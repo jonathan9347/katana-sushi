@@ -1,0 +1,470 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id            String   @id @default(cuid())
+  email         String   @unique
+  password_hash String
+  role          String
+  name          String
+  is_active     Boolean  @default(true)
+  last_login    DateTime?
+  created_at    DateTime @default(now())
+  updated_at    DateTime @updatedAt
+
+  inventory_transactions InventoryTransaction[]
+  audit_logs             AuditLog[]
+  pos_transactions       PosTransaction[]
+  unlimited_sessions     UnlimitedSession[]
+
+  @@map("users")
+}
+
+model RawMaterial {
+  id            String   @id @default(cuid())
+  name          String   @unique
+  unit          String
+  current_stock Decimal  @db.Decimal(12, 3)
+  reorder_level Decimal  @db.Decimal(12, 3)
+  cost_per_unit Decimal  @db.Decimal(12, 2)
+  is_deleted    Boolean  @default(false)
+  created_at    DateTime @default(now())
+  updated_at    DateTime @updatedAt
+
+  recipe_ingredients        RecipeIngredient[]
+  inventory_transactions    InventoryTransaction[]
+  catering_ingredient_locks CateringIngredientLock[]
+  batches                   MaterialBatch[]
+  inventory_snapshots       InventorySnapshot[]
+
+  @@map("raw_materials")
+}
+
+model MaterialBatch {
+  id                 String    @id @default(cuid())
+  raw_material_id    String
+  batch_number       String
+  quantity           Decimal   @db.Decimal(12, 3)
+  remaining_quantity Decimal   @db.Decimal(12, 3)
+  expiration_date    DateTime?
+  received_at        DateTime  @default(now())
+  cost_per_unit      Decimal?  @db.Decimal(12, 2)
+  notes              String?
+  is_disposed        Boolean   @default(false)
+  created_at         DateTime  @default(now())
+  updated_at         DateTime  @updatedAt
+
+  raw_material           RawMaterial            @relation(fields: [raw_material_id], references: [id])
+  inventory_transactions InventoryTransaction[]
+
+  @@unique([raw_material_id, batch_number])
+  @@map("material_batches")
+}
+
+model InventorySnapshot {
+  id              String   @id @default(cuid())
+  snapshot_date   DateTime @db.Date
+  raw_material_id String
+  quantity        Decimal  @db.Decimal(12, 3)
+  unit            String
+  total_value     Decimal  @db.Decimal(12, 2)
+  created_at      DateTime @default(now())
+
+  raw_material RawMaterial @relation(fields: [raw_material_id], references: [id])
+
+  @@unique([snapshot_date, raw_material_id])
+  @@map("inventory_snapshots")
+}
+
+model SellingProduct {
+  id           String   @id @default(cuid())
+  name         String
+  category     String
+  price        Decimal  @db.Decimal(12, 2)
+  is_available Boolean  @default(true)
+  is_deleted   Boolean  @default(false)
+  description  String?
+  image_url    String?
+  created_at   DateTime @default(now())
+  updated_at   DateTime @updatedAt
+
+  recipes                     Recipe[]
+  pos_items                   PosItem[]
+  unlimited_order_items       UnlimitedOrderItem[]
+  unlimited_leftover_items    UnlimitedLeftoverItem[]
+  unlimited_included_products UnlimitedIncludedProduct[]
+
+  @@map("selling_products")
+}
+
+model Recipe {
+  id                   String  @id @default(cuid())
+  selling_product_id   String
+  total_yield_quantity Decimal @db.Decimal(12, 3)
+  yield_unit           String
+
+  selling_product    SellingProduct     @relation(fields: [selling_product_id], references: [id], onDelete: Cascade)
+  recipe_ingredients RecipeIngredient[]
+
+  @@map("recipes")
+}
+
+model RecipeIngredient {
+  id                 String  @id @default(cuid())
+  recipe_id          String
+  raw_material_id    String
+  quantity_per_yield Decimal @db.Decimal(12, 3)
+  unit               String
+
+  recipe       Recipe      @relation(fields: [recipe_id], references: [id], onDelete: Cascade)
+  raw_material RawMaterial @relation(fields: [raw_material_id], references: [id])
+
+  @@map("recipe_ingredients")
+}
+
+model InventoryTransaction {
+  id               String   @id @default(cuid())
+  raw_material_id  String
+  batch_id         String?
+  transaction_type String
+  quantity         Decimal  @db.Decimal(12, 3)
+  unit             String
+  reference        String?
+  reason           String?
+  user_id          String?
+  created_at       DateTime @default(now())
+
+  raw_material RawMaterial    @relation(fields: [raw_material_id], references: [id])
+  batch        MaterialBatch? @relation(fields: [batch_id], references: [id])
+  user         User?          @relation(fields: [user_id], references: [id])
+
+  @@map("inventory_transactions")
+}
+
+model PosTransaction {
+  id                 String   @id @default(cuid())
+  transaction_number String   @unique
+  customer_name      String?
+  transaction_type   String
+  subtotal           Float
+  tax                Float
+  total              Float
+  payment_method     String
+  cash_received      Float?
+  change_due         Float?
+  status             String
+  cashier_id         String
+  created_at         DateTime @default(now())
+  updated_at         DateTime @updatedAt
+
+  cashier User      @relation(fields: [cashier_id], references: [id])
+  items   PosItem[]
+
+  @@map("pos_transactions")
+}
+
+model PosItem {
+  id                 String   @id @default(cuid())
+  transaction_id     String
+  selling_product_id String
+  quantity           Int
+  unit_price         Float
+  total_price        Float
+  created_at         DateTime @default(now())
+
+  transaction     PosTransaction @relation(fields: [transaction_id], references: [id], onDelete: Cascade)
+  selling_product SellingProduct @relation(fields: [selling_product_id], references: [id])
+
+  @@map("pos_items")
+}
+
+model Table {
+  id           String   @id @default(cuid())
+  table_number Int      @unique
+  capacity     Int
+  status       String
+  created_at   DateTime @default(now())
+
+  reservations     Reservation[]
+  unlimited_sessions UnlimitedSession[]
+
+  @@map("tables")
+}
+
+model Reservation {
+  id                         String          @id @default(cuid())
+  booking_id                 String          @unique
+  customer_name              String
+  customer_phone             String
+  customer_email             String
+  reservation_type           String          @default("dine_in")
+  date                       DateTime
+  time                       String
+  party_size                 Int
+  selected_products          Json?
+  unlimited_package_id       String?
+  unlimited_package         UnlimitedSetting? @relation(fields: [unlimited_package_id], references: [id])
+  assigned_table_id          String?
+  table                      Table?          @relation(fields: [assigned_table_id], references: [id])
+  subtotal                   Float           @default(0)
+  tax                        Float           @default(0)
+  total_price                Float           @default(0)
+  payment_plan               String          @default("initial_only")
+  downpayment_percent        Int             @default(50)
+  downpayment_amount         Float           @default(0)
+  remaining_balance          Float           @default(0)
+  downpayment_status         String          @default("pending")
+  downpayment_method         String?
+  downpayment_date           DateTime?
+  downpayment_transaction_id String?
+  full_payment_paid          Boolean         @default(false)
+  full_payment_date          DateTime?
+  remaining_paid_at_venue    Boolean         @default(false)
+  remaining_paid_date        DateTime?
+  final_payment_status       String          @default("pending")
+  final_payment_method       String?
+  final_payment_date         DateTime?
+  status                     String
+  staff_notes                String?
+  special_requests           String?
+  admin_notes                String?
+  rejected_reason            String?
+  alternative_suggestions    String?
+  created_at                 DateTime        @default(now())
+  updated_at                 DateTime        @updatedAt
+  payments                   ReservationPayment[]
+
+  @@map("reservations")
+}
+
+model UnlimitedSession {
+  id             String    @id @default(cuid())
+  pax_count      Int
+  price_per_pax  Float
+  total_paid     Float
+  started_at     DateTime  @default(now())
+  first_round_at DateTime?
+  ends_at        DateTime
+  status         String
+  cashier_id     String
+  table_id       String?
+  table          Table?    @relation(fields: [table_id], references: [id])
+  created_at     DateTime  @default(now())
+
+  cashier        User                    @relation(fields: [cashier_id], references: [id])
+  rounds         UnlimitedRound[]
+  leftover_items UnlimitedLeftoverItem[]
+
+  @@map("unlimited_sessions")
+}
+
+model UnlimitedRound {
+  id           String   @id @default(cuid())
+  session_id   String
+  round_number Int
+  served_at    DateTime @default(now())
+
+  session UnlimitedSession     @relation(fields: [session_id], references: [id], onDelete: Cascade)
+  items   UnlimitedOrderItem[]
+
+  @@map("unlimited_rounds")
+}
+
+model UnlimitedOrderItem {
+  id                 String   @id @default(cuid())
+  round_id           String
+  selling_product_id String
+  quantity           Int
+  deducted_at        DateTime @default(now())
+
+  round           UnlimitedRound @relation(fields: [round_id], references: [id], onDelete: Cascade)
+  selling_product SellingProduct @relation(fields: [selling_product_id], references: [id])
+
+  @@map("unlimited_order_items")
+}
+
+model UnlimitedLeftoverItem {
+  id                 String @id @default(cuid())
+  session_id         String
+  selling_product_id String
+  quantity           Int
+  charge_amount      Float
+
+  session         UnlimitedSession @relation(fields: [session_id], references: [id], onDelete: Cascade)
+  selling_product SellingProduct   @relation(fields: [selling_product_id], references: [id])
+
+  @@map("unlimited_leftover_items")
+}
+
+model UnlimitedSetting {
+  id                      String   @id @default(cuid())
+  price_per_person        Float
+  time_limit_minutes      Int
+  leftover_charge_percent Float
+  updated_at              DateTime @updatedAt
+
+  reservations             Reservation[]
+
+  @@map("unlimited_settings")
+}
+
+model UnlimitedIncludedProduct {
+  id                 String  @id @default(cuid())
+  selling_product_id String  @unique
+  is_included        Boolean @default(true)
+
+  selling_product SellingProduct @relation(fields: [selling_product_id], references: [id])
+
+  @@map("unlimited_included_products")
+}
+
+model CateringPackage {
+  id             String   @id @default(cuid())
+  name           String
+  pricePerPerson Float    @default(0) @map("price_per_person")
+  minPax         Int      @map("min_pax")
+  maxPax         Int      @map("max_pax")
+  description    String?
+  imageUrl       String?  @map("image_url")
+  items          Json?
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  cateringReservations CateringReservation[]
+
+  @@map("catering_packages")
+}
+
+model CateringInquiry {
+  id             String   @id @default(cuid())
+  inquiry_id     String   @unique
+  customer_name  String
+  customer_phone String
+  customer_email String
+  event_date     DateTime
+  headcount      Int
+  venue_type     String
+  package_type   String?
+  message        String?
+  status         String
+  admin_notes    String?
+  created_at     DateTime @default(now())
+  updated_at     DateTime @updatedAt
+
+  catering_reservation CateringReservation?
+
+  @@map("catering_inquiries")
+}
+
+model CateringReservation {
+  id                   String    @id @default(cuid())
+  reservation_id       String?   @unique
+  inquiry_id           String?   @unique
+  customer_name        String?
+  customer_phone       String?
+  customer_email       String?
+  event_date           DateTime?
+  headcount            Int?
+  package_id           String?
+  package              CateringPackage? @relation(fields: [package_id], references: [id])
+  total_price          Float     @default(0)
+  payment_plan         String    @default("initial_only")
+  downpayment_percent  Int       @default(50)
+  downpayment_amount   Float     @default(0)
+  downpayment_status   String    @default("pending")
+  downpayment_method   String?
+  downpayment_date     DateTime?
+  downpayment_transaction_id String?
+  full_payment_paid    Boolean   @default(false)
+  full_payment_date    DateTime?
+  remaining_paid_at_venue Boolean @default(false)
+  remaining_paid_date  DateTime?
+  remaining_balance    Float     @default(0)
+  final_payment_status String    @default("pending")
+  final_payment_method String?
+  final_payment_date   DateTime?
+  status               String?
+  confirmed_date       DateTime?
+  deposit_paid         Float     @default(0)
+  deposit_due_date     DateTime?
+  ingredients_locked   Boolean   @default(false)
+  created_at           DateTime  @default(now())
+  updated_at           DateTime  @default(now()) @updatedAt
+
+  inquiry          CateringInquiry?          @relation(fields: [inquiry_id], references: [id])
+  ingredient_locks CateringIngredientLock[]
+  payments         ReservationPayment[]
+
+  @@map("catering_reservations")
+}
+
+model ReservationPayment {
+  id                         String               @id @default(cuid())
+  reservation_id             String?
+  catering_reservation_id    String?
+  payment_stage              String
+  method                     String
+  amount                     Float
+  reference_number           String?
+  cash_received              Float?
+  change_due                 Float?
+  source                     String               @default("staff")
+  recorded_by_id             String?
+  received_at                DateTime             @default(now())
+  created_at                 DateTime             @default(now())
+
+  reservation                Reservation?         @relation(fields: [reservation_id], references: [id], onDelete: Cascade)
+  catering_reservation       CateringReservation? @relation(fields: [catering_reservation_id], references: [id], onDelete: Cascade)
+
+  @@map("reservation_payments")
+}
+
+model CateringIngredientLock {
+  id                      String    @id @default(cuid())
+  catering_reservation_id String
+  raw_material_id         String
+  reserved_quantity       Float
+  unit                    String
+  is_released             Boolean   @default(false)
+  created_at              DateTime  @default(now())
+  released_at             DateTime?
+
+  catering_reservation CateringReservation @relation(fields: [catering_reservation_id], references: [id], onDelete: Cascade)
+  raw_material         RawMaterial         @relation(fields: [raw_material_id], references: [id])
+
+  @@map("catering_ingredient_locks")
+}
+
+model ConversionRule {
+  id            String   @id @default(cuid())
+  name          String
+  from_quantity Decimal  @db.Decimal(12, 3)
+  from_unit     String
+  to_quantity   Decimal  @db.Decimal(12, 3)
+  to_unit       String
+  created_at    DateTime @default(now())
+
+  @@map("conversion_rules")
+}
+
+model AuditLog {
+  id         String   @id @default(cuid())
+  user_id    String?
+  action     String
+  entity     String
+  entity_id  String?
+  old_value  Json?
+  new_value  Json?
+  ip_address String?
+  created_at DateTime @default(now())
+
+  user User? @relation(fields: [user_id], references: [id])
+
+  @@map("audit_logs")
+}
