@@ -13,3 +13,7 @@ services:
         value: 5001
       - key: JWT_SECRET
         value: change-me-in-render
+      - key: DATABASE_URL
+        value: postgresql://postgres:030203Marchjjj_@db.jiewnzbjaiddzbwcjjvm.supabase.co:5432/postgres?sslmode=require
+      - key: DIRECT_URL
+        value: postgresql://postgres:030203Marchjjj_@db.jiewnzbjaiddzbwcjjvm.supabase.co:5432/postgres?sslmode=require

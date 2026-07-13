@@ -15,4 +15,6 @@ services:
       - key: JWT_SECRET
         value: change-me-in-render
       - key: DATABASE_URL
-        value: postgresql://postgres:YOUR_PASSWORD@db.YOUR_PROJECT_REF.supabase.co:5432/postgres
+        value: postgresql://postgres:YOUR_PASSWORD@db.YOUR_PROJECT_REF.supabase.co:5432/postgres?sslmode=require
+      - key: DIRECT_URL
+        value: postgresql://postgres:YOUR_PASSWORD@db.YOUR_PROJECT_REF.supabase.co:5432/postgres?sslmode=require
