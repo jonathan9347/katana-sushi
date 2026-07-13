@@ -1,4 +1,10 @@
 {
+  "private": true,
+  "scripts": {
+    "build": "cd backend && npm install && npm run build && npm run prisma:generate && npx prisma db push",
+    "start": "cd backend && npm run start",
+    "prisma:generate": "cd backend && npx prisma generate"
+  },
   "dependencies": {
     "typescript": "^6.0.3"
   }
