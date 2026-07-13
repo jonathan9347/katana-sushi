@@ -5,8 +5,8 @@ services:
     plan: free
     region: oregon
     rootDir: backend
-    buildCommand: cd backend && npm install --include=dev && npm run build && npm run prisma:generate && npx prisma db push
-    startCommand: cd backend && npm run start
+    buildCommand: npm install --include=dev && npm run build && npm run prisma:generate && npx prisma db push
+    startCommand: npm run start
     envVars:
       - key: NODE_ENV
         value: production
@@ -14,3 +14,5 @@ services:
         value: 5001
       - key: JWT_SECRET
         value: change-me-in-render
+      - key: DATABASE_URL
+        value: postgresql://postgres:YOUR_PASSWORD@db.YOUR_PROJECT_REF.supabase.co:5432/postgres
