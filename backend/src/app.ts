@@ -130,7 +130,7 @@ function isLocalFrontendOrigin(origin?: string) {
 
 app.use(
   cors({
-    origin: (origin, callback) => {
+    origin: (origin: string | undefined, callback: (err: Error | null, allow?: boolean) => void) => {
       if (isLocalFrontendOrigin(origin)) {
         callback(null, true);
         return;
@@ -2092,7 +2092,7 @@ app.post("/api/auth/login", async (req, res, next) => {
       return res.status(401).json({ message: "Invalid email or password" });
     }
 
-    const expiresIn = (process.env.JWT_EXPIRES_IN ?? "8h") as SignOptions["expiresIn"];
+    const expiresIn = process.env.JWT_EXPIRES_IN ?? "8h";
     const token = jwt.sign(
       { sub: user.id, email: user.email, role: user.role },
       process.env.JWT_SECRET ?? "katana-super-secret-key-change-in-production",
