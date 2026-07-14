@@ -43,6 +43,18 @@ export function resolveImageUrl(imageUrl?: string | null) {
     return imageUrl;
   }
 
+  // If the image path is rooted (starts with '/'), treat frontend-hosted
+  // images (e.g. '/images/...') as static assets served by the site.
+  // Only prefix the backend base URL for uploaded images under '/uploads/'.
+  if (imageUrl.startsWith("/")) {
+    if (imageUrl.startsWith("/uploads/")) {
+      if (!activeBaseUrl) return imageUrl;
+      return new URL(imageUrl, `${trimTrailingSlash(activeBaseUrl)}/`).toString();
+    }
+
+    return imageUrl;
+  }
+
   if (!activeBaseUrl) {
     return imageUrl;
   }

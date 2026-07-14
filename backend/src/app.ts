@@ -3153,6 +3153,34 @@ app.put("/api/inventory/conversion-rules/:materialId", async (req, res, next) =>
 
 app.get("/api/products", async (_req, res, next) => {
   try {
+    // Lightweight product list for unauthenticated customer requests
+    const requestingUser = getUserFromRequest(_req);
+
+    if (!requestingUser) {
+      const products = await prisma.sellingProduct.findMany({
+        where: { is_deleted: false },
+        orderBy: [{ category: "asc" }, { name: "asc" }],
+        select: {
+          id: true,
+          name: true,
+          category: true,
+          price: true,
+          is_available: true,
+          image_url: true,
+          description: true
+        }
+      });
+
+      const productsWithImageUrls = products.map((product) => ({
+        ...product,
+        image_url: product.image_url ?? null,
+        imageUrl: product.image_url ?? null
+      }));
+
+      return res.json({ products: productsWithImageUrls });
+    }
+
+    // Authenticated/staff requests: include recipes for inventory management
     const products = await prisma.sellingProduct.findMany({
       where: { is_deleted: false },
       orderBy: [{ category: "asc" }, { name: "asc" }],
