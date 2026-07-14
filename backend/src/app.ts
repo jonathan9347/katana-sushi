@@ -3153,51 +3153,24 @@ app.put("/api/inventory/conversion-rules/:materialId", async (req, res, next) =>
 
 app.get("/api/products", async (_req, res, next) => {
   try {
-    const includeRecipes = (_req.query.includeRecipes === "true") || (_req.query.include_recipes === "true");
-
-    if (includeRecipes) {
-      const products = await prisma.sellingProduct.findMany({
-        where: { is_deleted: false },
-        orderBy: [{ category: "asc" }, { name: "asc" }],
-        include: {
-          recipes: {
-            include: {
-              recipe_ingredients: {
-                include: {
-                  raw_material: true
-                },
-                orderBy: {
-                  raw_material: {
-                    name: "asc"
-                  }
+    const products = await prisma.sellingProduct.findMany({
+      where: { is_deleted: false },
+      orderBy: [{ category: "asc" }, { name: "asc" }],
+      include: {
+        recipes: {
+          include: {
+            recipe_ingredients: {
+              include: {
+                raw_material: true
+              },
+              orderBy: {
+                raw_material: {
+                  name: "asc"
                 }
               }
             }
           }
         }
-      });
-
-      const productsWithImageUrls = products.map((product) => ({
-        ...product,
-        image_url: product.image_url ?? null,
-        imageUrl: product.image_url ?? null
-      }));
-
-      return res.json({ products: productsWithImageUrls });
-    }
-
-    // Lightweight customer-facing product list (no recipes) to reduce response size
-    const products = await prisma.sellingProduct.findMany({
-      where: { is_deleted: false },
-      orderBy: [{ category: "asc" }, { name: "asc" }],
-      select: {
-        id: true,
-        name: true,
-        category: true,
-        price: true,
-        description: true,
-        is_available: true,
-        image_url: true
       }
     });
 

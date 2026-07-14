@@ -41,7 +41,7 @@ export default function SellingProductsList({ role }: SellingProductsListProps) 
   const productsQuery = useQuery({
     queryKey: ["products"],
     queryFn: async () => {
-      const response = await api.get<{ products: MenuProduct[] }>("/api/products?include_recipes=true");
+      const response = await api.get<{ products: MenuProduct[] }>("/api/products");
       return response.data.products;
     }
   });
