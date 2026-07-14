@@ -289,13 +289,26 @@ async function main() {
   const materials = await prisma.rawMaterial.findMany();
   const materialByName = new Map(materials.map((material) => [material.name, material.id]));
 
-  for (const product of products) {
+  const imageCandidates = [
+    "/images/sushi2.png",
+    "/images/sushi4.png",
+    "/images/sushi5.png",
+    "/images/Menu-head.png",
+    "/images/hero-banner.jpg",
+    "/images/katana-logo.jpg",
+    "/images/unli-dining.jpg"
+  ];
+
+  for (const [index, product] of products.entries()) {
+    const chosenImage = imageCandidates[index % imageCandidates.length];
+
     const sellingProduct = await prisma.sellingProduct.create({
       data: {
         name: product.name,
         category: product.category,
         price: product.price,
-        description: product.description ?? `${product.category} menu item`
+        description: product.description ?? `${product.category} menu item`,
+        image_url: chosenImage
       }
     });
 
