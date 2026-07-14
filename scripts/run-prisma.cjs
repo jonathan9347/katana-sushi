@@ -3,20 +3,26 @@ const path = require('path');
 const fs = require('fs');
 
 const envPath = path.resolve(__dirname, '..', 'backend', '.env');
-const envFile = fs.readFileSync(envPath, 'utf8');
 const env = {};
 
-for (const line of envFile.split(/\r?\n/)) {
-  const trimmed = line.trim();
-  if (!trimmed || trimmed.startsWith('#')) continue;
-  const idx = trimmed.indexOf('=');
-  if (idx === -1) continue;
-  const key = trimmed.slice(0, idx).trim();
-  let value = trimmed.slice(idx + 1).trim();
-  if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
-    value = value.slice(1, -1);
+// Only read backend/.env if it exists. On CI/build systems (Render) this file
+// may be absent by design because secrets are injected via the dashboard.
+if (fs.existsSync(envPath)) {
+  const envFile = fs.readFileSync(envPath, 'utf8');
+  for (const line of envFile.split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith('#')) continue;
+    const idx = trimmed.indexOf('=');
+    if (idx === -1) continue;
+    const key = trimmed.slice(0, idx).trim();
+    let value = trimmed.slice(idx + 1).trim();
+    if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
+      value = value.slice(1, -1);
+    }
+    env[key] = value;
   }
-  env[key] = value;
+} else {
+  // No local .env found — that's fine for CI/build environments.
 }
 
 const args = process.argv.slice(2);
