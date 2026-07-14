@@ -9,6 +9,7 @@ export type MenuProduct = {
   price: string | number;
   description?: string | null;
   image_url?: string | null;
+  imageUrl?: string | null;
   is_available?: boolean;
   recipes?: Array<{
     recipe_ingredients: Array<{
@@ -35,7 +36,7 @@ type ProductCardProps = {
 
 export default function ProductCard({ canEdit, product, onEdit, onToggleAvailable }: ProductCardProps) {
   const available = product.is_available !== false;
-  const imageSrc = resolveImageUrl(product.image_url);
+  const imageSrc = resolveImageUrl(product.image_url ?? product.imageUrl);
 
   return (
     <article className="grid min-h-[300px] gap-3 rounded-lg border border-slate-200 bg-white p-4 shadow-sm">

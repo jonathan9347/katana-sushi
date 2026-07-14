@@ -28,28 +28,26 @@ const notificationService = new NotificationService();
 
 export async function ensureDemoSeed() {
   try {
-    // Check if both users and products exist (complete seed required for system to work)
-    const [userCount, productCount] = await Promise.all([
-      prisma.user.count(),
-      prisma.sellingProduct.count()
-    ]);
+    const userCount = await prisma.user.count();
+    const productCount = await prisma.sellingProduct.count();
 
     if (userCount > 0 && productCount > 0) {
       console.log("Database already seeded with users and products. Skipping demo data initialization.");
+      await backfillPersistedProductImages();
       return;
     }
 
-    // Warn if we're doing a partial reseed
     if (userCount > 0 && productCount === 0) {
       console.warn("⚠ Warning: Database has users but no products. Performing recovery reseed...");
     }
 
     console.log("Initializing demo seed data...");
     await seedDemoData(prisma);
+    await backfillPersistedProductImages();
     console.log("✓ Demo seed data initialized successfully.");
   } catch (error) {
     console.error("✗ Failed to initialize demo seed data:", error);
-    throw error; // Re-throw to prevent app from running in incomplete state
+    throw error;
   }
 }
 
@@ -135,6 +133,17 @@ async function normalizeProductImage(product: { id: string; image_url: string | 
   }
 
   return normalizedValue ?? product.image_url ?? null;
+}
+
+async function backfillPersistedProductImages() {
+  const products = await prisma.sellingProduct.findMany({
+    where: { is_deleted: false, image_url: { startsWith: "/uploads/products/" } },
+    select: { id: true, image_url: true }
+  });
+
+  for (const product of products) {
+    await normalizeProductImage(product);
+  }
 }
 
 const menuCategoryOrder = [
