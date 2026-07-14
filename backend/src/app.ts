@@ -13,10 +13,31 @@ import { z } from "zod";
 import { NotificationService } from "./services/notification.service";
 import { generateTransactionNumber } from "./utils/transactionNumber";
 import paymentRoutes from "./routes/payment.routes";
+import { seedDemoData } from "./services/demoSeed.service";
+
+import dotenv from "dotenv";
+
+dotenv.config({ path: path.resolve(__dirname, "..", ".env") });
 
 const prisma = new PrismaClient();
 const app = express();
 const notificationService = new NotificationService();
+
+async function ensureDemoSeed() {
+  try {
+    const userCount = await prisma.user.count();
+    if (userCount > 0) {
+      return;
+    }
+
+    await seedDemoData(prisma);
+    console.log("Demo seed data initialized for empty database.");
+  } catch (error) {
+    console.error("Unable to initialize demo seed data:", error);
+  }
+}
+
+void ensureDemoSeed();
 
 // Lightweight health check — does not depend on the database. Use for uptime
 // monitoring and to let the platform know the process is healthy quickly.

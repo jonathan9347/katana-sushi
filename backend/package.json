@@ -9,7 +9,8 @@
     "start:prod": "node dist/server.js",
     "prisma:generate": "prisma generate --schema=prisma/schema.prisma --no-engine",
     "prisma:push": "prisma db push --schema=prisma/schema.prisma",
-    "prisma:seed": "prisma db seed"
+    "prisma:seed": "prisma db seed",
+    "prisma:seed:prod": "prisma db seed --schema=prisma/schema.prisma"
   },
   "prisma": {
     "seed": "ts-node-dev --transpile-only --exit-child prisma/seed.ts"
