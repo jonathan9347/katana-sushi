@@ -15,6 +15,10 @@ Deployment notes
 - Trigger a manual deploy or push a commit to `main`
 - Watch build logs: `npm run prisma:generate` should complete successfully
 
+4) Health check
+
+- The backend exposes a lightweight health endpoint at `GET /health` which returns 200 and a JSON payload. Use this URL in Render's health check settings or external uptime monitors.
+
 3) IPv6 note
 
 If your Postgres host resolves only to IPv6 and Render cannot reach IPv6 hosts from its network, the app will fail to connect. Use an IPv4-capable DB endpoint or contact Render support.

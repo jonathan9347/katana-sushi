@@ -18,6 +18,12 @@ const prisma = new PrismaClient();
 const app = express();
 const notificationService = new NotificationService();
 
+// Lightweight health check — does not depend on the database. Use for uptime
+// monitoring and to let the platform know the process is healthy quickly.
+app.get('/health', (_req, res) => {
+  res.json({ ok: true, uptime: process.uptime(), timestamp: new Date().toISOString() });
+});
+
 const uploadDir = path.join(__dirname, "..", "uploads", "products");
 fs.mkdirSync(uploadDir, { recursive: true });
 
