@@ -2,9 +2,9 @@ services:
   - type: web
     name: katana-sushi-api
     env: node
+    rootDir: backend
     plan: free
     region: oregon
-    rootDir: backend
     buildCommand: npm install --include=dev && npm run build && npm run prisma:generate
     startCommand: npm run start
     envVars:
@@ -15,6 +15,6 @@ services:
       - key: JWT_SECRET
         value: change-me-in-render
       - key: DATABASE_URL
-        value: postgresql://postgres:030203Marchjjj_@db.jiewnzbjaiddzbwcjjvm.supabase.co:5432/postgres?sslmode=require
+        value: "<SET_IN_DASHBOARD>"
       - key: DIRECT_URL
-        value: postgresql://postgres:030203Marchjjj_@db.jiewnzbjaiddzbwcjjvm.supabase.co:5432/postgres?sslmode=require
+        value: "<SET_IN_DASHBOARD>"

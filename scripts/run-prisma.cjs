@@ -22,9 +22,19 @@ for (const line of envFile.split(/\r?\n/)) {
 const args = process.argv.slice(2);
 const command = process.platform === 'win32' ? 'node.exe' : 'node';
 const prismaBin = path.resolve(__dirname, '..', 'node_modules', 'prisma', 'build', 'index.js');
+
+// Build final env: prefer runtime/provided environment variables (process.env).
+// Only use values from backend/.env when the key is not already set in process.env.
+const finalEnv = { ...process.env };
+for (const k of Object.keys(env)) {
+  if (!Object.prototype.hasOwnProperty.call(finalEnv, k)) {
+    finalEnv[k] = env[k];
+  }
+}
+
 const result = execFileSync(command, [prismaBin, ...args], {
   cwd: path.resolve(__dirname, '..'),
-  env: { ...process.env, ...env },
+  env: finalEnv,
   stdio: 'inherit'
 });
 
