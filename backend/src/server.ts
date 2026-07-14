@@ -1,6 +1,6 @@
 import path from "path";
 import dotenv from "dotenv";
-import app, { ensureDemoSeed } from "./app";
+import app, { ensureDemoSeed, startAutoCompleteTask } from "./app";
 
 // Load .env file only in development (won't exist in production on Render)
 if (process.env.NODE_ENV !== "production") {
@@ -17,6 +17,8 @@ async function startServer() {
   
   app.listen(port, () => {
     console.log(`✓ Katana Sushi API running on http://localhost:${port}`);
+    // Start background tasks after server is fully running
+    startAutoCompleteTask();
   });
 }
 

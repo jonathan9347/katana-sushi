@@ -4954,14 +4954,18 @@ async function autoCompleteOverdueCateringReservations() {
   }
 }
 
-void autoCompleteOverdueCateringReservations().catch((error) => {
-  console.error("Unable to auto-complete overdue catering reservations", error);
-});
-setInterval(() => {
+export function startAutoCompleteTask() {
   void autoCompleteOverdueCateringReservations().catch((error) => {
     console.error("Unable to auto-complete overdue catering reservations", error);
   });
-}, 24 * 60 * 60 * 1000);
+  setInterval(() => {
+    void autoCompleteOverdueCateringReservations().catch((error) => {
+      console.error("Unable to auto-complete overdue catering reservations", error);
+    });
+  }, 24 * 60 * 60 * 1000);
+}
+
+export { app };
 
 app.use((error: Error, _req: Request, res: Response, _next: NextFunction) => {
   console.error(error);
