@@ -16,6 +16,6 @@ services:
       - key: JWT_SECRET
         value: change-me-in-render
       - key: DATABASE_URL
-        value: "<SET_IN_DASHBOARD>"
+        value: postgresql://postgres.jiewnzbjaiddzbwcjjvm:030203Marchjjj_@aws-0-ap-northeast-1.pooler.supabase.com:5432/postgres
       - key: DIRECT_URL
-        value: "<SET_IN_DASHBOARD>"
+        value: postgresql://postgres.jiewnzbjaiddzbwcjjvm:030203Marchjjj_@aws-0-ap-northeast-1.pooler.supabase.com:5432/postgres
