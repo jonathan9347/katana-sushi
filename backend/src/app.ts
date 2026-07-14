@@ -81,6 +81,62 @@ const upload = multer({
     }
   }
 });
+
+function getMimeTypeFromPath(filePath: string) {
+  switch (path.extname(filePath).toLowerCase()) {
+    case ".jpg":
+    case ".jpeg":
+      return "image/jpeg";
+    case ".png":
+      return "image/png";
+    case ".gif":
+      return "image/gif";
+    case ".webp":
+      return "image/webp";
+    case ".svg":
+      return "image/svg+xml";
+    default:
+      return "application/octet-stream";
+  }
+}
+
+function getPersistableImageValue(imageUrl?: string | null) {
+  if (!imageUrl) {
+    return null;
+  }
+
+  if (imageUrl.startsWith("data:")) {
+    return imageUrl;
+  }
+
+  if (!imageUrl.startsWith("/uploads/")) {
+    return imageUrl;
+  }
+
+  const resolvedPath = path.join(__dirname, "..", imageUrl.replace(/^\/+/, ""));
+
+  if (!fs.existsSync(resolvedPath) || !fs.statSync(resolvedPath).isFile()) {
+    return imageUrl;
+  }
+
+  const mimeType = getMimeTypeFromPath(resolvedPath);
+  const buffer = fs.readFileSync(resolvedPath);
+  return `data:${mimeType};base64,${buffer.toString("base64")}`;
+}
+
+async function normalizeProductImage(product: { id: string; image_url: string | null }) {
+  const normalizedValue = getPersistableImageValue(product.image_url);
+
+  if (normalizedValue && normalizedValue !== product.image_url) {
+    await prisma.sellingProduct.update({
+      where: { id: product.id },
+      data: { image_url: normalizedValue }
+    });
+  }
+
+  return normalizedValue ?? product.image_url ?? null;
+}
+
 const menuCategoryOrder = [
   "Classic Roll",
   "Fried Roll",
@@ -3182,11 +3238,16 @@ app.get("/api/products", async (_req, res, next) => {
         }
       });
 
-      const productsWithImageUrls = products.map((product) => ({
-        ...product,
-        image_url: product.image_url ?? null,
-        imageUrl: product.image_url ?? null
-      }));
+      const productsWithImageUrls = await Promise.all(
+        products.map(async (product) => {
+          const imageUrl = await normalizeProductImage(product);
+          return {
+            ...product,
+            image_url: imageUrl,
+            imageUrl
+          };
+        })
+      );
 
       return res.json({ products: productsWithImageUrls });
     }
@@ -3213,11 +3274,16 @@ app.get("/api/products", async (_req, res, next) => {
       }
     });
 
-    const productsWithImageUrls = products.map((product) => ({
-      ...product,
-      image_url: product.image_url ?? null,
-      imageUrl: product.image_url ?? null
-    }));
+    const productsWithImageUrls = await Promise.all(
+      products.map(async (product) => {
+        const imageUrl = await normalizeProductImage(product);
+        return {
+          ...product,
+          image_url: imageUrl,
+          imageUrl
+        };
+      })
+    );
 
     res.json({ products: productsWithImageUrls });
   } catch (error) {
@@ -3245,6 +3311,7 @@ app.post("/api/products", upload.single("imageFile"), async (req, res, next) => 
       .parse(req.body);
 
     const uploadedImagePath = req.file ? `/uploads/products/${req.file.filename}` : body.image_url ?? null;
+    const persistedImageValue = getPersistableImageValue(uploadedImagePath);
 
     const product = await prisma.sellingProduct.create({
       data: {
@@ -3252,7 +3319,7 @@ app.post("/api/products", upload.single("imageFile"), async (req, res, next) => 
         category: body.category,
         price: body.price,
         description: body.description || null,
-        image_url: uploadedImagePath,
+        image_url: persistedImageValue,
         is_available: body.is_available ?? true,
         recipes: {
           create: {
@@ -3297,9 +3364,9 @@ app.put("/api/products/:id", upload.single("imageFile"), async (req, res, next) 
     };
 
     if (req.file) {
-      updateData.image_url = `/uploads/products/${req.file.filename}`;
+      updateData.image_url = getPersistableImageValue(`/uploads/products/${req.file.filename}`);
     } else if (body.image_url !== undefined) {
-      updateData.image_url = body.image_url;
+      updateData.image_url = getPersistableImageValue(body.image_url);
     }
 
     const product = await prisma.sellingProduct.update({
@@ -3354,11 +3421,16 @@ app.get("/api/products/grouped", async (_req, res, next) => {
       }
     });
 
-    const productsWithImageUrls = products.map((product) => ({
-      ...product,
-      image_url: product.image_url ?? null,
-      imageUrl: product.image_url ?? null
-    }));
+    const productsWithImageUrls = await Promise.all(
+      products.map(async (product) => {
+        const imageUrl = await normalizeProductImage(product);
+        return {
+          ...product,
+          image_url: imageUrl,
+          imageUrl
+        };
+      })
+    );
 
     const groups = menuCategoryOrder.map((category) => ({
       category,
