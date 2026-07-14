@@ -28,10 +28,20 @@ const notificationService = new NotificationService();
 
 export async function ensureDemoSeed() {
   try {
-    const userCount = await prisma.user.count();
-    if (userCount > 0) {
-      console.log("Database already seeded. Skipping demo data initialization.");
+    // Check if both users and products exist (complete seed required for system to work)
+    const [userCount, productCount] = await Promise.all([
+      prisma.user.count(),
+      prisma.sellingProduct.count()
+    ]);
+
+    if (userCount > 0 && productCount > 0) {
+      console.log("Database already seeded with users and products. Skipping demo data initialization.");
       return;
+    }
+
+    // Warn if we're doing a partial reseed
+    if (userCount > 0 && productCount === 0) {
+      console.warn("⚠ Warning: Database has users but no products. Performing recovery reseed...");
     }
 
     console.log("Initializing demo seed data...");
@@ -39,6 +49,7 @@ export async function ensureDemoSeed() {
     console.log("✓ Demo seed data initialized successfully.");
   } catch (error) {
     console.error("✗ Failed to initialize demo seed data:", error);
+    throw error; // Re-throw to prevent app from running in incomplete state
   }
 }
 

@@ -14,7 +14,7 @@ services:
       - key: PORT
         value: 5001
       - key: JWT_SECRET
-        value: change-me-in-render
+        value: katana_jwt_secret_prod_2024_k8x9m2n4p7q5r3s1t6u8v0w2x
       - key: DATABASE_URL
         value: postgresql://postgres.jiewnzbjaiddzbwcjjvm:030203Marchjjj_@aws-0-ap-northeast-1.pooler.supabase.com:5432/postgres
       - key: DIRECT_URL
