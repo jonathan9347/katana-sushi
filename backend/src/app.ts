@@ -17,7 +17,10 @@ import { seedDemoData } from "./services/demoSeed.service";
 
 import dotenv from "dotenv";
 
-dotenv.config({ path: path.resolve(__dirname, "..", ".env") });
+// Load .env file only in development (won't exist in production on Render)
+if (process.env.NODE_ENV !== "production") {
+  dotenv.config({ path: path.resolve(__dirname, "..", ".env") });
+}
 
 export const prisma = new PrismaClient();
 const app = express();

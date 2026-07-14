@@ -2,7 +2,10 @@ import path from "path";
 import dotenv from "dotenv";
 import app, { ensureDemoSeed } from "./app";
 
-dotenv.config({ path: path.resolve(__dirname, "..", ".env") });
+// Load .env file only in development (won't exist in production on Render)
+if (process.env.NODE_ENV !== "production") {
+  dotenv.config({ path: path.resolve(__dirname, "..", ".env") });
+}
 
 const port = Number(process.env.PORT ?? 5001);
 
