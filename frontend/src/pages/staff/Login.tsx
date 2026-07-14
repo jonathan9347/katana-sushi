@@ -29,8 +29,8 @@ function defaultRouteForRole(role: string) {
 }
 
 export default function Login() {
-  const [email, setEmail] = useState("admin@katana.com");
-  const [password, setPassword] = useState("Admin123!");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
   const [message, setMessage] = useState("");
   const navigate = useNavigate();
 
