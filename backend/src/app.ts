@@ -19,25 +19,25 @@ import dotenv from "dotenv";
 
 dotenv.config({ path: path.resolve(__dirname, "..", ".env") });
 
-const prisma = new PrismaClient();
+export const prisma = new PrismaClient();
 const app = express();
 const notificationService = new NotificationService();
 
-async function ensureDemoSeed() {
+export async function ensureDemoSeed() {
   try {
     const userCount = await prisma.user.count();
     if (userCount > 0) {
+      console.log("Database already seeded. Skipping demo data initialization.");
       return;
     }
 
+    console.log("Initializing demo seed data...");
     await seedDemoData(prisma);
-    console.log("Demo seed data initialized for empty database.");
+    console.log("✓ Demo seed data initialized successfully.");
   } catch (error) {
-    console.error("Unable to initialize demo seed data:", error);
+    console.error("✗ Failed to initialize demo seed data:", error);
   }
 }
-
-void ensureDemoSeed();
 
 // Lightweight health check — does not depend on the database. Use for uptime
 // monitoring and to let the platform know the process is healthy quickly.

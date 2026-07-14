@@ -1,11 +1,23 @@
 import path from "path";
 import dotenv from "dotenv";
-import app from "./app";
+import app, { ensureDemoSeed } from "./app";
 
 dotenv.config({ path: path.resolve(__dirname, "..", ".env") });
 
 const port = Number(process.env.PORT ?? 5001);
 
-app.listen(port, () => {
-  console.log(`Katana Sushi API running on http://localhost:${port}`);
+async function startServer() {
+  console.log("Starting Katana Sushi API...");
+  
+  // Seed database before accepting requests
+  await ensureDemoSeed();
+  
+  app.listen(port, () => {
+    console.log(`✓ Katana Sushi API running on http://localhost:${port}`);
+  });
+}
+
+startServer().catch((error) => {
+  console.error("Failed to start server:", error);
+  process.exit(1);
 });
