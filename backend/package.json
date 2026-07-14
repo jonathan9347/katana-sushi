@@ -7,8 +7,8 @@
     "build": "tsc",
     "start": "node dist/server.js",
     "start:prod": "node dist/server.js",
-    "prisma:generate": "node ../scripts/run-prisma.cjs generate --schema=backend/prisma/schema.prisma --no-engine",
-    "prisma:push": "node ../scripts/run-prisma.cjs db push --schema=backend/prisma/schema.prisma",
+    "prisma:generate": "prisma generate --schema=prisma/schema.prisma --no-engine",
+    "prisma:push": "prisma db push --schema=prisma/schema.prisma",
     "prisma:seed": "prisma db seed"
   },
   "prisma": {
