@@ -3,15 +3,6 @@ import { Link, useNavigate } from "react-router-dom";
 import { api } from "../../lib/api";
 import { Button } from "../../components/ui/button";
 
-const quickCredentials: Record<string, { email: string; password: string; label: string }> = {
-  admin: { email: "admin@katana.com", password: "Admin123!", label: "Admin" },
-  inventory: { email: "inventory@katana.com", password: "Inventory123!", label: "Inventory Manager" },
-  cashier: { email: "cashier@katana.com", password: "Cashier123!", label: "Cashier" },
-  reception: { email: "reception@katana.com", password: "Reception123!", label: "Receptionist" },
-  events: { email: "events@katana.com", password: "Events123!", label: "Event Coordinator" },
-  chef: { email: "chef@katana.com", password: "Chef123!", label: "Chef" }
-};
-
 function defaultRouteForRole(role: string) {
   const normalized = role.toLowerCase();
 
@@ -41,7 +32,6 @@ export default function Login() {
   const [email, setEmail] = useState("admin@katana.com");
   const [password, setPassword] = useState("Admin123!");
   const [message, setMessage] = useState("");
-  const [activeRole, setActiveRole] = useState("Admin");
   const navigate = useNavigate();
 
   async function loginWithCredentials(emailValue: string, passwordValue: string) {
@@ -68,92 +58,33 @@ export default function Login() {
     await loginWithCredentials(email, password);
   }
 
-  async function quickLogin(role: string) {
-    const credentials = quickCredentials[role];
-    if (!credentials) {
-      return;
-    }
-    setEmail(credentials.email);
-    setPassword(credentials.password);
-    setActiveRole(credentials.label);
-    await loginWithCredentials(credentials.email, credentials.password);
-  }
-
   return (
-    <main className="flex min-h-screen items-center justify-center bg-slate-100 px-6 py-10 text-slate-900">
-      <div className="w-full max-w-6xl">
-        <div className="grid gap-10 lg:grid-cols-[1.2fr_0.9fr]">
-          <section className="overflow-hidden rounded-[2rem] border border-slate-200 bg-white p-10 shadow-lg">
-
-            <div className="relative z-10 rounded-3xl bg-slate-50 p-6 shadow-sm ring-1 ring-slate-200">
-              <div className="flex items-center gap-4">
-                <div className="flex h-14 w-14 items-center justify-center rounded-3xl bg-red-600 text-3xl text-white">🍣</div>
-                <div>
-                  <p className="text-xs font-semibold uppercase tracking-[0.35em] text-red-600">Katana Sushi</p>
-                  <h1 className="mt-3 text-4xl font-black text-slate-950 sm:text-5xl">Staff access made effortless</h1>
-                </div>
+    <main className="flex min-h-screen items-center justify-center bg-[radial-gradient(circle_at_top_left,_#fff7ed,_#f8fafc_55%,_#f1f5f9_100%)] px-6 py-10 text-slate-900">
+      <div className="w-full max-w-xl">
+        <div className="overflow-hidden rounded-[32px] border border-slate-200 bg-white shadow-[0_30px_80px_-30px_rgba(15,23,42,0.35)]">
+          <div className="bg-[linear-gradient(135deg,_#fff7ed_0%,_#fff_55%,_#fef2f2_100%)] px-8 py-8 sm:px-10 sm:py-10">
+            <div className="flex items-center gap-3">
+              <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-red-600 text-2xl text-white">🍣</div>
+              <div>
+                <p className="text-[11px] font-semibold uppercase tracking-[0.35em] text-red-600">Katana Sushi</p>
+                <p className="text-sm font-medium text-slate-600">Staff portal</p>
               </div>
             </div>
 
-            <p className="relative z-10 mt-8 max-w-xl text-sm leading-7 text-slate-600 sm:text-base">
-              A polished sign-in experience for your restaurant team. Pick your role to quickly access the right workflow, from inventory to catering.
+            <h1 className="mt-6 text-3xl font-black tracking-[0.02em] text-slate-950 sm:text-4xl" style={{ fontFamily: '"Iowan Old Style", "Palatino Linotype", "Book Antiqua", serif' }}>
+              Staff login
+            </h1>
+            <p className="mt-3 max-w-md text-sm leading-6 text-slate-600">
+              Enter your email and password to continue managing your daily service flow.
             </p>
+          </div>
 
-            <div className="relative z-10 mt-10 rounded-[1.75rem] border border-slate-200 bg-slate-50 p-6 shadow-sm">
-              <div className="mb-5 flex items-center justify-between">
-                <div>
-                  <p className="text-sm font-semibold uppercase tracking-[0.3em] text-slate-500">Current Role</p>
-                  <p className="mt-1 text-lg font-semibold text-slate-950">{activeRole}</p>
-                </div>
-                <span className="rounded-full bg-red-100 px-4 py-2 text-xs font-semibold uppercase tracking-[0.25em] text-red-700">
-                  quick login
-                </span>
-              </div>
-
-              <div className="grid gap-3 sm:grid-cols-2">
-                {Object.entries(quickCredentials).map(([key, credential]) => (
-                  <Button
-                    key={key}
-                    type="button"
-                    variant={activeRole === credential.label ? "default" : "outline"}
-                    className="justify-start"
-                    onClick={() => void quickLogin(key)}
-                  >
-                    <div>
-                      <p className="font-semibold text-slate-950">{credential.label}</p>
-                      <p className="mt-1 text-xs text-slate-500">{credential.email}</p>
-                    </div>
-                  </Button>
-                ))}
-              </div>
-            </div>
-
-            <div className="relative z-10 mt-8 rounded-[1.75rem] bg-slate-50 p-6 ring-1 ring-slate-200">
-              <p className="text-sm font-semibold uppercase tracking-[0.25em] text-slate-500">Demo credentials</p>
-              <div className="mt-4 grid gap-3">
-                {Object.values(quickCredentials).map((credential) => (
-                  <div key={credential.email} className="rounded-2xl bg-white px-4 py-3 text-sm text-slate-600 ring-1 ring-slate-200">
-                    <span className="font-semibold text-slate-950">{credential.label}</span>: {credential.email} / {credential.password}
-                  </div>
-                ))}
-              </div>
-            </div>
-          </section>
-
-          <form onSubmit={handleSubmit} className="overflow-hidden rounded-[2rem] border border-slate-200 bg-white px-8 py-10 shadow-2xl shadow-slate-200/50">
-            <div className="mb-8">
-              <p className="text-xs font-semibold uppercase tracking-[0.36em] text-red-600">Welcome back</p>
-              <h2 className="mt-3 text-4xl font-black text-slate-950">Staff login</h2>
-              <p className="mt-4 max-w-md text-sm leading-6 text-slate-600">
-                Enter your email and password to manage inventory, reservations, POS, and catering workflows.
-              </p>
-            </div>
-
-            <div className="space-y-6">
+          <form onSubmit={handleSubmit} className="px-8 py-8 sm:px-10 sm:py-10">
+            <div className="space-y-5">
               <label className="block text-sm text-slate-700">
                 <span className="mb-2 block font-medium text-slate-800">Email address</span>
                 <input
-                  className="w-full rounded-3xl border border-slate-200 bg-slate-50 px-5 py-4 text-slate-950 outline-none transition focus:border-red-700 focus:ring-2 focus:ring-red-100"
+                  className="w-full rounded-[20px] border border-slate-200 bg-slate-50 px-5 py-4 text-slate-950 outline-none transition focus:border-red-700 focus:ring-2 focus:ring-red-100"
                   type="email"
                   value={email}
                   onChange={(event) => setEmail(event.target.value)}
@@ -163,7 +94,7 @@ export default function Login() {
               <label className="block text-sm text-slate-700">
                 <span className="mb-2 block font-medium text-slate-800">Password</span>
                 <input
-                  className="w-full rounded-3xl border border-slate-200 bg-slate-50 px-5 py-4 text-slate-950 outline-none transition focus:border-red-700 focus:ring-2 focus:ring-red-100"
+                  className="w-full rounded-[20px] border border-slate-200 bg-slate-50 px-5 py-4 text-slate-950 outline-none transition focus:border-red-700 focus:ring-2 focus:ring-red-100"
                   type="password"
                   value={password}
                   onChange={(event) => setPassword(event.target.value)}
@@ -181,7 +112,7 @@ export default function Login() {
             </div>
 
             {message && (
-              <div className="mt-6 rounded-3xl border border-red-200 bg-red-50 px-4 py-4 text-sm text-red-700">
+              <div className="mt-6 rounded-[20px] border border-red-200 bg-red-50 px-4 py-4 text-sm text-red-700">
                 {message}
               </div>
             )}
