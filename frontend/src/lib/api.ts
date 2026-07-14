@@ -6,13 +6,19 @@ function trimTrailingSlash(value: string) {
 
 function getCandidateBaseUrls() {
   const urls = new Set<string>();
-  const configured = import.meta.env.VITE_API_URL;
+  const configured = import.meta.env.VITE_API_URL?.trim();
+
+  if (import.meta.env.PROD && !configured) {
+    throw new Error(
+      "Missing VITE_API_URL in production. Set VITE_API_URL in Netlify to your Render backend URL."
+    );
+  }
 
   if (configured) {
     urls.add(trimTrailingSlash(configured));
   }
 
-  if (typeof window !== "undefined") {
+  if (import.meta.env.DEV && typeof window !== "undefined") {
     const protocol = window.location.protocol === "https:" ? "https:" : "http:";
     urls.add(`${protocol}//${window.location.hostname}:5001`);
 
@@ -21,8 +27,6 @@ function getCandidateBaseUrls() {
       urls.add("http://127.0.0.1:5001");
     }
   }
-
-  urls.add("http://localhost:5001");
 
   return Array.from(urls);
 }
@@ -39,8 +43,17 @@ export function resolveImageUrl(imageUrl?: string | null) {
     return imageUrl;
   }
 
-  const baseUrl = activeBaseUrl || apiBaseUrls[0] || "http://localhost:5001";
-  return new URL(imageUrl, `${trimTrailingSlash(baseUrl)}/`).toString();
+  if (!activeBaseUrl) {
+    return imageUrl;
+  }
+
+  return new URL(imageUrl, `${trimTrailingSlash(activeBaseUrl)}/`).toString();
+}
+
+if (!activeBaseUrl && import.meta.env.PROD) {
+  console.error(
+    "Missing VITE_API_URL in production. Set VITE_API_URL in Netlify to your Render backend URL."
+  );
 }
 
 export const api = axios.create({
@@ -50,8 +63,13 @@ export const api = axios.create({
 });
 
 api.interceptors.request.use((config) => {
-  const token = localStorage.getItem("katana_token");
+  if (import.meta.env.PROD && !activeBaseUrl) {
+    throw new Error(
+      "Missing VITE_API_URL in production. Set VITE_API_URL in Netlify to your Render backend URL."
+    );
+  }
 
+  const token = localStorage.getItem("katana_token");
   config.baseURL = activeBaseUrl;
 
   if (token) {

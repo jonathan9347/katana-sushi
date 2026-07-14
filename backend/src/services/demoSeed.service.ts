@@ -1,5 +1,7 @@
 import bcrypt from "bcrypt";
 import { PrismaClient } from "@prisma/client";
+import fs from "fs";
+import path from "path";
 
 export async function seedDemoData(prisma: PrismaClient) {
   type ProductSeed = {
@@ -288,12 +290,34 @@ export async function seedDemoData(prisma: PrismaClient) {
   const materialByName = new Map(materials.map((material) => [material.name, material.id]));
 
   for (const product of products) {
+    const uploadsDir = path.resolve(__dirname, "..", "uploads", "products");
+    let uploadFiles: string[] = [];
+    try {
+      uploadFiles = fs.readdirSync(uploadsDir);
+    } catch (e) {
+      uploadFiles = [];
+    }
+
+    function findImageForName(name: string) {
+      const tokens = name.toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
+      for (const file of uploadFiles) {
+        const fileLower = file.toLowerCase();
+        const matchesAll = tokens.every((t) => fileLower.includes(t));
+        if (matchesAll) {
+          return `/uploads/products/${file}`;
+        }
+      }
+
+      return null;
+    }
+
     const sellingProduct = await prisma.sellingProduct.create({
       data: {
         name: product.name,
         category: product.category,
         price: product.price,
-        description: product.description ?? `${product.category} menu item`
+        description: product.description ?? `${product.category} menu item`,
+        image_url: findImageForName(product.name) ?? null
       }
     });
 

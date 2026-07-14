@@ -131,10 +131,11 @@ function requireRole(req: Request, res: Response, roles: string[]) {
   return user;
 }
 
+const frontendUrl = process.env.FRONTEND_URL?.trim();
 const allowedFrontendOrigins = new Set([
   "http://localhost:5173",
   "http://127.0.0.1:5173",
-  process.env.FRONTEND_URL
+  frontendUrl
 ].filter((origin): origin is string => Boolean(origin)));
 
 function isLocalFrontendOrigin(origin?: string) {
@@ -151,11 +152,18 @@ function isLocalFrontendOrigin(origin?: string) {
       /^192\.168\.\d{1,3}\.\d{1,3}$/.test(parsed.hostname) ||
       /^10\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(parsed.hostname) ||
       /^172\.(1[6-9]|2\d|3[0-1])\.\d{1,3}\.\d{1,3}$/.test(parsed.hostname);
+    const isNetlifyOrigin = parsed.hostname.endsWith(".netlify.app");
 
-    return isVitePort && isPrivateHost;
+    return (isVitePort && isPrivateHost) || isNetlifyOrigin;
   } catch {
     return false;
   }
+}
+
+if (process.env.NODE_ENV === "production" && !frontendUrl) {
+  console.warn(
+    "WARNING: FRONTEND_URL is not set in production. Netlify frontends are allowed by default if the request origin ends with .netlify.app, but set FRONTEND_URL to your exact domain for strict CORS enforcement."
+  );
 }
 
 app.use(
@@ -3145,24 +3153,51 @@ app.put("/api/inventory/conversion-rules/:materialId", async (req, res, next) =>
 
 app.get("/api/products", async (_req, res, next) => {
   try {
-    const products = await prisma.sellingProduct.findMany({
-      where: { is_deleted: false },
-      orderBy: [{ category: "asc" }, { name: "asc" }],
-      include: {
-        recipes: {
-          include: {
-            recipe_ingredients: {
-              include: {
-                raw_material: true
-              },
-              orderBy: {
-                raw_material: {
-                  name: "asc"
+    const includeRecipes = (_req.query.includeRecipes === "true") || (_req.query.include_recipes === "true");
+
+    if (includeRecipes) {
+      const products = await prisma.sellingProduct.findMany({
+        where: { is_deleted: false },
+        orderBy: [{ category: "asc" }, { name: "asc" }],
+        include: {
+          recipes: {
+            include: {
+              recipe_ingredients: {
+                include: {
+                  raw_material: true
+                },
+                orderBy: {
+                  raw_material: {
+                    name: "asc"
+                  }
                 }
               }
             }
           }
         }
+      });
+
+      const productsWithImageUrls = products.map((product) => ({
+        ...product,
+        image_url: product.image_url ?? null,
+        imageUrl: product.image_url ?? null
+      }));
+
+      return res.json({ products: productsWithImageUrls });
+    }
+
+    // Lightweight customer-facing product list (no recipes) to reduce response size
+    const products = await prisma.sellingProduct.findMany({
+      where: { is_deleted: false },
+      orderBy: [{ category: "asc" }, { name: "asc" }],
+      select: {
+        id: true,
+        name: true,
+        category: true,
+        price: true,
+        description: true,
+        is_available: true,
+        image_url: true
       }
     });
 
