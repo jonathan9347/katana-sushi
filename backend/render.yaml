@@ -6,7 +6,7 @@ services:
     plan: free
     region: oregon
     buildCommand: npm install --include=dev && npm run build && npm run prisma:generate
-    preDeployCommand: npm run prisma:push
+    preDeployCommand: npm run prisma:push && npm run prisma:seed
     startCommand: npm run start
     envVars:
       - key: NODE_ENV

@@ -241,6 +241,10 @@ async function main() {
   await prisma.auditLog.deleteMany();
   await prisma.cateringInquiry.deleteMany();
   await prisma.cateringPackage.deleteMany();
+  await prisma.cateringIngredientLock.deleteMany();
+  await prisma.inventorySnapshot.deleteMany();
+  await prisma.inventoryTransaction.deleteMany();
+  await prisma.materialBatch.deleteMany();
   await prisma.posItem.deleteMany();
   await prisma.posTransaction.deleteMany();
   await prisma.unlimitedLeftoverItem.deleteMany();
@@ -251,7 +255,6 @@ async function main() {
   await prisma.unlimitedSession.deleteMany();
   await prisma.reservation.deleteMany();
   await prisma.table.deleteMany();
-  await prisma.inventoryTransaction.deleteMany();
   await prisma.recipeIngredient.deleteMany();
   await prisma.recipe.deleteMany();
   await prisma.sellingProduct.deleteMany();
