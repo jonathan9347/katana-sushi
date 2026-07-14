@@ -6,8 +6,9 @@
     "dev": "ts-node-dev --respawn --transpile-only src/server.ts",
     "build": "tsc",
     "start": "node dist/server.js",
+    "start:prod": "prisma db push --schema=prisma/schema.prisma && node dist/server.js",
     "prisma:generate": "prisma generate --schema=prisma/schema.prisma --no-engine",
-    "prisma:push": "prisma db push",
+    "prisma:push": "prisma db push --schema=prisma/schema.prisma",
     "prisma:seed": "prisma db seed"
   },
   "prisma": {
