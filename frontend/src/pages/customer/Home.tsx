@@ -264,19 +264,12 @@ export default function Home() {
                 alt={experienceHighlights[activeGalleryIndex].title}
                 className="h-[280px] w-full object-cover sm:h-[360px]"
               />
-              <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent" />
-              <div className="absolute bottom-0 left-0 right-0 p-4 sm:p-6 text-white">
-                <p className="text-[10px] font-semibold uppercase tracking-[0.24em] drop-shadow-[0_2px_12px_rgba(0,0,0,0.95)]">
+              <div className="absolute inset-0 bg-gradient-to-t from-black/20 via-transparent to-transparent" />
+              <div className="absolute bottom-0 left-0 right-0 p-4 sm:p-6 text-white bg-transparent">
+                <p className="!text-white text-[10px] font-semibold uppercase tracking-[0.24em] drop-shadow-[0_2px_8px_rgba(0,0,0,0.7)]">
                   {experienceHighlights[activeGalleryIndex].badge}
                 </p>
-                <h3 className="mt-2 font-display text-2xl font-bold drop-shadow-[0_2px_12px_rgba(0,0,0,0.95)] sm:text-3xl">
-                  {experienceHighlights[activeGalleryIndex].title}
-                </h3>
-              </div>
-
-              <button
-                type="button"
-                onClick={() => setActiveGalleryIndex((prev) => (prev === 0 ? experienceHighlights.length - 1 : prev - 1))}
+                <h3 className="!text-white mt-2 font-display text-2xl font-bold drop-shadow-[0_2px_10px_rgba(0,0,0,0.7)] sm:text-3xl">
                 className="absolute left-3 top-1/2 flex h-10 w-10 -translate-y-1/2 items-center justify-center rounded-full border border-white/20 bg-black/40 text-white backdrop-blur transition hover:bg-black/60"
                 aria-label="Previous experience"
               >
