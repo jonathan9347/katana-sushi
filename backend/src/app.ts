@@ -211,6 +211,7 @@ const frontendUrl = process.env.FRONTEND_URL?.trim();
 const allowedFrontendOrigins = new Set([
   "http://localhost:5173",
   "http://127.0.0.1:5173",
+  "https://katana-sushi-u54k.vercel.app",
   frontendUrl
 ].filter((origin): origin is string => Boolean(origin)));
 
