@@ -266,12 +266,14 @@ export default function Home() {
               />
               <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent" />
               <div className="absolute bottom-0 left-0 right-0 p-4 sm:p-6">
-                <p className="text-[10px] font-semibold uppercase tracking-[0.24em] text-white drop-shadow-[0_2px_12px_rgba(0,0,0,0.95)]">
-                  {experienceHighlights[activeGalleryIndex].badge}
-                </p>
-                <h3 className="mt-2 font-display text-2xl font-bold text-white drop-shadow-[0_2px_12px_rgba(0,0,0,0.95)] sm:text-3xl">
-                  {experienceHighlights[activeGalleryIndex].title}
-                </h3>
+                <div className="inline-flex max-w-full flex-col rounded-[1rem] border border-white/15 bg-black/55 px-3 py-2 shadow-[0_8px_24px_rgba(0,0,0,0.35)] backdrop-blur-sm sm:px-4 sm:py-3">
+                  <p className="text-[10px] font-semibold uppercase tracking-[0.24em] text-white drop-shadow-[0_2px_12px_rgba(0,0,0,0.95)]">
+                    {experienceHighlights[activeGalleryIndex].badge}
+                  </p>
+                  <h3 className="mt-2 font-display text-2xl font-bold text-white drop-shadow-[0_2px_12px_rgba(0,0,0,0.95)] sm:text-3xl">
+                    {experienceHighlights[activeGalleryIndex].title}
+                  </h3>
+                </div>
               </div>
 
               <button
