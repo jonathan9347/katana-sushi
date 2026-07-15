@@ -270,19 +270,13 @@ export default function Home() {
                   {experienceHighlights[activeGalleryIndex].badge}
                 </p>
                 <h3 className="!text-white mt-2 font-display text-2xl font-bold drop-shadow-[0_2px_10px_rgba(0,0,0,0.7)] sm:text-3xl">
-                className="absolute left-3 top-1/2 flex h-10 w-10 -translate-y-1/2 items-center justify-center rounded-full border border-white/20 bg-black/40 text-white backdrop-blur transition hover:bg-black/60"
-                aria-label="Previous experience"
-              >
-                <ChevronLeft className="h-5 w-5" />
-              </button>
+                  {experienceHighlights[activeGalleryIndex].title}
+                </h3>
+              </div>
+
               <button
                 type="button"
-                onClick={() => setActiveGalleryIndex((prev) => (prev === experienceHighlights.length - 1 ? 0 : prev + 1))}
-                className="absolute right-3 top-1/2 flex h-10 w-10 -translate-y-1/2 items-center justify-center rounded-full border border-white/20 bg-black/40 text-white backdrop-blur transition hover:bg-black/60"
-                aria-label="Next experience"
-              >
-                <ChevronRight className="h-5 w-5" />
-              </button>
+                onClick={() => setActiveGalleryIndex((prev) => (prev === 0 ? experienceHighlights.length - 1 : prev - 1))}
             </div>
 
             <div className="mt-4 flex items-center justify-between gap-3">
