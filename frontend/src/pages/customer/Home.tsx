@@ -325,44 +325,107 @@ export default function Home() {
         </div>
 
         <div className="rounded-[2rem] p-4 shadow-none sm:p-6">
-          <div className="relative h-[420px] overflow-hidden rounded-[1.5rem] sm:h-[520px]">
-            <div className="absolute inset-0 overflow-hidden">
-              <img
-                key={galleryItems[activeGalleryIndex].image}
-                src={galleryItems[activeGalleryIndex].image}
-                alt={galleryItems[activeGalleryIndex].title}
-                className="h-full w-full object-cover animate-[fadeInScale_800ms_ease-out_forwards]"
-              />
-            </div>
-            <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/35 to-transparent" />
+          <div className="hidden md:block">
+            <div className="relative h-[420px] overflow-hidden rounded-[1.5rem] sm:h-[520px]">
+              <div className="absolute inset-0 overflow-hidden">
+                <img
+                  key={galleryItems[activeGalleryIndex].image}
+                  src={galleryItems[activeGalleryIndex].image}
+                  alt={galleryItems[activeGalleryIndex].title}
+                  className="h-full w-full object-cover animate-[fadeInScale_800ms_ease-out_forwards]"
+                />
+              </div>
+              <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/35 to-transparent" />
 
-            <div className="absolute inset-0 flex">
-              {galleryItems.map((item, index) => {
-                const isActive = index === activeGalleryIndex;
+              <div className="absolute inset-0 flex">
+                {galleryItems.map((item, index) => {
+                  const isActive = index === activeGalleryIndex;
 
-                return (
-                  <button
-                    key={item.title}
-                    type="button"
-                    onMouseEnter={() => setActiveGalleryIndex(index)}
-                    onFocus={() => setActiveGalleryIndex(index)}
-                    className={`group relative flex-1 border-r border-transparent bg-transparent text-left transition-all duration-700 ease-[cubic-bezier(0.22,1,0.36,1)] last:border-r-0 ${isActive ? "flex-[1.15]" : "flex-[0.85] hover:flex-[1.02]"}`}
-                  >
-                    <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/40 to-transparent transition-opacity duration-700 ease-out" />
-                    <div className="absolute inset-x-0 bottom-0 p-4 sm:p-5">
-                      <p className="text-[10px] font-semibold uppercase tracking-[0.25em] text-slate-50 drop-shadow-[0_2px_8px_rgba(0,0,0,0.95)]">
-                        {isActive ? "Now viewing" : "Hover to explore"}
-                      </p>
-                      <h3 className="mt-2 font-display text-lg font-semibold text-slate-50 transition-all duration-700 ease-out drop-shadow-[0_2px_10px_rgba(0,0,0,0.95)] sm:text-xl">
-                        {item.title}
-                      </h3>
-                      <div className={`overflow-hidden transition-all duration-700 ease-out ${isActive ? "mt-2 max-h-24 opacity-100" : "mt-0 max-h-0 opacity-0"}`}>
-                        <p className="text-sm leading-relaxed text-slate-50 drop-shadow-[0_2px_12px_rgba(0,0,0,0.98)]">{item.caption}</p>
+                  return (
+                    <button
+                      key={item.title}
+                      type="button"
+                      onMouseEnter={() => setActiveGalleryIndex(index)}
+                      onFocus={() => setActiveGalleryIndex(index)}
+                      className={`group relative flex-1 border-r border-transparent bg-transparent text-left transition-all duration-700 ease-[cubic-bezier(0.22,1,0.36,1)] last:border-r-0 ${isActive ? "flex-[1.15]" : "flex-[0.85] hover:flex-[1.02]"}`}
+                    >
+                      <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/40 to-transparent transition-opacity duration-700 ease-out" />
+                      <div className="absolute inset-x-0 bottom-0 p-4 sm:p-5">
+                        <p className="text-[10px] font-semibold uppercase tracking-[0.25em] text-slate-50 drop-shadow-[0_2px_8px_rgba(0,0,0,0.95)]">
+                          {isActive ? "Now viewing" : "Hover to explore"}
+                        </p>
+                        <h3 className="mt-2 font-display text-lg font-semibold text-slate-50 transition-all duration-700 ease-out drop-shadow-[0_2px_10px_rgba(0,0,0,0.95)] sm:text-xl">
+                          {item.title}
+                        </h3>
+                        <div className={`overflow-hidden transition-all duration-700 ease-out ${isActive ? "mt-2 max-h-24 opacity-100" : "mt-0 max-h-0 opacity-0"}`}>
+                          <p className="text-sm leading-relaxed text-slate-50 drop-shadow-[0_2px_12px_rgba(0,0,0,0.98)]">{item.caption}</p>
+                        </div>
                       </div>
-                    </div>
-                  </button>
-                );
-              })}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+
+          <div className="md:hidden">
+            <div className="relative h-[420px] overflow-hidden rounded-[1.5rem]">
+              <div className="absolute inset-0 overflow-hidden">
+                <img
+                  key={galleryItems[activeGalleryIndex].image}
+                  src={galleryItems[activeGalleryIndex].image}
+                  alt={galleryItems[activeGalleryIndex].title}
+                  className="h-full w-full object-cover animate-[fadeInScale_800ms_ease-out_forwards]"
+                />
+              </div>
+              <div className="absolute inset-0 bg-gradient-to-t from-black/88 via-black/35 to-transparent" />
+              <div className="absolute inset-x-0 bottom-0 p-5">
+                <p className="text-[10px] font-semibold uppercase tracking-[0.24em] text-slate-50">Now viewing</p>
+                <h3 className="mt-2 font-display text-xl font-semibold text-slate-50">
+                  {galleryItems[activeGalleryIndex].title}
+                </h3>
+                <p className="mt-2 text-sm leading-relaxed text-slate-50">
+                  {galleryItems[activeGalleryIndex].caption}
+                </p>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setActiveGalleryIndex((prev) => (prev === 0 ? galleryItems.length - 1 : prev - 1))}
+                className="absolute left-3 top-1/2 flex h-10 w-10 -translate-y-1/2 items-center justify-center rounded-full border border-white/20 bg-black/40 text-white backdrop-blur transition hover:bg-black/60"
+                aria-label="Previous gallery image"
+              >
+                <ChevronLeft className="h-5 w-5" />
+              </button>
+              <button
+                type="button"
+                onClick={() => setActiveGalleryIndex((prev) => (prev === galleryItems.length - 1 ? 0 : prev + 1))}
+                className="absolute right-3 top-1/2 flex h-10 w-10 -translate-y-1/2 items-center justify-center rounded-full border border-white/20 bg-black/40 text-white backdrop-blur transition hover:bg-black/60"
+                aria-label="Next gallery image"
+              >
+                <ChevronRight className="h-5 w-5" />
+              </button>
+            </div>
+
+            <div className="mt-4 flex items-center justify-between gap-3">
+              <div className="flex gap-2">
+                {galleryItems.map((item, index) => {
+                  const isActive = index === activeGalleryIndex;
+
+                  return (
+                    <button
+                      key={item.title}
+                      type="button"
+                      onClick={() => setActiveGalleryIndex(index)}
+                      className={`h-2.5 rounded-full transition-all duration-300 ${isActive ? "w-8 bg-katana-red" : "w-2.5 bg-slate-700 hover:bg-slate-500"}`}
+                      aria-label={`Show ${item.title}`}
+                    />
+                  );
+                })}
+              </div>
+              <div className="text-sm text-[color:var(--customer-muted)]">
+                0{activeGalleryIndex + 1} / 0{galleryItems.length}
+              </div>
             </div>
           </div>
         </div>
