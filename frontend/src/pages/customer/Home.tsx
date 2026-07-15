@@ -277,6 +277,19 @@ export default function Home() {
               <button
                 type="button"
                 onClick={() => setActiveGalleryIndex((prev) => (prev === 0 ? experienceHighlights.length - 1 : prev - 1))}
+                className="absolute left-3 top-1/2 flex h-10 w-10 -translate-y-1/2 items-center justify-center rounded-full border border-white/20 bg-black/40 text-white backdrop-blur transition hover:bg-black/60"
+                aria-label="Previous experience"
+              >
+                <ChevronLeft className="h-5 w-5" />
+              </button>
+              <button
+                type="button"
+                onClick={() => setActiveGalleryIndex((prev) => (prev === experienceHighlights.length - 1 ? 0 : prev + 1))}
+                className="absolute right-3 top-1/2 flex h-10 w-10 -translate-y-1/2 items-center justify-center rounded-full border border-white/20 bg-black/40 text-white backdrop-blur transition hover:bg-black/60"
+                aria-label="Next experience"
+              >
+                <ChevronRight className="h-5 w-5" />
+              </button>
             </div>
 
             <div className="mt-4 flex items-center justify-between gap-3">
