@@ -167,6 +167,13 @@
 .customer-app [class*="bg-katana-black"] { background-color: var(--customer-bg) !important; }
 .customer-app [class*="bg-katana-surface"] { background-color: var(--customer-surface) !important; }
 .customer-app [class*="bg-katana-elevated"] { background-color: var(--customer-surface-2) !important; }
+.summary-collapsed .summary-text {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  word-break: break-word;
+}
 
 /* Force white text and SVGs inside the experience image overlay (override theme rules) */
 .experience-image [class*="text-white"],

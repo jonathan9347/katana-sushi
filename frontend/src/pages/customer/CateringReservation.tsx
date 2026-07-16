@@ -388,7 +388,7 @@ export default function CateringReservation() {
             <>
             <div>
               <h3 className="text-xs font-bold uppercase tracking-[0.18em] text-katana-muted">Choose a station</h3>
-              <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-3 md:gap-4 md:mt-4">
+              <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-1 md:gap-4 md:mt-4">
                 {stations.map((station) => {
                   const isSelected = form.station_types.includes(station.id);
                   const selectedPkg = selectedPackageByStation[station.id];
@@ -629,11 +629,11 @@ export default function CateringReservation() {
         {step === 2 ? (
           <div className="fixed bottom-4 left-4 right-4 z-40 md:right-6 md:left-auto md:w-96 md:bottom-6">
           <div className="mx-auto md:ml-auto">
-              <div className={`rounded-xl border border-katana-border bg-katana-elevated shadow-lg transition-all ${summaryOpen ? "max-h-[36rem]" : "max-h-14 overflow-hidden"}`}>
+              <div className={`rounded-xl border border-katana-border bg-katana-elevated shadow-lg transition-all ${summaryOpen ? "max-h-[36rem]" : "max-h-14 overflow-hidden summary-collapsed"}`}>
               <div className="flex items-center justify-between px-4 py-3">
                 <div>
                   <p className="text-sm font-semibold text-white">Your package summary</p>
-                  <p className="text-xs text-neutral-300 whitespace-normal">{stationCount} station{stationCount > 1 ? "s" : ""} selected • {form.station_types.map((id) => selectedPackageByStation[id]?.description ?? selectedPackageByStation[id]?.name).filter(Boolean).join(", ") || "No option"}</p>
+                  <p className="text-xs text-neutral-300 whitespace-normal summary-text">{stationCount} station{stationCount > 1 ? "s" : ""} selected • {form.station_types.map((id) => selectedPackageByStation[id]?.description ?? selectedPackageByStation[id]?.name).filter(Boolean).join(", ") || "No option"}</p>
                 </div>
                 <div className="flex items-center gap-3">
                   <div className="text-right">
@@ -669,7 +669,6 @@ export default function CateringReservation() {
                       <span>{money(totalPriceTotal)}</span>
                     </div>
                     <div className="grid gap-2">
-                      <button type="button" onClick={() => { setStep(3); setSummaryOpen(false); }} className="customer-btn-primary w-full">Proceed to payment</button>
                       <div className="flex gap-2">
                         <button type="button" onClick={() => setStep((c) => Math.max(1, c - 1))} className="customer-btn-secondary w-full">Back</button>
                         <button
