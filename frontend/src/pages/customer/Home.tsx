@@ -257,7 +257,7 @@ export default function Home() {
           </div>
 
           <div className="p-0 sm:p-0">
-            <div className="relative overflow-hidden rounded-[1.25rem]">
+            <div className="relative overflow-hidden rounded-[1.25rem] experience-image">
               <img
                 key={experienceHighlights[activeGalleryIndex].image}
                 src={experienceHighlights[activeGalleryIndex].image}
