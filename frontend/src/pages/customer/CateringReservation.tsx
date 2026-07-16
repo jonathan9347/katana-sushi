@@ -395,80 +395,82 @@ export default function CateringReservation() {
                   const options = packagesByStation[station.id] ?? [];
 
                   return (
-                    <div key={station.id} className={`rounded-2xl border p-3 transition ${isSelected ? "border-katana-red bg-katana-red/6 shadow-sm" : "border-katana-border bg-katana-elevated hover:border-katana-red/40"}`}>
-                      <div className="flex items-start gap-3">
-                        {station.image ? (
-                          <img src={station.image} alt={station.name} className="h-14 w-14 rounded-lg object-cover" />
-                        ) : (
-                          <div className="h-14 w-14 rounded-lg bg-katana-elevated" />
-                        )}
-                        <div className="flex-1">
-                          <div className="flex items-center justify-between gap-3">
-                            <div>
-                              <p className="text-sm font-bold text-white md:text-base">{station.name}</p>
-                              <p className="mt-1 text-xs text-neutral-300 md:text-sm">{station.summary}</p>
-                            </div>
-                            <div className="ml-2 text-right">
-                              <p className="text-sm font-semibold text-katana-red">{selectedPkg ? getPackagePriceLabel(selectedPkg) : ""}</p>
-                            </div>
-                          </div>
-                          <div className="mt-3 flex items-center gap-3">
-                            <button
-                              type="button"
-                              onClick={() => {
-                                if (isSelected) {
-                                  setField("station_types", form.station_types.filter((s) => s !== station.id));
-                                } else {
-                                  setField("station_types", [...form.station_types, station.id]);
-                                }
-                              }}
-                              className={`rounded-full px-3 py-2 text-xs font-semibold ${isSelected ? "bg-katana-red text-white" : "bg-katana-surface text-neutral-300 border border-katana-border"}`}
-                            >
-                              {isSelected ? "Selected" : "Select"}
-                            </button>
-                            {isSelected ? (
-                              <details className="ml-auto rounded-lg" open>
-                                <summary className="cursor-pointer text-sm font-semibold text-white">Choose an option</summary>
-                                <div className="mt-3 grid gap-2">
-                                  {options.map((item) => (
-                                    <button
-                                      key={item.id}
-                                      type="button"
-                                      onClick={() => setForm((curr) => ({ ...curr, package_by_station: { ...curr.package_by_station, [station.id]: item.id } }))}
-                                      className={`rounded-2xl border p-3 text-left transition ${selectedPkg?.id === item.id ? "border-katana-red bg-katana-red/10 shadow-sm" : "border-katana-border bg-katana-elevated hover:border-katana-red/40"}`}
-                                    >
-                                      <div className="flex items-center justify-between gap-3">
-                                        <div>
-                                          <p className="text-sm font-bold text-white md:text-base">{item.description ?? item.name}</p>
-                                          <p className="mt-1 text-xs uppercase tracking-wide text-katana-muted">{item.minPax}-{item.maxPax} pax</p>
-                                        </div>
-                                        <p className="text-right text-sm font-bold text-katana-red">{getPackagePriceLabel(item)}</p>
-                                      </div>
-                                    </button>
-                                  ))}
-                                  {options.length === 0 && (
-                                    <p className="rounded-2xl border border-katana-border bg-katana-elevated p-4 text-sm text-neutral-300">Loading station options...</p>
-                                  )}
-                                </div>
-                              </details>
-                            ) : null}
-                          </div>
-
-                          {isSelected && station.id === "sushi_station" && selectedPkg?.items?.inclusions?.length ? (
-                            <details className="mt-3 rounded-xl border border-katana-border bg-katana-elevated text-sm text-neutral-300">
-                              <summary className="cursor-pointer px-4 py-3 font-bold text-white">Sushi station products</summary>
-                              <div className="grid gap-2 border-t border-katana-border px-4 py-3 sm:grid-cols-2">
-                                {selectedPkg.items.inclusions.map((inclusion) => (
-                                  <p key={typeof inclusion === "string" ? inclusion : inclusion.name}>
-                                    {typeof inclusion === "string" ? inclusion : inclusion.name}
-                                  </p>
-                                ))}
-                              </div>
-                            </details>
-                          ) : null}
-                        </div>
-                      </div>
-                    </div>
++                    <div
++                      key={station.id}
++                      role="button"
++                      tabIndex={0}
++                      onClick={() => {
++                        if (isSelected) {
++                          setField("station_types", form.station_types.filter((s) => s !== station.id));
++                        } else {
++                          setField("station_types", [...form.station_types, station.id]);
++                        }
++                      }}
++                      className={`cursor-pointer rounded-2xl border p-3 transition ${isSelected ? "border-katana-red bg-katana-red/6 shadow-sm" : "border-katana-border bg-katana-elevated hover:border-katana-red/40"}`}
++                    >
++                      <div className="flex items-start gap-3">
++                        {station.image ? (
++                          <img src={station.image} alt={station.name} className="h-14 w-14 rounded-lg object-cover" />
++                        ) : (
++                          <div className="h-14 w-14 rounded-lg bg-katana-elevated" />
++                        )}
++                        <div className="flex-1">
++                          <div className="flex items-center justify-between gap-3">
++                            <div>
++                              <p className="text-sm font-bold text-white md:text-base">{station.name}</p>
++                              <p className="mt-1 text-xs text-neutral-300 md:text-sm">{station.summary}</p>
++                            </div>
++                            <div className="ml-2 text-right">
++                              <p className="text-sm font-semibold text-katana-red">{selectedPkg ? getPackagePriceLabel(selectedPkg) : ""}</p>
++                            </div>
++                          </div>
++                          <div className="mt-3 flex items-center gap-3">
++                            {isSelected ? (
++                              <details className="ml-auto rounded-lg" open onClick={(e) => e.stopPropagation()}>
++                                <summary className="cursor-pointer text-sm font-semibold text-white">Choose an option</summary>
++                                <div className="mt-3 grid grid-cols-2 gap-2 md:grid-cols-3">
++                                  {options.map((item) => (
++                                    <button
++                                      key={item.id}
++                                      type="button"
++                                      onClick={(e) => {
++                                        e.stopPropagation();
++                                        setForm((curr) => ({ ...curr, package_by_station: { ...curr.package_by_station, [station.id]: item.id } }));
++                                      }}
++                                      className={`rounded-2xl border p-3 text-left transition ${selectedPkg?.id === item.id ? "border-katana-red bg-katana-red/10 shadow-sm" : "border-katana-border bg-katana-elevated hover:border-katana-red/40"}`}
++                                    >
++                                      <div className="flex items-center justify-between gap-3">
++                                        <div>
++                                          <p className="text-sm font-bold text-white md:text-base">{item.description ?? item.name}</p>
++                                          <p className="mt-1 text-xs uppercase tracking-wide text-katana-muted">{item.minPax}-{item.maxPax} pax</p>
++                                        </div>
++                                        <p className="text-right text-sm font-bold text-katana-red">{getPackagePriceLabel(item)}</p>
++                                      </div>
++                                    </button>
++                                  ))}
++                                  {options.length === 0 && (
++                                    <p className="rounded-2xl border border-katana-border bg-katana-elevated p-4 text-sm text-neutral-300">Loading station options...</p>
++                                  )}
++                                </div>
++                              </details>
++                            ) : null}
++                          </div>
++
++                          {isSelected && station.id === "sushi_station" && selectedPkg?.items?.inclusions?.length ? (
++                            <details className="mt-3 rounded-xl border border-katana-border bg-katana-elevated text-sm text-neutral-300" onClick={(e) => e.stopPropagation()}>
++                              <summary className="cursor-pointer px-4 py-3 font-bold text-white">Sushi station products</summary>
++                              <div className="grid gap-2 border-t border-katana-border px-4 py-3 sm:grid-cols-2">
++                                {selectedPkg.items.inclusions.map((inclusion) => (
++                                  <p key={typeof inclusion === "string" ? inclusion : inclusion.name}>
++                                    {typeof inclusion === "string" ? inclusion : inclusion.name}
++                                  </p>
++                                ))}
++                              </div>
++                            </details>
++                          ) : null}
++                        </div>
++                      </div>
++                    </div>
                   );
                 })}
               </div>
@@ -624,12 +626,14 @@ export default function CateringReservation() {
           </div>
         </form>
       </div>
+      {step === 2 && <div className="h-28 md:hidden" />}
 
         {/* Floating collapsible summary card (step 2 only) */}
         {step === 2 ? (
           <div className="fixed bottom-4 left-4 right-4 z-40 md:right-6 md:left-auto md:w-96 md:bottom-6">
           <div className="mx-auto md:ml-auto">
               <div className={`rounded-xl border border-katana-border bg-katana-elevated shadow-lg transition-all ${summaryOpen ? "max-h-[36rem]" : "max-h-14 overflow-hidden summary-collapsed"}`}>
+              <div className="h-1 w-full rounded-t-xl bg-katana-red" />
               <div className="flex items-center justify-between px-4 py-3">
                 <div>
                   <p className="text-sm font-semibold text-white">Your package summary</p>
