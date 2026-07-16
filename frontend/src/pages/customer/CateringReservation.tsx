@@ -37,9 +37,9 @@ function money(value: number) {
 }
 
 const stations = [
-  { id: "sushi_station", name: "Sushi Station", summary: "Maki, sushi, and nigiri selections" },
-  { id: "sashimi_bar", name: "Sashimi Bar", summary: "Whole tuna sashimi service" },
-  { id: "tempura_live", name: "Tempura Live", summary: "Live tempura station" }
+  { id: "sushi_station", name: "Sushi Station", summary: "Maki, sushi, and nigiri selections", image: "/images/cateringf.jpg" },
+  { id: "sashimi_bar", name: "Sashimi Bar", summary: "Whole tuna sashimi service", image: "/images/catering-banner.jpg" },
+  { id: "tempura_live", name: "Tempura Live", summary: "Live tempura station", image: "/images/unli-dining.jpg" }
 ];
 
 function today() {
@@ -95,7 +95,7 @@ export default function CateringReservation() {
   const [form, setForm] = useState<{
     event_date: string;
     venue_address: string;
-    station_type: string;
+    station_types: string[];
     package_id: string;
     customer_name: string;
     customer_phone: string;
@@ -107,7 +107,7 @@ export default function CateringReservation() {
   }>({
     event_date: today(),
     venue_address: "",
-    station_type: "sushi_station",
+    station_types: ["sushi_station"],
     package_id: "",
     customer_name: "",
     customer_phone: "",
@@ -129,7 +129,7 @@ export default function CateringReservation() {
   });
 
   const packages = packagesQuery.data ?? [];
-  const stationPackages = packages.filter((item) => getStationType(item) === form.station_type);
+  const stationPackages = packages.filter((item) => form.station_types.includes(getStationType(item)));
   const selectedPackage = stationPackages.find((item) => item.id === form.package_id) ?? stationPackages[0];
 
   useEffect(() => {
@@ -148,8 +148,15 @@ export default function CateringReservation() {
   const isFullPayment = form.payment_plan === "full_payment";
   const paymentAmount = Number((isFullPayment ? totalPrice : Number((totalPrice * 0.5).toFixed(2))).toFixed(2));
   const remaining = Number((totalPrice - paymentAmount).toFixed(2));
+  const [summaryOpen, setSummaryOpen] = useState(false);
+  const stationCount = form.station_types.length;
+  const subtotalTotal = Number((subtotal * stationCount).toFixed(2));
+  const taxTotal = Number((subtotalTotal * 0.12).toFixed(2));
+  const totalPriceTotal = Number((subtotalTotal + taxTotal).toFixed(2));
+  const paymentAmountTotal = Number((isFullPayment ? totalPriceTotal : Number((totalPriceTotal * 0.5).toFixed(2))).toFixed(2));
+  const remainingTotal = Number((totalPriceTotal - paymentAmountTotal).toFixed(2));
 
-  function setField(field: keyof typeof form, value: string | boolean) {
+  function setField(field: keyof typeof form, value: any) {
     setForm((current) => ({ ...current, [field]: value }));
   }
 
@@ -164,7 +171,7 @@ export default function CateringReservation() {
   }
 
   function canProceedToStep3() {
-    return Boolean(selectedPackage);
+    return Boolean(selectedPackage) && form.station_types.length > 0;
   }
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
@@ -194,7 +201,7 @@ export default function CateringReservation() {
     try {
       const reservationReference = buildReservationReference("CAT");
       const paymentIntent = await createPaymentIntent({
-        amount: paymentAmount,
+        amount: paymentAmountTotal,
         paymentMethod: form.payment_method,
         bookingId: reservationReference,
         reservationType: "catering",
@@ -209,7 +216,7 @@ export default function CateringReservation() {
         referenceId: paymentIntent.referenceId,
         bookingId: reservationReference,
         gatewayData: {
-          amount: paymentAmount,
+          amount: paymentAmountTotal,
           paymentMethod: form.payment_method,
           paymentPlan: form.payment_plan,
           reservationType: "catering"
@@ -354,18 +361,35 @@ export default function CateringReservation() {
             <>
             <div>
               <h3 className="text-xs font-bold uppercase tracking-[0.18em] text-katana-muted">Choose a station</h3>
-              <div className="mt-3 grid grid-cols-3 gap-2 md:mt-4">
-                {stations.map((station) => (
-                  <button
-                    type="button"
-                    key={station.id}
-                    onClick={() => setField("station_type", station.id)}
-                    className={`min-h-20 rounded-2xl border p-3 text-left transition ${form.station_type === station.id ? "border-katana-red bg-katana-red/10 shadow-sm" : "border-katana-border bg-katana-elevated hover:border-katana-red/40"}`}
-                  >
-                    <p className="text-sm font-bold text-white md:text-base">{station.name}</p>
-                    <p className="mt-1 text-xs text-neutral-300 md:text-sm">{station.summary}</p>
-                  </button>
-                ))}
+              <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-3 md:gap-2 md:mt-4">
+                {stations.map((station) => {
+                  const isSelected = form.station_types.includes(station.id);
+
+                  return (
+                    <button
+                      type="button"
+                      key={station.id}
+                      onClick={() => {
+                        if (isSelected) {
+                          setField("station_types", form.station_types.filter((s) => s !== station.id));
+                        } else {
+                          setField("station_types", [...form.station_types, station.id]);
+                        }
+                      }}
+                      className={`flex items-center gap-3 min-h-20 rounded-2xl border p-3 text-left transition ${isSelected ? "border-katana-red bg-katana-red/10 shadow-sm" : "border-katana-border bg-katana-elevated hover:border-katana-red/40"}`}
+                    >
+                      {station.image ? (
+                        <img src={station.image} alt={station.name} className="h-14 w-14 rounded-lg object-cover" />
+                      ) : (
+                        <div className="h-14 w-14 rounded-lg bg-katana-elevated" />
+                      )}
+                      <div>
+                        <p className="text-sm font-bold text-white md:text-base">{station.name}</p>
+                        <p className="mt-1 text-xs text-neutral-300 md:text-sm">{station.summary}</p>
+                      </div>
+                    </button>
+                  );
+                })}
               </div>
             </div>
 
@@ -393,7 +417,7 @@ export default function CateringReservation() {
                 )}
               </div>
             </div>
-            {form.station_type === "sushi_station" && selectedPackage?.items?.inclusions?.length ? (
+            {form.station_types.includes("sushi_station") && selectedPackage?.items?.inclusions?.length ? (
               <details className="rounded-xl border border-katana-border bg-katana-elevated text-sm text-neutral-300">
                 <summary className="cursor-pointer px-4 py-3 font-bold text-white">Sushi station products</summary>
                 <div className="grid gap-2 border-t border-katana-border px-4 py-3 sm:grid-cols-2">
@@ -420,7 +444,7 @@ export default function CateringReservation() {
               <div className="mt-4 space-y-3 text-sm text-neutral-300">
                 <div className="flex items-center justify-between">
                   <span>Station</span>
-                  <span className="font-semibold text-white">{stations.find((station) => station.id === form.station_type)?.name ?? "-"}</span>
+                  <span className="font-semibold text-white">{form.station_types.map((id) => stations.find((s) => s.id === id)?.name).filter(Boolean).join(", ") || "-"}</span>
                 </div>
                 <div className="flex items-center justify-between">
                   <span>Option</span>
@@ -431,24 +455,24 @@ export default function CateringReservation() {
                   <span>{headcountNumber} pax</span>
                 </div>
                 <div className="flex items-center justify-between">
-                  <span>Subtotal</span>
-                  <span>{money(subtotal)}</span>
+                    <span>Subtotal</span>
+                    <span>{money(subtotalTotal)}</span>
                 </div>
-                <div className="flex items-center justify-between">
-                  <span>Tax (12%)</span>
-                  <span>{money(tax)}</span>
+                  <div className="flex items-center justify-between">
+                    <span>Tax (12%)</span>
+                    <span>{money(taxTotal)}</span>
                 </div>
-                <div className="flex items-center justify-between text-base font-bold text-white">
-                  <span>Total</span>
-                  <span>{money(totalPrice)}</span>
+                  <div className="flex items-center justify-between text-base font-bold text-white">
+                    <span>Total</span>
+                    <span>{money(totalPriceTotal)}</span>
                 </div>
-                <div className="flex items-center justify-between text-sm text-neutral-300">
-                  <span>{isFullPayment ? "Amount now" : "Downpayment (50%)"}</span>
-                  <span>{money(paymentAmount)}</span>
+                  <div className="flex items-center justify-between text-sm text-neutral-300">
+                    <span>{isFullPayment ? "Amount now" : "Downpayment (50%)"}</span>
+                    <span>{money(paymentAmountTotal)}</span>
                 </div>
-                <div className="flex items-center justify-between text-sm text-neutral-300">
-                  <span>{isFullPayment ? "Remaining balance" : "Remaining balance"}</span>
-                  <span>{money(remaining)}</span>
+                  <div className="flex items-center justify-between text-sm text-neutral-300">
+                    <span>{isFullPayment ? "Remaining balance" : "Remaining balance"}</span>
+                    <span>{money(remainingTotal)}</span>
                 </div>
               </div>
             </div>
@@ -461,8 +485,8 @@ export default function CateringReservation() {
                   onClick={() => setField("payment_plan", "initial_only")}
                   className={`rounded-2xl border px-4 py-4 text-left text-sm font-bold ${form.payment_plan === "initial_only" ? "border-katana-red bg-katana-red/15 text-white" : "border-katana-border bg-katana-surface text-neutral-300"}`}
                 >
-                  <p className="font-semibold">50% initial</p>
-                  <p className="mt-2 text-sm text-neutral-300">Pay {money(paymentAmount)} now. Remaining {money(remaining)} due at event.</p>
+                      <p className="font-semibold">50% initial</p>
+                      <p className="mt-2 text-sm text-neutral-300">Pay {money(paymentAmountTotal)} now. Remaining {money(remainingTotal)} due at event.</p>
                 </button>
                 <button
                   type="button"
@@ -470,7 +494,7 @@ export default function CateringReservation() {
                   className={`rounded-2xl border px-4 py-4 text-left text-sm font-bold ${form.payment_plan === "full_payment" ? "border-katana-red bg-katana-red/15 text-white" : "border-katana-border bg-katana-surface text-neutral-300"}`}
                 >
                   <p className="font-semibold">100% full</p>
-                  <p className="mt-2 text-sm text-neutral-300">Pay {money(paymentAmount)} now and owe nothing later.</p>
+                  <p className="mt-2 text-sm text-neutral-300">Pay {money(paymentAmountTotal)} now and owe nothing later.</p>
                 </button>
               </div>
             </div>
@@ -517,7 +541,7 @@ export default function CateringReservation() {
               className="customer-btn-primary flex w-full gap-2 disabled:cursor-not-allowed disabled:opacity-70"
               disabled={isProcessingPayment}
             >
-              <Send className="h-4 w-4" /> {isProcessingPayment ? "Processing payment..." : `Pay ${money(paymentAmount)}`}
+              <Send className="h-4 w-4" /> {isProcessingPayment ? "Processing payment..." : `Pay ${money(paymentAmountTotal)}`}
             </button>
             {paymentNotice && <p className="rounded-md bg-emerald-50 px-3 py-2 text-sm font-medium text-emerald-700">{paymentNotice}</p>}
             </>
@@ -559,6 +583,58 @@ export default function CateringReservation() {
           </div>
         </form>
       </div>
+
+        {/* Floating collapsible summary card */}
+        <div className="fixed bottom-4 left-4 right-4 z-40 md:right-6 md:left-auto md:w-96 md:bottom-6">
+          <div className="mx-auto md:ml-auto">
+            <div className={`rounded-xl border border-katana-border bg-katana-elevated shadow-lg transition-all ${summaryOpen ? "max-h-[36rem]" : "max-h-14 overflow-hidden"}`}>
+              <div className="flex items-center justify-between px-4 py-3">
+                <div>
+                  <p className="text-sm font-semibold text-white">Your package summary</p>
+                  <p className="text-xs text-neutral-300">{stationCount} station{stationCount > 1 ? "s" : ""} selected • {selectedPackage?.description ?? selectedPackage?.name ?? "No option"}</p>
+                </div>
+                <div className="flex items-center gap-3">
+                  <div className="text-right">
+                    <div className="text-sm font-bold text-white">{money(paymentAmountTotal)}</div>
+                    <div className="text-xs text-neutral-300">{isFullPayment ? "Pay now" : "Downpayment"}</div>
+                  </div>
+                  <button type="button" onClick={() => setSummaryOpen((s) => !s)} className="rounded-full border border-katana-border bg-katana-surface px-3 py-2 text-sm font-semibold">
+                    {summaryOpen ? "Close" : "View"}
+                  </button>
+                </div>
+              </div>
+              {summaryOpen ? (
+                <div className="border-t border-katana-border px-4 py-4">
+                  <div className="space-y-3 text-sm text-neutral-300">
+                    <div className="flex items-center justify-between">
+                      <span>Stations</span>
+                      <span className="font-semibold text-white">{form.station_types.map((id) => stations.find((s) => s.id === id)?.name).filter(Boolean).join(", ") || "-"}</span>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span>Option</span>
+                      <span className="font-semibold text-white">{selectedPackage?.description ?? selectedPackage?.name ?? "-"}</span>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span>Subtotal</span>
+                      <span>{money(subtotalTotal)}</span>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span>Tax (12%)</span>
+                      <span>{money(taxTotal)}</span>
+                    </div>
+                    <div className="flex items-center justify-between text-base font-bold text-white">
+                      <span>Total</span>
+                      <span>{money(totalPriceTotal)}</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <button type="button" onClick={() => { setStep(3); setSummaryOpen(false); }} className="customer-btn-primary w-full">Proceed to payment</button>
+                    </div>
+                  </div>
+                </div>
+              ) : null}
+            </div>
+          </div>
+        </div>
       </section>
     </main>
   );
