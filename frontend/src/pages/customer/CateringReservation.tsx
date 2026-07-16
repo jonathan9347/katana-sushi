@@ -96,7 +96,7 @@ export default function CateringReservation() {
     event_date: string;
     venue_address: string;
     station_types: string[];
-    package_id: string;
+    package_by_station: { [stationId: string]: string };
     customer_name: string;
     customer_phone: string;
     customer_email: string;
@@ -108,7 +108,7 @@ export default function CateringReservation() {
     event_date: today(),
     venue_address: "",
     station_types: ["sushi_station"],
-    package_id: "",
+    package_by_station: {},
     customer_name: "",
     customer_phone: "",
     customer_email: "",
@@ -129,20 +129,44 @@ export default function CateringReservation() {
   });
 
   const packages = packagesQuery.data ?? [];
-  const stationPackages = packages.filter((item) => form.station_types.includes(getStationType(item)));
-  const selectedPackage = stationPackages.find((item) => item.id === form.package_id) ?? stationPackages[0];
+  const packagesByStation = useMemo(() => {
+    const map: { [k: string]: CateringPackage[] } = {};
+    stations.forEach((s) => {
+      map[s.id] = packages.filter((item) => getStationType(item) === s.id);
+    });
+    return map;
+  }, [packages]);
+
+  const selectedPackageByStation: { [k: string]: CateringPackage | undefined } = {};
+  stations.forEach((s) => {
+    const pkgId = form.package_by_station[s.id];
+    selectedPackageByStation[s.id] = (packagesByStation[s.id] ?? []).find((p) => p.id === pkgId) ?? (packagesByStation[s.id] ?? [])[0];
+  });
 
   useEffect(() => {
-    if (stationPackages.length > 0 && !stationPackages.some((item) => item.id === form.package_id)) {
-      setField("package_id", stationPackages[0].id);
-    }
-  }, [stationPackages, form.package_id]);
+    // ensure a default package is selected for each selected station
+    stations.forEach((s) => {
+      if (form.station_types.includes(s.id) && !form.package_by_station[s.id]) {
+        const firstPkg = (packagesByStation[s.id] ?? [])[0];
+        if (firstPkg) {
+          setForm((curr) => ({ ...curr, package_by_station: { ...curr.package_by_station, [s.id]: firstPkg.id } }));
+        }
+      }
+    });
+  }, [packagesByStation, form.station_types]);
 
   useEffect(() => {
     window.scrollTo({ top: 0, behavior: "smooth" });
   }, [step]);
-  const headcountNumber = selectedPackage?.minPax ?? 10;
-  const subtotal = getPackagePrice(selectedPackage);
+
+  const headcountNumber = selectedPackageByStation[form.station_types[0]]?.minPax ?? 10;
+  const subtotal = useMemo(() => {
+    return stations.reduce((sum, s) => {
+      if (!form.station_types.includes(s.id)) return sum;
+      const pkg = selectedPackageByStation[s.id];
+      return sum + getPackagePrice(pkg);
+    }, 0);
+  }, [form.station_types, packagesByStation, JSON.stringify(form.package_by_station)]);
   const tax = Number((subtotal * 0.12).toFixed(2));
   const totalPrice = Number((subtotal + tax).toFixed(2));
   const isFullPayment = form.payment_plan === "full_payment";
@@ -171,7 +195,7 @@ export default function CateringReservation() {
   }
 
   function canProceedToStep3() {
-    return Boolean(selectedPackage) && form.station_types.length > 0;
+    return form.station_types.length > 0 && form.station_types.every((sid) => Boolean(form.package_by_station[sid]));
   }
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
@@ -192,20 +216,23 @@ export default function CateringReservation() {
       return;
     }
 
-    if (!selectedPackage) {
-      setNotice("Please select a catering package.");
+    // ensure packages selected for all chosen stations
+    const missing = form.station_types.find((sid) => !form.package_by_station[sid]);
+    if (missing) {
+      setNotice("Please select a package for each chosen station.");
       setIsProcessingPayment(false);
       return;
     }
 
     try {
       const reservationReference = buildReservationReference("CAT");
+      const description = form.station_types.map((sid) => selectedPackageByStation[sid]?.name ?? sid).join(" + ");
       const paymentIntent = await createPaymentIntent({
         amount: paymentAmountTotal,
         paymentMethod: form.payment_method,
         bookingId: reservationReference,
         reservationType: "catering",
-        description: `Catering reservation deposit for ${selectedPackage?.name ?? "selected package"}`
+        description: `Catering reservation deposit for ${description}`
       });
 
       if (!paymentIntent.success) {
@@ -236,7 +263,7 @@ export default function CateringReservation() {
           event_date: form.event_date,
           headcount: headcountNumber,
           venue_address: form.venue_address,
-          package_id: selectedPackage.id,
+          package_id: form.package_by_station[form.station_types[0]] ?? "",
           payment_method: form.payment_method,
           payment_plan: form.payment_plan,
           payment_transaction_id: verification.transactionId,
@@ -361,74 +388,91 @@ export default function CateringReservation() {
             <>
             <div>
               <h3 className="text-xs font-bold uppercase tracking-[0.18em] text-katana-muted">Choose a station</h3>
-              <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-3 md:gap-2 md:mt-4">
+              <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-3 md:gap-4 md:mt-4">
                 {stations.map((station) => {
                   const isSelected = form.station_types.includes(station.id);
+                  const selectedPkg = selectedPackageByStation[station.id];
+                  const options = packagesByStation[station.id] ?? [];
 
                   return (
-                    <button
-                      type="button"
-                      key={station.id}
-                      onClick={() => {
-                        if (isSelected) {
-                          setField("station_types", form.station_types.filter((s) => s !== station.id));
-                        } else {
-                          setField("station_types", [...form.station_types, station.id]);
-                        }
-                      }}
-                      className={`flex items-center gap-3 min-h-20 rounded-2xl border p-3 text-left transition ${isSelected ? "border-katana-red bg-katana-red/10 shadow-sm" : "border-katana-border bg-katana-elevated hover:border-katana-red/40"}`}
-                    >
-                      {station.image ? (
-                        <img src={station.image} alt={station.name} className="h-14 w-14 rounded-lg object-cover" />
-                      ) : (
-                        <div className="h-14 w-14 rounded-lg bg-katana-elevated" />
-                      )}
-                      <div>
-                        <p className="text-sm font-bold text-white md:text-base">{station.name}</p>
-                        <p className="mt-1 text-xs text-neutral-300 md:text-sm">{station.summary}</p>
+                    <div key={station.id} className={`rounded-2xl border p-3 transition ${isSelected ? "border-katana-red bg-katana-red/6 shadow-sm" : "border-katana-border bg-katana-elevated hover:border-katana-red/40"}`}>
+                      <div className="flex items-start gap-3">
+                        {station.image ? (
+                          <img src={station.image} alt={station.name} className="h-14 w-14 rounded-lg object-cover" />
+                        ) : (
+                          <div className="h-14 w-14 rounded-lg bg-katana-elevated" />
+                        )}
+                        <div className="flex-1">
+                          <div className="flex items-center justify-between gap-3">
+                            <div>
+                              <p className="text-sm font-bold text-white md:text-base">{station.name}</p>
+                              <p className="mt-1 text-xs text-neutral-300 md:text-sm">{station.summary}</p>
+                            </div>
+                            <div className="ml-2 text-right">
+                              <p className="text-sm font-semibold text-katana-red">{selectedPkg ? getPackagePriceLabel(selectedPkg) : ""}</p>
+                            </div>
+                          </div>
+                          <div className="mt-3 flex items-center gap-3">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                if (isSelected) {
+                                  setField("station_types", form.station_types.filter((s) => s !== station.id));
+                                } else {
+                                  setField("station_types", [...form.station_types, station.id]);
+                                }
+                              }}
+                              className={`rounded-full px-3 py-2 text-xs font-semibold ${isSelected ? "bg-katana-red text-white" : "bg-katana-surface text-neutral-300 border border-katana-border"}`}
+                            >
+                              {isSelected ? "Selected" : "Select"}
+                            </button>
+                            {isSelected ? (
+                              <details className="ml-auto rounded-lg" open>
+                                <summary className="cursor-pointer text-sm font-semibold text-white">Choose an option</summary>
+                                <div className="mt-3 grid gap-2">
+                                  {options.map((item) => (
+                                    <button
+                                      key={item.id}
+                                      type="button"
+                                      onClick={() => setForm((curr) => ({ ...curr, package_by_station: { ...curr.package_by_station, [station.id]: item.id } }))}
+                                      className={`rounded-2xl border p-3 text-left transition ${selectedPkg?.id === item.id ? "border-katana-red bg-katana-red/10 shadow-sm" : "border-katana-border bg-katana-elevated hover:border-katana-red/40"}`}
+                                    >
+                                      <div className="flex items-center justify-between gap-3">
+                                        <div>
+                                          <p className="text-sm font-bold text-white md:text-base">{item.description ?? item.name}</p>
+                                          <p className="mt-1 text-xs uppercase tracking-wide text-katana-muted">{item.minPax}-{item.maxPax} pax</p>
+                                        </div>
+                                        <p className="text-right text-sm font-bold text-katana-red">{getPackagePriceLabel(item)}</p>
+                                      </div>
+                                    </button>
+                                  ))}
+                                  {options.length === 0 && (
+                                    <p className="rounded-2xl border border-katana-border bg-katana-elevated p-4 text-sm text-neutral-300">Loading station options...</p>
+                                  )}
+                                </div>
+                              </details>
+                            ) : null}
+                          </div>
+
+                          {isSelected && station.id === "sushi_station" && selectedPkg?.items?.inclusions?.length ? (
+                            <details className="mt-3 rounded-xl border border-katana-border bg-katana-elevated text-sm text-neutral-300">
+                              <summary className="cursor-pointer px-4 py-3 font-bold text-white">Sushi station products</summary>
+                              <div className="grid gap-2 border-t border-katana-border px-4 py-3 sm:grid-cols-2">
+                                {selectedPkg.items.inclusions.map((inclusion) => (
+                                  <p key={typeof inclusion === "string" ? inclusion : inclusion.name}>
+                                    {typeof inclusion === "string" ? inclusion : inclusion.name}
+                                  </p>
+                                ))}
+                              </div>
+                            </details>
+                          ) : null}
+                        </div>
                       </div>
-                    </button>
+                    </div>
                   );
                 })}
               </div>
             </div>
-
-            <div>
-              <h3 className="text-xs font-bold uppercase tracking-[0.18em] text-katana-muted">Choose an option</h3>
-              <div className="mt-3 grid gap-2 sm:grid-cols-2 md:mt-4">
-                {stationPackages.map((item) => (
-                  <button
-                    type="button"
-                    key={item.id}
-                    onClick={() => setField("package_id", item.id)}
-                    className={`rounded-2xl border p-3 text-left transition ${selectedPackage?.id === item.id ? "border-katana-red bg-katana-red/10 shadow-sm" : "border-katana-border bg-katana-elevated hover:border-katana-red/40"}`}
-                  >
-                    <div className="flex items-center justify-between gap-3">
-                      <div>
-                        <p className="text-sm font-bold text-white md:text-base">{item.description ?? item.name}</p>
-                        <p className="mt-1 text-xs uppercase tracking-wide text-katana-muted">{item.minPax}-{item.maxPax} pax</p>
-                      </div>
-                      <p className="text-right text-sm font-bold text-katana-red">{getPackagePriceLabel(item)}</p>
-                    </div>
-                  </button>
-                ))}
-                {stationPackages.length === 0 && (
-                  <p className="rounded-2xl border border-katana-border bg-katana-elevated p-4 text-sm text-neutral-300">Loading station options...</p>
-                )}
-              </div>
-            </div>
-            {form.station_types.includes("sushi_station") && selectedPackage?.items?.inclusions?.length ? (
-              <details className="rounded-xl border border-katana-border bg-katana-elevated text-sm text-neutral-300">
-                <summary className="cursor-pointer px-4 py-3 font-bold text-white">Sushi station products</summary>
-                <div className="grid gap-2 border-t border-katana-border px-4 py-3 sm:grid-cols-2">
-                  {selectedPackage.items.inclusions.map((inclusion) => (
-                    <p key={typeof inclusion === "string" ? inclusion : inclusion.name}>
-                      {typeof inclusion === "string" ? inclusion : inclusion.name}
-                    </p>
-                  ))}
-                </div>
-              </details>
-            ) : null}
             </>
             )}
 
@@ -448,7 +492,7 @@ export default function CateringReservation() {
                 </div>
                 <div className="flex items-center justify-between">
                   <span>Option</span>
-                  <span className="font-semibold text-white">{selectedPackage?.description ?? selectedPackage?.name ?? "-"}</span>
+                  <span className="font-semibold text-white">{form.station_types.map((id) => selectedPackageByStation[id]?.description ?? selectedPackageByStation[id]?.name).filter(Boolean).join(", ") || "-"}</span>
                 </div>
                 <div className="flex items-center justify-between">
                   <span>Headcount</span>
@@ -547,51 +591,21 @@ export default function CateringReservation() {
             </>
             )}
 
-            <div className="flex flex-col gap-3 sm:flex-row sm:justify-between">
-              <button
-                type="button"
-                onClick={() => setStep((current) => Math.max(1, current - 1))}
-                className="customer-btn-secondary"
-                disabled={step === 1}
-              >
-                Back
-              </button>
-              {step < 3 ? (
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (step === 1 && !canProceedToStep2()) {
-                      setNotice("Please complete your basic information and venue address before continuing.");
-                      return;
-                    }
-
-                    if (step === 2 && !canProceedToStep3()) {
-                      setNotice("Please select a catering package.");
-                      return;
-                    }
-
-                    setNotice("");
-                    setStep((current) => current + 1);
-                  }}
-                  className="customer-btn-primary"
-                >
-                  Next
-                </button>
-              ) : null}
-            </div>
+            <div />
             {notice && <p className="rounded-md bg-red-50 px-3 py-2 text-sm font-medium text-katana-red">{notice}</p>}
           </div>
         </form>
       </div>
 
-        {/* Floating collapsible summary card */}
-        <div className="fixed bottom-4 left-4 right-4 z-40 md:right-6 md:left-auto md:w-96 md:bottom-6">
+        {/* Floating collapsible summary card (step 2 only) */}
+        {step === 2 ? (
+          <div className="fixed bottom-4 left-4 right-4 z-40 md:right-6 md:left-auto md:w-96 md:bottom-6">
           <div className="mx-auto md:ml-auto">
-            <div className={`rounded-xl border border-katana-border bg-katana-elevated shadow-lg transition-all ${summaryOpen ? "max-h-[36rem]" : "max-h-14 overflow-hidden"}`}>
+              <div className={`rounded-xl border border-katana-border bg-katana-elevated shadow-lg transition-all ${summaryOpen ? "max-h-[36rem]" : "max-h-14 overflow-hidden"}`}>
               <div className="flex items-center justify-between px-4 py-3">
                 <div>
                   <p className="text-sm font-semibold text-white">Your package summary</p>
-                  <p className="text-xs text-neutral-300">{stationCount} station{stationCount > 1 ? "s" : ""} selected • {selectedPackage?.description ?? selectedPackage?.name ?? "No option"}</p>
+                  <p className="text-xs text-neutral-300 whitespace-normal">{stationCount} station{stationCount > 1 ? "s" : ""} selected • {form.station_types.map((id) => selectedPackageByStation[id]?.description ?? selectedPackageByStation[id]?.name).filter(Boolean).join(", ") || "No option"}</p>
                 </div>
                 <div className="flex items-center gap-3">
                   <div className="text-right">
@@ -612,7 +626,7 @@ export default function CateringReservation() {
                     </div>
                     <div className="flex items-center justify-between">
                       <span>Option</span>
-                      <span className="font-semibold text-white">{selectedPackage?.description ?? selectedPackage?.name ?? "-"}</span>
+                      <span className="font-semibold text-white">{form.station_types.map((id) => selectedPackageByStation[id]?.description ?? selectedPackageByStation[id]?.name).filter(Boolean).join(", ") || "-"}</span>
                     </div>
                     <div className="flex items-center justify-between">
                       <span>Subtotal</span>
@@ -626,15 +640,34 @@ export default function CateringReservation() {
                       <span>Total</span>
                       <span>{money(totalPriceTotal)}</span>
                     </div>
-                    <div className="flex items-center gap-2">
+                    <div className="grid gap-2">
                       <button type="button" onClick={() => { setStep(3); setSummaryOpen(false); }} className="customer-btn-primary w-full">Proceed to payment</button>
+                      <div className="flex gap-2">
+                        <button type="button" onClick={() => setStep((c) => Math.max(1, c - 1))} className="customer-btn-secondary w-full">Back</button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (!canProceedToStep3()) {
+                              setNotice("Please select a package for each chosen station.");
+                              return;
+                            }
+                            setNotice("");
+                            setStep(3);
+                            setSummaryOpen(false);
+                          }}
+                          className="customer-btn-primary w-full"
+                        >
+                          Next
+                        </button>
+                      </div>
                     </div>
                   </div>
                 </div>
               ) : null}
+              </div>
             </div>
           </div>
-        </div>
+        ) : null}
       </section>
     </main>
   );
