@@ -169,7 +169,7 @@
 .customer-app [class*="bg-katana-elevated"] { background-color: var(--customer-surface-2) !important; }
 
 /* Force white text and SVGs inside the experience image overlay (override theme rules) */
-.experience-image .text-white,
+.experience-image [class*="text-white"],
 .experience-image .experience-overlay-text,
 .experience-image svg {
   color: #ffffff !important;
