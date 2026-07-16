@@ -591,7 +591,35 @@ export default function CateringReservation() {
             </>
             )}
 
-            <div />
+            {step !== 2 && (
+            <div className="flex flex-col gap-3 sm:flex-row sm:justify-between">
+              <button
+                type="button"
+                onClick={() => setStep((current) => Math.max(1, current - 1))}
+                className="customer-btn-secondary"
+                disabled={step === 1}
+              >
+                Back
+              </button>
+              {step < 3 ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (step === 1 && !canProceedToStep2()) {
+                      setNotice("Please complete your basic information and venue address before continuing.");
+                      return;
+                    }
+
+                    setNotice("");
+                    setStep((current) => current + 1);
+                  }}
+                  className="customer-btn-primary"
+                >
+                  Next
+                </button>
+              ) : null}
+            </div>
+            )}
             {notice && <p className="rounded-md bg-red-50 px-3 py-2 text-sm font-medium text-katana-red">{notice}</p>}
           </div>
         </form>
