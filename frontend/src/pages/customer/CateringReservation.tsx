@@ -486,49 +486,49 @@ export default function CateringReservation() {
                 </div>
               </div>
               <div className="mt-4 space-y-3 text-sm text-neutral-300">
-                <div className="grid grid-cols-[minmax(0,5rem)_minmax(0,1fr)] items-start gap-3 sm:grid-cols-[minmax(0,6rem)_minmax(0,1fr)]">
-                  <span>Basic info</span>
-                  <span className="break-words text-left font-semibold text-white sm:text-right">{form.customer_name || "-"}</span>
+                <div className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-3">
+                  <span className="text-left">Basic info</span>
+                  <span className="break-words text-right font-semibold text-white">{form.customer_name || "-"}</span>
                 </div>
-                <div className="grid grid-cols-[minmax(0,5rem)_minmax(0,1fr)] items-start gap-3 sm:grid-cols-[minmax(0,6rem)_minmax(0,1fr)]">
-                  <span>Phone</span>
-                  <span className="break-words text-left font-semibold text-white sm:text-right">{form.customer_phone || "-"}</span>
+                <div className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-3">
+                  <span className="text-left">Phone</span>
+                  <span className="break-words text-right font-semibold text-white">{form.customer_phone || "-"}</span>
                 </div>
-                <div className="grid grid-cols-[minmax(0,5rem)_minmax(0,1fr)] items-start gap-3 sm:grid-cols-[minmax(0,6rem)_minmax(0,1fr)]">
-                  <span>Venue</span>
-                  <span className="break-words text-left font-semibold text-white sm:text-right">{form.venue_address || "-"}</span>
+                <div className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-3">
+                  <span className="text-left">Venue</span>
+                  <span className="break-words text-right font-semibold text-white">{form.venue_address || "-"}</span>
                 </div>
-                <div className="grid grid-cols-[minmax(0,5rem)_minmax(0,1fr)] items-start gap-3 sm:grid-cols-[minmax(0,6rem)_minmax(0,1fr)]">
-                  <span>Station</span>
-                  <span className="break-words text-left font-semibold text-white sm:text-right">{form.station_types.map((id) => stations.find((s) => s.id === id)?.name).filter(Boolean).join(", ") || "-"}</span>
+                <div className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-3">
+                  <span className="text-left">Station</span>
+                  <span className="break-words text-right font-semibold text-white">{form.station_types.map((id) => stations.find((s) => s.id === id)?.name).filter(Boolean).join(", ") || "-"}</span>
                 </div>
-                <div className="grid grid-cols-[minmax(0,5rem)_minmax(0,1fr)] items-start gap-3 sm:grid-cols-[minmax(0,6rem)_minmax(0,1fr)]">
-                  <span>Option</span>
-                  <span className="break-words text-left font-semibold text-white sm:text-right">{form.station_types.map((id) => selectedPackageByStation[id]?.description ?? selectedPackageByStation[id]?.name).filter(Boolean).join(", ") || "-"}</span>
+                <div className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-3">
+                  <span className="text-left">Option</span>
+                  <span className="break-words text-right font-semibold text-white">{form.station_types.map((id) => selectedPackageByStation[id]?.description ?? selectedPackageByStation[id]?.name).filter(Boolean).join(", ") || "-"}</span>
                 </div>
-                <div className="grid grid-cols-[minmax(0,5rem)_minmax(0,1fr)] items-center gap-3 sm:grid-cols-[minmax(0,6rem)_minmax(0,1fr)]">
-                  <span>Headcount</span>
-                  <span className="text-left sm:text-right">{headcountNumber} pax</span>
+                <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3">
+                  <span className="text-left">Headcount</span>
+                  <span className="text-right">{headcountNumber} pax</span>
                 </div>
-                <div className="grid grid-cols-[minmax(0,5rem)_minmax(0,1fr)] items-center gap-3 sm:grid-cols-[minmax(0,6rem)_minmax(0,1fr)]">
-                    <span>Subtotal</span>
-                    <span className="text-left sm:text-right">{money(subtotalTotal)}</span>
+                <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3">
+                    <span className="text-left">Subtotal</span>
+                    <span className="text-right">{money(subtotalTotal)}</span>
                 </div>
-                  <div className="grid grid-cols-[minmax(0,5rem)_minmax(0,1fr)] items-center gap-3 sm:grid-cols-[minmax(0,6rem)_minmax(0,1fr)]">
-                    <span>Tax (12%)</span>
-                    <span className="text-left sm:text-right">{money(taxTotal)}</span>
+                  <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3">
+                    <span className="text-left">Tax (12%)</span>
+                    <span className="text-right">{money(taxTotal)}</span>
                 </div>
-                  <div className="grid grid-cols-[minmax(0,5rem)_minmax(0,1fr)] items-center gap-3 sm:grid-cols-[minmax(0,6rem)_minmax(0,1fr)] text-base font-bold text-white">
-                    <span>Total</span>
-                    <span className="text-left sm:text-right">{money(totalPriceTotal)}</span>
+                  <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 text-base font-bold text-white">
+                    <span className="text-left">Total</span>
+                    <span className="text-right">{money(totalPriceTotal)}</span>
                 </div>
-                  <div className="grid grid-cols-[minmax(0,5rem)_minmax(0,1fr)] items-center gap-3 sm:grid-cols-[minmax(0,6rem)_minmax(0,1fr)] text-sm text-neutral-300">
-                    <span>{isFullPayment ? "Amount now" : "Downpayment (50%)"}</span>
-                    <span className="text-left sm:text-right">{money(paymentAmountTotal)}</span>
+                  <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 text-sm text-neutral-300">
+                    <span className="text-left">{isFullPayment ? "Amount now" : "Downpayment (50%)"}</span>
+                    <span className="text-right">{money(paymentAmountTotal)}</span>
                 </div>
-                  <div className="grid grid-cols-[minmax(0,5rem)_minmax(0,1fr)] items-center gap-3 sm:grid-cols-[minmax(0,6rem)_minmax(0,1fr)] text-sm text-neutral-300">
-                    <span>{isFullPayment ? "Remaining balance" : "Remaining balance"}</span>
-                    <span className="text-left sm:text-right">{money(remainingTotal)}</span>
+                  <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 text-sm text-neutral-300">
+                    <span className="text-left">{isFullPayment ? "Remaining balance" : "Remaining balance"}</span>
+                    <span className="text-right">{money(remainingTotal)}</span>
                 </div>
               </div>
             </div>
