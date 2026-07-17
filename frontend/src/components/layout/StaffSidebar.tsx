@@ -65,6 +65,8 @@ export default function StaffSidebar() {
   const role = (localStorage.getItem("katana_role") ?? "staff").toLowerCase();
   const user = getStoredUser();
   const visibleItems = menuItems.filter((item) => canSee(item, role));
+  const topItems = visibleItems.filter((item) => item.label !== "Settings");
+  const bottomItems = visibleItems.filter((item) => item.label === "Settings");
 
   function logout() {
     localStorage.removeItem("katana_token");
@@ -75,14 +77,14 @@ export default function StaffSidebar() {
 
   return (
     <>
-      <aside className="hidden md:block">
-        <div className="flex min-h-screen flex-col justify-between rounded-[2rem] border border-slate-200 bg-white p-4 shadow-sm">
-          <div className="space-y-4">
-            <div className="rounded-3xl border border-slate-200 bg-slate-50 p-3 text-center text-sm font-semibold text-slate-700">
+      <aside className="fixed left-4 top-1/2 z-40 hidden -translate-y-1/2 rounded-[2rem] border border-slate-200 bg-white/90 p-4 shadow-2xl backdrop-blur-md md:block">
+        <div className="flex min-h-[420px] w-20 flex-col justify-between">
+          <div className="space-y-3">
+            <div className="flex h-14 items-center justify-center rounded-3xl border border-slate-200 bg-slate-50 text-center text-sm font-semibold text-slate-700">
               Staff
             </div>
             <nav className="space-y-2">
-              {visibleItems.map((item) => {
+              {topItems.map((item) => {
                 const Icon = item.icon;
 
                 return (
@@ -95,28 +97,41 @@ export default function StaffSidebar() {
             </nav>
           </div>
 
-          <div className="relative">
-            <button onClick={() => setProfileOpen((current) => !current)} className="group relative flex h-12 w-full items-center justify-center rounded-md text-slate-600 transition hover:bg-slate-100 hover:text-slate-950">
-              <User className="h-6 w-6" />
-              <span className={tooltipClass()}>Profile</span>
-            </button>
-            {profileOpen && (
-              <div className="absolute left-full bottom-0 ml-3 w-56 rounded-lg border border-slate-200 bg-white p-2 shadow-xl">
-                <div className="border-b border-slate-200 px-3 py-2">
-                  <p className="truncate text-sm font-black text-slate-950">{user.name ?? "Staff User"}</p>
-                  <p className="truncate text-xs text-slate-500">{role.replace("_", " ")}</p>
+          <div className="space-y-2">
+            {bottomItems.map((item) => {
+              const Icon = item.icon;
+
+              return (
+                <NavLink key={item.to} to={item.to} className={({ isActive }) => iconClass(isActive)}>
+                  <Icon className="h-6 w-6" />
+                  <span className={tooltipClass()}>{item.label}</span>
+                </NavLink>
+              );
+            })}
+
+            <div className="relative w-full">
+              <button onClick={() => setProfileOpen((current) => !current)} className="group relative flex h-12 w-full items-center justify-center rounded-md text-slate-600 transition hover:bg-slate-100 hover:text-slate-950">
+                <User className="h-6 w-6" />
+                <span className={tooltipClass()}>Profile</span>
+              </button>
+              {profileOpen && (
+                <div className="absolute left-full bottom-0 ml-3 w-56 rounded-lg border border-slate-200 bg-white p-2 shadow-xl">
+                  <div className="border-b border-slate-200 px-3 py-2">
+                    <p className="truncate text-sm font-black text-slate-950">{user.name ?? "Staff User"}</p>
+                    <p className="truncate text-xs text-slate-500">{role.replace("_", " ")}</p>
+                  </div>
+                  <button className="mt-2 flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm font-semibold text-slate-700 hover:bg-slate-100">
+                    <User className="h-4 w-4" /> My Profile
+                  </button>
+                  <button className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm font-semibold text-slate-700 hover:bg-slate-100">
+                    <Shield className="h-4 w-4" /> Change Password
+                  </button>
+                  <button onClick={logout} className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm font-semibold text-red-700 hover:bg-red-50">
+                    <LogOut className="h-4 w-4" /> Logout
+                  </button>
                 </div>
-                <button className="mt-2 flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm font-semibold text-slate-700 hover:bg-slate-100">
-                  <User className="h-4 w-4" /> My Profile
-                </button>
-                <button className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm font-semibold text-slate-700 hover:bg-slate-100">
-                  <Shield className="h-4 w-4" /> Change Password
-                </button>
-                <button onClick={logout} className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm font-semibold text-red-700 hover:bg-red-50">
-                  <LogOut className="h-4 w-4" /> Logout
-                </button>
-              </div>
-            )}
+              )}
+            </div>
           </div>
         </div>
       </aside>
