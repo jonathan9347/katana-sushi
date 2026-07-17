@@ -8,7 +8,6 @@ import bcrypt from "bcrypt";
 import fs from "fs";
 import path from "path";
 import multer from "multer";
-import { createClient, SupabaseClient } from "@supabase/supabase-js";
 import { Prisma, PrismaClient } from "@prisma/client";
 import { z } from "zod";
 import { NotificationService } from "./services/notification.service";
@@ -27,9 +26,27 @@ const supabaseUrl = process.env.SUPABASE_URL?.trim();
 const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY?.trim();
 const supabaseStorageBucket = process.env.SUPABASE_STORAGE_BUCKET?.trim();
 
-const supabase: SupabaseClient | null =
-  supabaseUrl && supabaseServiceRoleKey ? createClient(supabaseUrl, supabaseServiceRoleKey) : null;
-const useSupabaseStorage = Boolean(supabase && supabaseStorageBucket);
+let supabase: any = null;
+let useSupabaseStorage = false;
+
+async function initSupabase() {
+  if (!supabaseUrl || !supabaseServiceRoleKey || !supabaseStorageBucket) {
+    return;
+  }
+
+  try {
+    const { createClient } = await import("@supabase/supabase-js");
+    supabase = createClient(supabaseUrl, supabaseServiceRoleKey);
+    useSupabaseStorage = Boolean(supabase);
+  } catch {
+    supabase = null;
+    useSupabaseStorage = false;
+  }
+}
+
+initSupabase().catch((error) => {
+  console.error("Failed to initialize Supabase client:", error);
+});
 
 export const prisma = new PrismaClient();
 const app = express();
@@ -107,6 +124,36 @@ function getMimeTypeFromPath(filePath: string) {
   }
 }
 
+function getExtensionFromMimeType(mimeType: string) {
+  switch (mimeType.toLowerCase()) {
+    case "image/jpeg":
+      return "jpg";
+    case "image/png":
+      return "png";
+    case "image/gif":
+      return "gif";
+    case "image/webp":
+      return "webp";
+    case "image/svg+xml":
+      return "svg";
+    default:
+      return "bin";
+  }
+}
+
+function parseDataUrl(dataUrl: string) {
+  const match = dataUrl.match(/^data:(image\/[a-zA-Z+.-]+);base64,(.+)$/);
+
+  if (!match) {
+    return null;
+  }
+
+  return {
+    mimeType: match[1],
+    buffer: Buffer.from(match[2], "base64")
+  };
+}
+
 function getPersistableImageValue(imageUrl?: string | null) {
   if (!imageUrl) {
     return null;
@@ -146,22 +193,96 @@ async function uploadFileToSupabase(filePath: string, storagePath: string) {
   return publicUrlData.data.publicUrl;
 }
 
-async function normalizeProductImage(product: { id: string; image_url: string | null }) {
-  const normalizedValue = getPersistableImageValue(product.image_url);
-
-  if (normalizedValue && normalizedValue !== product.image_url) {
-    await prisma.sellingProduct.update({
-      where: { id: product.id },
-      data: { image_url: normalizedValue }
-    });
+async function persistDataUrlImage(productId: string, imageUrl: string) {
+  const parsed = parseDataUrl(imageUrl);
+  if (!parsed) {
+    return null;
   }
 
-  return normalizedValue ?? product.image_url ?? null;
+  const extension = getExtensionFromMimeType(parsed.mimeType);
+  const filename = `${productId}-${Date.now()}.${extension}`;
+  const storagePath = `products/${filename}`;
+
+  if (useSupabaseStorage && supabase && supabaseStorageBucket) {
+    const { error: uploadError } = await supabase.storage.from(supabaseStorageBucket).upload(storagePath, parsed.buffer, {
+      contentType: parsed.mimeType,
+      cacheControl: "public, max-age=2592000, immutable"
+    });
+
+    if (uploadError) {
+      throw uploadError;
+    }
+
+    const publicUrlData = supabase.storage.from(supabaseStorageBucket).getPublicUrl(storagePath);
+
+    if (!publicUrlData.data?.publicUrl) {
+      throw new Error("Failed to get Supabase public URL");
+    }
+
+    return publicUrlData.data.publicUrl;
+  }
+
+  const localFilename = `${Date.now()}-${Math.round(Math.random() * 1e9)}-${filename}`;
+  const localPath = path.join(uploadDir, localFilename);
+  fs.writeFileSync(localPath, parsed.buffer);
+  return `/uploads/products/${localFilename}`;
+}
+
+async function normalizeProductImage(product: { id: string; image_url: string | null }) {
+  const imageUrl = product.image_url;
+
+  if (!imageUrl) {
+    return null;
+  }
+
+  if (imageUrl.startsWith("data:")) {
+    const persistedUrl = await persistDataUrlImage(product.id, imageUrl);
+
+    if (persistedUrl && persistedUrl !== imageUrl) {
+      await prisma.sellingProduct.update({
+        where: { id: product.id },
+        data: { image_url: persistedUrl }
+      });
+    }
+
+    return persistedUrl ?? imageUrl;
+  }
+
+  if (imageUrl.startsWith("/uploads/") && useSupabaseStorage && supabase && supabaseStorageBucket) {
+    const localPath = path.join(__dirname, "..", imageUrl.replace(/^\/+/, ""));
+
+    if (fs.existsSync(localPath)) {
+      const storagePath = imageUrl.replace(/^\/uploads\/?/, "");
+      const publicUrl = await uploadFileToSupabase(localPath, storagePath);
+
+      if (publicUrl && publicUrl !== imageUrl) {
+        await prisma.sellingProduct.update({
+          where: { id: product.id },
+          data: { image_url: publicUrl }
+        });
+
+        return publicUrl;
+      }
+    }
+  }
+
+  return imageUrl;
 }
 
 async function backfillPersistedProductImages() {
+  const whereClause: any = { is_deleted: false };
+
+  if (useSupabaseStorage) {
+    whereClause.OR = [
+      { image_url: { startsWith: "/uploads/products/" } },
+      { image_url: { startsWith: "data:" } }
+    ];
+  } else {
+    whereClause.image_url = { startsWith: "data:" };
+  }
+
   const products = await prisma.sellingProduct.findMany({
-    where: { is_deleted: false, image_url: { startsWith: "/uploads/products/" } },
+    where: whereClause,
     select: { id: true, image_url: true }
   });
 
