@@ -1,4 +1,4 @@
-import { Facebook, Instagram, Linkedin, Mail, Phone } from "lucide-react";
+import { Facebook, Mail, Phone } from "lucide-react";
 import { Link } from "react-router-dom";
 
 export default function Footer() {
@@ -14,14 +14,8 @@ export default function Footer() {
           <div>
             <h4 className="mb-3 font-semibold text-[color:var(--customer-text)]">Follow Us</h4>
             <div className="flex items-center gap-3">
-              <a href="https://www.facebook.com/" target="_blank" rel="noreferrer" className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-[var(--customer-surface-2)] text-[color:var(--customer-text)]">
+              <a href="https://www.facebook.com/profile.php?id=61578608710050" target="_blank" rel="noreferrer" className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-[var(--customer-surface-2)] text-[color:var(--customer-text)]">
                 <Facebook className="h-4 w-4" />
-              </a>
-              <a href="#" className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-[var(--customer-surface-2)] text-[color:var(--customer-text)]">
-                <Linkedin className="h-4 w-4" />
-              </a>
-              <a href="#" className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-[var(--customer-surface-2)] text-[color:var(--customer-text)]">
-                <Instagram className="h-4 w-4" />
               </a>
             </div>
             <div className="mt-3 text-sm">

@@ -202,7 +202,7 @@ export default function Home() {
                 className="group customer-card relative overflow-hidden flex h-full flex-col rounded-3xl border border-[color:var(--customer-border)] bg-[linear-gradient(135deg,var(--customer-surface),var(--customer-surface-2))] p-6 text-left shadow-lg shadow-black/10 transition duration-200 hover:-translate-y-1 hover:border-katana-red/40 hover:shadow-[0_18px_45px_rgba(0,0,0,0.12)]"
               >
                 <div className="absolute inset-x-0 top-0 h-2 bg-[#FBC9B3]" />
-                <div className="flex h-12 w-12 items-center justify-center rounded-2xl border border-katana-red/30 bg-katana-red/10 text-katana-red transition group-hover:bg-katana-red group-hover:text-white">
+                <div className="flex h-12 w-12 items-center justify-center rounded-2xl border border-katana-red/30 bg-katana-red/10 text-[color:var(--customer-text)] transition group-hover:bg-[color:rgba(220,38,38,0.14)] group-hover:text-[color:var(--customer-text)]">
                   <Icon className="h-5 w-5" />
                 </div>
                 <h2 className="mt-5 font-display text-2xl font-bold text-[color:var(--customer-text)]">{action.title}</h2>
