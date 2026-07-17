@@ -657,25 +657,25 @@ export default function CateringReservation() {
               {summaryOpen ? (
                 <div className="border-t border-[#e8a978] px-4 py-4">
                   <div className="space-y-3 text-sm text-slate-800">
-                    <div className="flex flex-col gap-1 sm:flex-row sm:items-start sm:justify-between">
-                      <span>Stations</span>
-                      <span className="max-w-full break-words text-right font-semibold text-slate-900">{form.station_types.map((id) => stations.find((s) => s.id === id)?.name).filter(Boolean).join(", ") || "-"}</span>
+                    <div className="grid grid-cols-[minmax(0,5rem)_minmax(0,1fr)] items-start gap-3 sm:grid-cols-[minmax(0,6rem)_minmax(0,1fr)]">
+                      <span className="text-left">Stations</span>
+                      <span className="break-words text-left font-semibold text-slate-900 sm:text-right">{form.station_types.map((id) => stations.find((s) => s.id === id)?.name).filter(Boolean).join(", ") || "-"}</span>
                     </div>
-                    <div className="flex flex-col gap-1 sm:flex-row sm:items-start sm:justify-between">
-                      <span>Option</span>
-                      <span className="max-w-full break-words text-right font-semibold text-slate-900">{form.station_types.map((id) => selectedPackageByStation[id]?.description ?? selectedPackageByStation[id]?.name).filter(Boolean).join(", ") || "-"}</span>
+                    <div className="grid grid-cols-[minmax(0,5rem)_minmax(0,1fr)] items-start gap-3 sm:grid-cols-[minmax(0,6rem)_minmax(0,1fr)]">
+                      <span className="text-left">Option</span>
+                      <span className="break-words text-left font-semibold text-slate-900 sm:text-right">{form.station_types.map((id) => selectedPackageByStation[id]?.description ?? selectedPackageByStation[id]?.name).filter(Boolean).join(", ") || "-"}</span>
                     </div>
-                    <div className="flex items-center justify-between gap-2">
+                    <div className="grid grid-cols-[minmax(0,5rem)_minmax(0,1fr)] items-center gap-3 sm:grid-cols-[minmax(0,6rem)_minmax(0,1fr)]">
                       <span>Subtotal</span>
-                      <span>{money(subtotalTotal)}</span>
+                      <span className="text-left sm:text-right">{money(subtotalTotal)}</span>
                     </div>
-                    <div className="flex items-center justify-between gap-2">
+                    <div className="grid grid-cols-[minmax(0,5rem)_minmax(0,1fr)] items-center gap-3 sm:grid-cols-[minmax(0,6rem)_minmax(0,1fr)]">
                       <span>Tax (12%)</span>
-                      <span>{money(taxTotal)}</span>
+                      <span className="text-left sm:text-right">{money(taxTotal)}</span>
                     </div>
-                    <div className="flex items-center justify-between gap-2 text-base font-bold text-slate-900">
+                    <div className="grid grid-cols-[minmax(0,5rem)_minmax(0,1fr)] items-center gap-3 sm:grid-cols-[minmax(0,6rem)_minmax(0,1fr)] text-base font-bold text-slate-900">
                       <span>Total</span>
-                      <span>{money(totalPriceTotal)}</span>
+                      <span className="text-left sm:text-right">{money(totalPriceTotal)}</span>
                     </div>
                     <div className="grid gap-2">
                       <div className="flex gap-2">
