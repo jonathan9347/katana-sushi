@@ -75,22 +75,27 @@ export default function StaffSidebar() {
 
   return (
     <>
-      <aside className="fixed left-3 top-1/2 z-50 hidden w-[60px] -translate-y-1/2 rounded-md bg-white px-1.5 py-3 shadow-lg ring-1 ring-slate-200 md:block lg:left-3">
-        <nav className="flex flex-col items-center gap-1">
-          {visibleItems.map((item) => {
-            const Icon = item.icon;
+      <aside className="hidden md:block">
+        <div className="flex min-h-screen flex-col justify-between rounded-[2rem] border border-slate-200 bg-white p-4 shadow-sm">
+          <div className="space-y-4">
+            <div className="rounded-3xl border border-slate-200 bg-slate-50 p-3 text-center text-sm font-semibold text-slate-700">
+              Staff
+            </div>
+            <nav className="space-y-2">
+              {visibleItems.map((item) => {
+                const Icon = item.icon;
 
-            return (
-              <NavLink key={item.to} to={item.to} className={({ isActive }) => iconClass(isActive)}>
-                <Icon className="h-6 w-6" />
-                <span className={tooltipClass()}>{item.label}</span>
-              </NavLink>
-            );
-          })}
+                return (
+                  <NavLink key={item.to} to={item.to} className={({ isActive }) => iconClass(isActive)}>
+                    <Icon className="h-6 w-6" />
+                    <span className={tooltipClass()}>{item.label}</span>
+                  </NavLink>
+                );
+              })}
+            </nav>
+          </div>
 
-          <div className="my-1 h-px w-8 bg-slate-200" />
-
-          <div className="relative w-full">
+          <div className="relative">
             <button onClick={() => setProfileOpen((current) => !current)} className="group relative flex h-12 w-full items-center justify-center rounded-md text-slate-600 transition hover:bg-slate-100 hover:text-slate-950">
               <User className="h-6 w-6" />
               <span className={tooltipClass()}>Profile</span>
@@ -113,7 +118,7 @@ export default function StaffSidebar() {
               </div>
             )}
           </div>
-        </nav>
+        </div>
       </aside>
 
       <nav className="fixed bottom-0 left-0 right-0 z-50 grid grid-cols-5 border-t border-slate-200 bg-white px-2 pb-2 pt-2 shadow-[0_-8px_20px_rgba(15,23,42,0.08)] md:hidden">
