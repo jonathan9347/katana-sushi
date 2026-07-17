@@ -320,7 +320,7 @@ export default function CateringReservation() {
   return (
     <main className="px-0 py-0 md:px-4 md:py-10">
       <section className="mx-auto flex min-h-[calc(100vh-4rem)] w-full items-start justify-center md:max-w-6xl md:items-center md:px-6">
-        <div className="w-full md:max-w-4xl">
+        <div className={`w-full md:max-w-4xl ${step === 2 ? "pb-28 md:pb-32" : ""}`}>
           <form onSubmit={handleSubmit} className="overflow-hidden border-0 bg-transparent shadow-none md:rounded-2xl md:border md:border-katana-border md:bg-katana-surface/90 md:shadow-card md:backdrop-blur">
             <div className="border-b border-katana-border px-4 py-5 md:px-6">
               <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
@@ -426,9 +426,9 @@ export default function CateringReservation() {
                           </div>
                           <div className="mt-3 flex items-center gap-3">
                             {isSelected ? (
-                              <details className="ml-auto rounded-lg" open onClick={(e) => e.stopPropagation()}>
+                              <details className="ml-auto w-full rounded-lg" open onClick={(e) => e.stopPropagation()}>
                                 <summary className="cursor-pointer text-sm font-semibold text-white">Choose an option</summary>
-                                <div className="mt-3 grid grid-cols-2 gap-2 md:grid-cols-3">
+                                <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2 md:grid-cols-3">
                                   {options.map((item) => (
                                     <button
                                       key={item.id}
@@ -437,14 +437,14 @@ export default function CateringReservation() {
                                         e.stopPropagation();
                                         setForm((curr) => ({ ...curr, package_by_station: { ...curr.package_by_station, [station.id]: item.id } }));
                                       }}
-                                      className={`rounded-2xl border p-3 text-left transition ${selectedPkg?.id === item.id ? "border-katana-red bg-katana-red/10 shadow-sm" : "border-katana-border bg-katana-elevated hover:border-katana-red/40"}`}
+                                      className={`flex min-h-[96px] flex-col justify-between overflow-hidden rounded-2xl border p-3 text-left transition ${selectedPkg?.id === item.id ? "border-katana-red bg-katana-red/10 shadow-sm" : "border-katana-border bg-katana-elevated hover:border-katana-red/40"}`}
                                     >
-                                      <div className="flex items-center justify-between gap-3">
-                                        <div>
-                                          <p className="text-sm font-bold text-white md:text-base">{item.description ?? item.name}</p>
+                                      <div className="flex min-w-0 flex-1 flex-col justify-between gap-2">
+                                        <div className="min-w-0">
+                                          <p className="break-words text-sm font-bold text-white md:text-base">{item.description ?? item.name}</p>
                                           <p className="mt-1 text-xs uppercase tracking-wide text-katana-muted">{item.minPax}-{item.maxPax} pax</p>
                                         </div>
-                                        <p className="text-right text-sm font-bold text-katana-red">{getPackagePriceLabel(item)}</p>
+                                        <p className="text-sm font-bold text-katana-red">{getPackagePriceLabel(item)}</p>
                                       </div>
                                     </button>
                                   ))}
@@ -630,33 +630,32 @@ export default function CateringReservation() {
         {step === 2 ? (
           <div className="fixed bottom-4 left-4 right-4 z-40 md:right-6 md:left-auto md:w-96 md:bottom-6">
           <div className="mx-auto md:ml-auto">
-              <div className={`rounded-xl border border-katana-border bg-katana-elevated shadow-lg transition-all ${summaryOpen ? "max-h-[36rem]" : "max-h-14 overflow-hidden summary-collapsed"}`}>
-              <div className="h-1 w-full rounded-t-xl bg-katana-red" />
+              <div className={`rounded-xl border border-[#e8a978] bg-[#f7c8a7] shadow-lg transition-all ${summaryOpen ? "max-h-[36rem]" : "max-h-14 overflow-hidden summary-collapsed"}`}>
               <div className="flex items-center justify-between px-4 py-3">
                 <div>
-                  <p className="text-sm font-semibold text-white">Your package summary</p>
-                  <p className="text-xs text-neutral-300 whitespace-normal summary-text">{stationCount} station{stationCount > 1 ? "s" : ""} selected • {form.station_types.map((id) => selectedPackageByStation[id]?.description ?? selectedPackageByStation[id]?.name).filter(Boolean).join(", ") || "No option"}</p>
+                  <p className="text-sm font-semibold text-slate-900">Your package summary</p>
+                  <p className="text-xs whitespace-normal text-slate-700 summary-text">{stationCount} station{stationCount > 1 ? "s" : ""} selected • {form.station_types.map((id) => selectedPackageByStation[id]?.description ?? selectedPackageByStation[id]?.name).filter(Boolean).join(", ") || "No option"}</p>
                 </div>
                 <div className="flex items-center gap-3">
                   <div className="text-right">
-                    <div className="text-sm font-bold text-white">{money(paymentAmountTotal)}</div>
-                    <div className="text-xs text-neutral-300">{isFullPayment ? "Pay now" : "Downpayment"}</div>
+                    <div className="text-sm font-bold text-slate-900">{money(paymentAmountTotal)}</div>
+                    <div className="text-xs text-slate-700">{isFullPayment ? "Pay now" : "Downpayment"}</div>
                   </div>
-                  <button type="button" onClick={() => setSummaryOpen((s) => !s)} className="rounded-full border border-katana-border bg-katana-surface px-3 py-2 text-sm font-semibold">
+                  <button type="button" onClick={() => setSummaryOpen((s) => !s)} className="rounded-full border border-[#d78d57] bg-[#fff2e8] px-3 py-2 text-sm font-semibold text-slate-900">
                     {summaryOpen ? "Close" : "View"}
                   </button>
                 </div>
               </div>
               {summaryOpen ? (
-                <div className="border-t border-katana-border px-4 py-4">
-                  <div className="space-y-3 text-sm text-neutral-300">
+                <div className="border-t border-[#e8a978] px-4 py-4">
+                  <div className="space-y-3 text-sm text-slate-800">
                     <div className="flex items-center justify-between">
                       <span>Stations</span>
-                      <span className="font-semibold text-white">{form.station_types.map((id) => stations.find((s) => s.id === id)?.name).filter(Boolean).join(", ") || "-"}</span>
+                      <span className="font-semibold text-slate-900">{form.station_types.map((id) => stations.find((s) => s.id === id)?.name).filter(Boolean).join(", ") || "-"}</span>
                     </div>
                     <div className="flex items-center justify-between">
                       <span>Option</span>
-                      <span className="font-semibold text-white">{form.station_types.map((id) => selectedPackageByStation[id]?.description ?? selectedPackageByStation[id]?.name).filter(Boolean).join(", ") || "-"}</span>
+                      <span className="font-semibold text-slate-900">{form.station_types.map((id) => selectedPackageByStation[id]?.description ?? selectedPackageByStation[id]?.name).filter(Boolean).join(", ") || "-"}</span>
                     </div>
                     <div className="flex items-center justify-between">
                       <span>Subtotal</span>
@@ -666,7 +665,7 @@ export default function CateringReservation() {
                       <span>Tax (12%)</span>
                       <span>{money(taxTotal)}</span>
                     </div>
-                    <div className="flex items-center justify-between text-base font-bold text-white">
+                    <div className="flex items-center justify-between text-base font-bold text-slate-900">
                       <span>Total</span>
                       <span>{money(totalPriceTotal)}</span>
                     </div>
