@@ -631,16 +631,24 @@ export default function CateringReservation() {
           <div className="fixed bottom-4 left-4 right-4 z-40 md:right-6 md:left-auto md:w-96 md:bottom-6">
           <div className="mx-auto md:ml-auto">
               <div className={`rounded-xl border border-[#e8a978] bg-[#f7c8a7] shadow-lg transition-all ${summaryOpen ? "max-h-[36rem]" : "max-h-14 overflow-hidden summary-collapsed"}`}>
-              <div className="flex items-center justify-between px-4 py-3">
-                <div>
-                  <p className="text-sm font-semibold text-slate-900">Your package summary</p>
-                  <p className="text-xs whitespace-normal text-slate-700 summary-text">{stationCount} station{stationCount > 1 ? "s" : ""} selected • {form.station_types.map((id) => selectedPackageByStation[id]?.description ?? selectedPackageByStation[id]?.name).filter(Boolean).join(", ") || "No option"}</p>
+              <div className="flex items-center justify-between gap-3 px-4 py-3">
+                <div className="min-w-0 flex-1">
+                  {!summaryOpen ? (
+                    <p className="text-sm font-semibold text-slate-900">Your package summary</p>
+                  ) : (
+                    <div className="space-y-1">
+                      <p className="text-sm font-semibold text-slate-900">Your package summary</p>
+                      <p className="text-xs whitespace-normal break-words text-slate-700 summary-text">{stationCount} station{stationCount > 1 ? "s" : ""} selected • {form.station_types.map((id) => selectedPackageByStation[id]?.description ?? selectedPackageByStation[id]?.name).filter(Boolean).join(", ") || "No option"}</p>
+                    </div>
+                  )}
                 </div>
-                <div className="flex items-center gap-3">
-                  <div className="text-right">
-                    <div className="text-sm font-bold text-slate-900">{money(paymentAmountTotal)}</div>
-                    <div className="text-xs text-slate-700">{isFullPayment ? "Pay now" : "Downpayment"}</div>
-                  </div>
+                <div className="flex shrink-0 items-center gap-3">
+                  {summaryOpen ? (
+                    <div className="text-right">
+                      <div className="text-sm font-bold text-slate-900">{money(paymentAmountTotal)}</div>
+                      <div className="text-xs text-slate-700">{isFullPayment ? "Pay now" : "Downpayment"}</div>
+                    </div>
+                  ) : null}
                   <button type="button" onClick={() => setSummaryOpen((s) => !s)} className="rounded-full border border-[#d78d57] bg-[#fff2e8] px-3 py-2 text-sm font-semibold text-slate-900">
                     {summaryOpen ? "Close" : "View"}
                   </button>
@@ -649,23 +657,23 @@ export default function CateringReservation() {
               {summaryOpen ? (
                 <div className="border-t border-[#e8a978] px-4 py-4">
                   <div className="space-y-3 text-sm text-slate-800">
-                    <div className="flex items-center justify-between">
+                    <div className="flex flex-col gap-1 sm:flex-row sm:items-start sm:justify-between">
                       <span>Stations</span>
-                      <span className="font-semibold text-slate-900">{form.station_types.map((id) => stations.find((s) => s.id === id)?.name).filter(Boolean).join(", ") || "-"}</span>
+                      <span className="max-w-full break-words text-right font-semibold text-slate-900">{form.station_types.map((id) => stations.find((s) => s.id === id)?.name).filter(Boolean).join(", ") || "-"}</span>
                     </div>
-                    <div className="flex items-center justify-between">
+                    <div className="flex flex-col gap-1 sm:flex-row sm:items-start sm:justify-between">
                       <span>Option</span>
-                      <span className="font-semibold text-slate-900">{form.station_types.map((id) => selectedPackageByStation[id]?.description ?? selectedPackageByStation[id]?.name).filter(Boolean).join(", ") || "-"}</span>
+                      <span className="max-w-full break-words text-right font-semibold text-slate-900">{form.station_types.map((id) => selectedPackageByStation[id]?.description ?? selectedPackageByStation[id]?.name).filter(Boolean).join(", ") || "-"}</span>
                     </div>
-                    <div className="flex items-center justify-between">
+                    <div className="flex items-center justify-between gap-2">
                       <span>Subtotal</span>
                       <span>{money(subtotalTotal)}</span>
                     </div>
-                    <div className="flex items-center justify-between">
+                    <div className="flex items-center justify-between gap-2">
                       <span>Tax (12%)</span>
                       <span>{money(taxTotal)}</span>
                     </div>
-                    <div className="flex items-center justify-between text-base font-bold text-slate-900">
+                    <div className="flex items-center justify-between gap-2 text-base font-bold text-slate-900">
                       <span>Total</span>
                       <span>{money(totalPriceTotal)}</span>
                     </div>
