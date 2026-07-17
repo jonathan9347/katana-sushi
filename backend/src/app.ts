@@ -8,6 +8,7 @@ import bcrypt from "bcrypt";
 import fs from "fs";
 import path from "path";
 import multer from "multer";
+import { createClient, SupabaseClient } from "@supabase/supabase-js";
 import { Prisma, PrismaClient } from "@prisma/client";
 import { z } from "zod";
 import { NotificationService } from "./services/notification.service";
@@ -21,6 +22,14 @@ import dotenv from "dotenv";
 if (process.env.NODE_ENV !== "production") {
   dotenv.config({ path: path.resolve(__dirname, "..", ".env") });
 }
+
+const supabaseUrl = process.env.SUPABASE_URL?.trim();
+const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY?.trim();
+const supabaseStorageBucket = process.env.SUPABASE_STORAGE_BUCKET?.trim();
+
+const supabase: SupabaseClient | null =
+  supabaseUrl && supabaseServiceRoleKey ? createClient(supabaseUrl, supabaseServiceRoleKey) : null;
+const useSupabaseStorage = Boolean(supabase && supabaseStorageBucket);
 
 export const prisma = new PrismaClient();
 const app = express();
@@ -112,6 +121,29 @@ function getPersistableImageValue(imageUrl?: string | null) {
   }
 
   return imageUrl;
+}
+
+async function uploadFileToSupabase(filePath: string, storagePath: string) {
+  if (!useSupabaseStorage || !supabase || !supabaseStorageBucket) {
+    return null;
+  }
+
+  const fileStream = fs.createReadStream(filePath);
+  const { error: uploadError } = await supabase.storage.from(supabaseStorageBucket).upload(storagePath, fileStream, {
+    cacheControl: "public, max-age=2592000, immutable"
+  });
+
+  if (uploadError) {
+    throw uploadError;
+  }
+
+  const publicUrlData = supabase.storage.from(supabaseStorageBucket).getPublicUrl(storagePath);
+
+  if (!publicUrlData.data?.publicUrl) {
+    throw new Error("Failed to get Supabase public URL");
+  }
+
+  return publicUrlData.data.publicUrl;
 }
 
 async function normalizeProductImage(product: { id: string; image_url: string | null }) {
@@ -3314,8 +3346,19 @@ app.post("/api/products", upload.single("imageFile"), async (req, res, next) => 
       })
       .parse(req.body);
 
-    const uploadedImagePath = req.file ? `/uploads/products/${req.file.filename}` : body.image_url ?? null;
-    const persistedImageValue = getPersistableImageValue(uploadedImagePath);
+    let imageUrl: string | null = body.image_url ?? null;
+
+    if (req.file) {
+      const localUploadPath = path.join(uploadDir, req.file.filename);
+      if (useSupabaseStorage && supabase && supabaseStorageBucket) {
+        const supabasePath = `products/${req.file.filename}`;
+        imageUrl = await uploadFileToSupabase(localUploadPath, supabasePath);
+      } else {
+        imageUrl = `/uploads/products/${req.file.filename}`;
+      }
+    }
+
+    const persistedImageValue = getPersistableImageValue(imageUrl);
 
     const product = await prisma.sellingProduct.create({
       data: {
@@ -3368,7 +3411,13 @@ app.put("/api/products/:id", upload.single("imageFile"), async (req, res, next) 
     };
 
     if (req.file) {
-      updateData.image_url = getPersistableImageValue(`/uploads/products/${req.file.filename}`);
+      const localUploadPath = path.join(uploadDir, req.file.filename);
+      if (useSupabaseStorage && supabase && supabaseStorageBucket) {
+        const supabasePath = `products/${req.file.filename}`;
+        updateData.image_url = await uploadFileToSupabase(localUploadPath, supabasePath);
+      } else {
+        updateData.image_url = getPersistableImageValue(`/uploads/products/${req.file.filename}`);
+      }
     } else if (body.image_url !== undefined) {
       updateData.image_url = getPersistableImageValue(body.image_url);
     }
