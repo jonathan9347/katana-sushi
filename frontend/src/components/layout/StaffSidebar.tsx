@@ -77,9 +77,13 @@ export default function StaffSidebar() {
 
   return (
     <>
-      <aside className="hidden h-screen w-16 border-r border-slate-200 bg-slate-50 p-2 md:flex md:flex-col md:justify-between">
-        <div className="space-y-2">
-          <nav className="space-y-2">
+      <aside className="hidden h-screen w-20 border-r border-slate-200 bg-white md:flex md:flex-col md:justify-between">
+        <div className="flex flex-col items-center gap-6 px-2 pt-6">
+          <button className="flex h-12 w-12 items-center justify-center rounded-2xl bg-slate-100 text-slate-700 shadow-sm">
+            <Home className="h-6 w-6" />
+          </button>
+          <div className="text-[10px] font-semibold uppercase tracking-[0.3em] text-slate-400">Main</div>
+          <nav className="flex flex-col items-center gap-2">
             {topItems.map((item) => {
               const Icon = item.icon;
 
@@ -93,7 +97,14 @@ export default function StaffSidebar() {
           </nav>
         </div>
 
-          <div className="space-y-2">
+        <div className="flex flex-col items-center gap-4 px-2 pb-6">
+          <div className="flex flex-col items-center gap-2">
+            <span className="h-2 w-2 rounded-full bg-slate-400" />
+            <span className="h-2 w-2 rounded-full bg-red-500" />
+            <span className="h-2 w-2 rounded-full bg-violet-500" />
+          </div>
+
+          <div className="flex flex-col items-center gap-2 w-full">
             {bottomItems.map((item) => {
               const Icon = item.icon;
 
