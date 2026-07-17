@@ -581,7 +581,7 @@ export default function ReservationForm() {
                           </div>
                           <span className="rounded-full border border-katana-border bg-katana-surface px-3 py-1 text-xs font-semibold text-neutral-200">{cartItems.length} item{cartItems.length === 1 ? "" : "s"}</span>
                         </div>
-                        <div className="sticky top-0 z-30 -mx-3 mb-5 border-b border-katana-border bg-katana-black/95 px-3 pb-3 pt-2 backdrop-blur md:hidden">
+                        <div className="sticky top-0 z-40 -mx-3 mb-5 border-b border-katana-border bg-katana-black/95 px-3 pb-3 pt-2 shadow-[0_4px_12px_rgba(0,0,0,0.18)] backdrop-blur md:hidden">
                           <div ref={mobileCategoryTabsRef} className="overflow-x-auto pb-2">
                             <div className="flex min-w-max gap-2">
                               {productGroups.map((group) => (
@@ -654,31 +654,31 @@ export default function ReservationForm() {
                         </div>
                       </div>
 
-                      <div className="fixed bottom-[76px] left-0 right-0 z-50 px-3 md:hidden">
+                      <div className="fixed bottom-0 left-0 right-0 z-50 px-3 pb-3 md:hidden">
                         {isMobileCartOpen && (
-                          <div className="mb-2 max-h-[52vh] overflow-y-auto rounded-2xl border border-katana-border bg-katana-elevated p-4 shadow-card">
+                          <div className="mb-2 max-h-[52vh] overflow-y-auto rounded-2xl border border-[#e8a978] bg-[#f7c8a7] p-4 shadow-card">
                             <div className="mb-3 flex items-center justify-between gap-3">
-                              <h2 className="text-sm font-bold uppercase text-white">Your Cart</h2>
-                              <p className="text-sm font-black text-katana-red">{money(subtotal)}</p>
+                              <h2 className="text-sm font-bold uppercase text-slate-900">Your Cart</h2>
+                              <p className="text-sm font-black text-slate-900">{money(subtotal)}</p>
                             </div>
                             {cartItems.length === 0 ? (
-                              <p className="text-sm text-neutral-300">Add at least one menu item to continue.</p>
+                              <p className="text-sm text-slate-700">Add at least one menu item to continue.</p>
                             ) : (
                               <div className="space-y-3">
                                 {cartItems.map((item) => (
-                                  <div key={item.product_id} className="rounded-lg border border-katana-border bg-katana-surface p-3 shadow-sm">
+                                  <div key={item.product_id} className="rounded-lg border border-[#d78d57] bg-[#fff2e8] p-3 shadow-sm">
                                     <div className="flex items-center justify-between gap-3">
                                       <div className="min-w-0">
-                                        <p className="line-clamp-2 font-bold text-white">{item.name}</p>
-                                        <p className="text-sm text-neutral-300">{money(item.price * item.quantity)}</p>
+                                        <p className="line-clamp-2 font-bold text-slate-900">{item.name}</p>
+                                        <p className="text-sm text-slate-700">{money(item.price * item.quantity)}</p>
                                       </div>
                                       <div className="flex shrink-0 items-center gap-2">
-                                        <button type="button" className="flex h-8 w-8 items-center justify-center rounded-full border border-katana-border text-sm font-bold text-neutral-200" onClick={() => updateCartQuantity(item.product_id, item.quantity - 1)}>-</button>
-                                        <span className="w-6 text-center text-sm font-bold text-white">{item.quantity}</span>
-                                        <button type="button" className="flex h-8 w-8 items-center justify-center rounded-full border border-katana-border text-sm font-bold text-neutral-200" onClick={() => updateCartQuantity(item.product_id, item.quantity + 1)}>+</button>
+                                        <button type="button" className="flex h-8 w-8 items-center justify-center rounded-full border border-[#d78d57] text-sm font-bold text-slate-900" onClick={() => updateCartQuantity(item.product_id, item.quantity - 1)}>-</button>
+                                        <span className="w-6 text-center text-sm font-bold text-slate-900">{item.quantity}</span>
+                                        <button type="button" className="flex h-8 w-8 items-center justify-center rounded-full border border-[#d78d57] text-sm font-bold text-slate-900" onClick={() => updateCartQuantity(item.product_id, item.quantity + 1)}>+</button>
                                       </div>
                                     </div>
-                                    <button type="button" onClick={() => removeCartItem(item.product_id)} className="mt-3 text-xs font-semibold text-katana-red underline">Remove</button>
+                                    <button type="button" onClick={() => removeCartItem(item.product_id)} className="mt-3 text-xs font-semibold text-slate-900 underline">Remove</button>
                                   </div>
                                 ))}
                               </div>
@@ -687,14 +687,14 @@ export default function ReservationForm() {
                               <button
                                 type="button"
                                 onClick={goBackStep}
-                                className="rounded-md border border-slate-300 bg-white px-4 py-3 text-sm font-bold text-slate-800"
+                                className="rounded-md border border-[#d78d57] bg-[#fff2e8] px-4 py-3 text-sm font-bold text-slate-900"
                               >
                                 Back
                               </button>
                               <button
                                 type="button"
                                 onClick={goNextStep}
-                                className="rounded-md bg-red-700 px-4 py-3 text-sm font-bold text-white hover:bg-red-800"
+                                className="rounded-md bg-[#d78d57] px-4 py-3 text-sm font-bold text-slate-900 hover:bg-[#e8a978]"
                               >
                                 Next
                               </button>
@@ -704,67 +704,67 @@ export default function ReservationForm() {
                         <button
                           type="button"
                           onClick={() => setIsMobileCartOpen((current) => !current)}
-                          className="flex min-h-14 w-full items-center justify-between rounded-2xl border border-katana-border bg-katana-surface px-4 py-3 text-left shadow-card"
+                          className="flex min-h-14 w-full items-center justify-between rounded-2xl border border-[#e8a978] bg-[#f7c8a7] px-4 py-3 text-left shadow-card"
                         >
                           <span className="flex items-center gap-3">
-                            <span className="flex h-9 w-9 items-center justify-center rounded-full bg-katana-red text-white">
+                            <span className="flex h-9 w-9 items-center justify-center rounded-full bg-[#fff2e8] text-slate-900">
                               <ShoppingCart className="h-4 w-4" />
                             </span>
                             <span>
-                              <span className="block text-sm font-bold uppercase text-white">Your Cart</span>
-                              <span className="block text-xs font-semibold text-neutral-400">{cartItemCount} item{cartItemCount === 1 ? "" : "s"}</span>
+                              <span className="block text-sm font-bold uppercase text-slate-900">Your Cart</span>
+                              <span className="block text-xs font-semibold text-slate-700">{cartItemCount} item{cartItemCount === 1 ? "" : "s"}</span>
                             </span>
                           </span>
                           <span className="flex items-center gap-3">
-                            <span className="text-sm font-black text-katana-red">{money(subtotal)}</span>
-                            <ChevronDown className={`h-4 w-4 text-neutral-300 transition ${isMobileCartOpen ? "rotate-180" : ""}`} />
+                            <span className="text-sm font-black text-slate-900">{money(subtotal)}</span>
+                            <ChevronDown className={`h-4 w-4 text-slate-700 transition ${isMobileCartOpen ? "rotate-180" : ""}`} />
                           </span>
                         </button>
                       </div>
-                      <div className="fixed bottom-6 left-1/2 z-50 hidden w-[min(960px,calc(100vw-3rem))] -translate-x-1/2 md:block">
+                      <div className="fixed bottom-6 right-6 z-50 hidden md:block md:w-96">
                         {isMobileCartOpen && (
-                          <div className="mb-3 max-h-[42vh] overflow-y-auto rounded-2xl border border-katana-border bg-katana-elevated p-5 shadow-card">
+                          <div className="mb-3 max-h-[42vh] overflow-y-auto rounded-2xl border border-[#e8a978] bg-[#f7c8a7] p-5 shadow-card">
                             <div className="mb-4 flex items-center justify-between gap-4">
                               <div>
-                                <h2 className="text-sm font-bold uppercase text-white">Your Cart</h2>
-                                <p className="mt-1 text-xs text-neutral-400">{cartItemCount} item{cartItemCount === 1 ? "" : "s"} selected</p>
+                                <h2 className="text-sm font-bold uppercase text-slate-900">Your Cart</h2>
+                                <p className="mt-1 text-xs text-slate-700">{cartItemCount} item{cartItemCount === 1 ? "" : "s"} selected</p>
                               </div>
-                              <p className="text-lg font-black text-katana-red">{money(subtotal)}</p>
+                              <p className="text-lg font-black text-slate-900">{money(subtotal)}</p>
                             </div>
                             {cartItems.length === 0 ? (
-                              <p className="text-sm text-neutral-300">Add at least one menu item to continue.</p>
+                              <p className="text-sm text-slate-700">Add at least one menu item to continue.</p>
                             ) : (
                               <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
                                 {cartItems.map((item) => (
-                                  <div key={item.product_id} className="rounded-lg border border-katana-border bg-katana-surface p-3 shadow-sm">
+                                  <div key={item.product_id} className="rounded-lg border border-[#d78d57] bg-[#fff2e8] p-3 shadow-sm">
                                     <div className="flex items-start justify-between gap-3">
                                       <div className="min-w-0">
-                                        <p className="line-clamp-2 font-bold text-white">{item.name}</p>
-                                        <p className="mt-1 text-sm text-neutral-300">{money(item.price * item.quantity)}</p>
+                                        <p className="line-clamp-2 font-bold text-slate-900">{item.name}</p>
+                                        <p className="mt-1 text-sm text-slate-700">{money(item.price * item.quantity)}</p>
                                       </div>
                                       <div className="flex shrink-0 items-center gap-2">
-                                        <button type="button" className="flex h-8 w-8 items-center justify-center rounded-full border border-katana-border text-sm font-bold text-neutral-200" onClick={() => updateCartQuantity(item.product_id, item.quantity - 1)}>-</button>
-                                        <span className="w-6 text-center text-sm font-bold text-white">{item.quantity}</span>
-                                        <button type="button" className="flex h-8 w-8 items-center justify-center rounded-full border border-katana-border text-sm font-bold text-neutral-200" onClick={() => updateCartQuantity(item.product_id, item.quantity + 1)}>+</button>
+                                        <button type="button" className="flex h-8 w-8 items-center justify-center rounded-full border border-[#d78d57] text-sm font-bold text-slate-900" onClick={() => updateCartQuantity(item.product_id, item.quantity - 1)}>-</button>
+                                        <span className="w-6 text-center text-sm font-bold text-slate-900">{item.quantity}</span>
+                                        <button type="button" className="flex h-8 w-8 items-center justify-center rounded-full border border-[#d78d57] text-sm font-bold text-slate-900" onClick={() => updateCartQuantity(item.product_id, item.quantity + 1)}>+</button>
                                       </div>
                                     </div>
-                                    <button type="button" onClick={() => removeCartItem(item.product_id)} className="mt-3 text-xs font-semibold text-katana-red underline">Remove</button>
+                                    <button type="button" onClick={() => removeCartItem(item.product_id)} className="mt-3 text-xs font-semibold text-slate-900 underline">Remove</button>
                                   </div>
                                 ))}
                               </div>
                             )}
-                            <div className="mt-5 flex justify-end gap-3 border-t border-katana-border pt-4">
+                            <div className="mt-5 flex justify-end gap-3 border-t border-[#d78d57] pt-4">
                               <button
                                 type="button"
                                 onClick={goBackStep}
-                                className="rounded-md border border-slate-300 bg-white px-5 py-3 text-sm font-bold text-slate-800"
+                                className="rounded-md border border-[#d78d57] bg-[#fff2e8] px-5 py-3 text-sm font-bold text-slate-900"
                               >
                                 Back
                               </button>
                               <button
                                 type="button"
                                 onClick={goNextStep}
-                                className="rounded-md bg-red-700 px-5 py-3 text-sm font-bold text-white hover:bg-red-800"
+                                className="rounded-md bg-[#d78d57] px-5 py-3 text-sm font-bold text-slate-900 hover:bg-[#e8a978]"
                               >
                                 Next
                               </button>
@@ -774,20 +774,20 @@ export default function ReservationForm() {
                         <button
                           type="button"
                           onClick={() => setIsMobileCartOpen((current) => !current)}
-                          className="flex min-h-16 w-full items-center justify-between rounded-2xl border border-katana-border bg-katana-surface px-5 py-4 text-left shadow-card"
+                          className="flex min-h-16 w-full items-center justify-between rounded-2xl border border-[#e8a978] bg-[#f7c8a7] px-5 py-4 text-left shadow-card"
                         >
                           <span className="flex items-center gap-3">
-                            <span className="flex h-10 w-10 items-center justify-center rounded-full bg-katana-red text-white">
+                            <span className="flex h-10 w-10 items-center justify-center rounded-full bg-[#fff2e8] text-slate-900">
                               <ShoppingCart className="h-5 w-5" />
                             </span>
                             <span>
-                              <span className="block text-sm font-bold uppercase text-white">Your Cart</span>
-                              <span className="block text-xs font-semibold text-neutral-400">{cartItemCount} item{cartItemCount === 1 ? "" : "s"} in reservation</span>
+                              <span className="block text-sm font-bold uppercase text-slate-900">Your Cart</span>
+                              <span className="block text-xs font-semibold text-slate-700">{cartItemCount} item{cartItemCount === 1 ? "" : "s"} in reservation</span>
                             </span>
                           </span>
                           <span className="flex items-center gap-4">
-                            <span className="text-base font-black text-katana-red">{money(subtotal)}</span>
-                            <ChevronDown className={`h-5 w-5 text-neutral-300 transition ${isMobileCartOpen ? "rotate-180" : ""}`} />
+                            <span className="text-base font-black text-slate-900">{money(subtotal)}</span>
+                            <ChevronDown className={`h-5 w-5 text-slate-700 transition ${isMobileCartOpen ? "rotate-180" : ""}`} />
                           </span>
                         </button>
                       </div>
