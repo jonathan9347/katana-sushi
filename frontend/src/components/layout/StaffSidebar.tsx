@@ -77,8 +77,8 @@ export default function StaffSidebar() {
 
   return (
     <>
-      <aside className="fixed left-4 top-1/2 z-40 hidden -translate-y-1/2 w-16 border border-slate-200 bg-white/90 p-2 shadow-2xl backdrop-blur-md md:block">
-        <div className="flex min-h-[420px] flex-col justify-between">
+      <aside className="hidden h-screen w-16 border-r border-slate-200 bg-slate-50 p-2 md:flex md:flex-col md:justify-between">
+        <div className="space-y-2">
           <nav className="space-y-2">
             {topItems.map((item) => {
               const Icon = item.icon;
@@ -91,6 +91,7 @@ export default function StaffSidebar() {
               );
             })}
           </nav>
+        </div>
 
           <div className="space-y-2">
             {bottomItems.map((item) => {

@@ -36,9 +36,11 @@ function StaffPage({ roles, children }: { roles: string[]; children: JSX.Element
 
   return (
     <ProtectedRoute allowedRoles={roles}>
-      <div className="min-h-screen bg-slate-100 text-slate-900 md:pl-28">
-        <StaffSidebar />
-        <div>{children}</div>
+      <div className="min-h-screen bg-slate-100 text-slate-900">
+        <div className="min-h-screen md:flex">
+          <StaffSidebar />
+          <div className="flex-1">{children}</div>
+        </div>
       </div>
     </ProtectedRoute>
   );
