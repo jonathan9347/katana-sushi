@@ -54,7 +54,7 @@ function tooltipClass() {
 }
 
 function iconClass(isActive: boolean) {
-  return `group relative flex h-14 w-full items-center justify-center rounded-3xl transform transition duration-200 ${
+  return `group relative mx-auto flex h-14 w-14 items-center justify-center rounded-2xl transform transition duration-200 ${
     isActive ? "bg-red-700 text-white scale-110 shadow-lg" : "text-slate-600 hover:bg-slate-100 hover:text-slate-950 hover:scale-110"
   }`;
 }
