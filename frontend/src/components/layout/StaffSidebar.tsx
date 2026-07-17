@@ -77,25 +77,20 @@ export default function StaffSidebar() {
 
   return (
     <>
-      <aside className="fixed left-4 top-1/2 z-40 hidden -translate-y-1/2 rounded-[2rem] border border-slate-200 bg-white/90 p-4 shadow-2xl backdrop-blur-md md:block">
-        <div className="flex min-h-[420px] w-20 flex-col justify-between">
-          <div className="space-y-3">
-            <div className="flex h-14 items-center justify-center rounded-3xl border border-slate-200 bg-slate-50 text-center text-sm font-semibold text-slate-700">
-              Staff
-            </div>
-            <nav className="space-y-2">
-              {topItems.map((item) => {
-                const Icon = item.icon;
+      <aside className="fixed left-4 top-1/2 z-40 hidden -translate-y-1/2 w-16 border border-slate-200 bg-white/90 p-2 shadow-2xl backdrop-blur-md md:block">
+        <div className="flex min-h-[420px] flex-col justify-between">
+          <nav className="space-y-2">
+            {topItems.map((item) => {
+              const Icon = item.icon;
 
-                return (
-                  <NavLink key={item.to} to={item.to} className={({ isActive }) => iconClass(isActive)}>
-                    <Icon className="h-6 w-6" />
-                    <span className={tooltipClass()}>{item.label}</span>
-                  </NavLink>
-                );
-              })}
-            </nav>
-          </div>
+              return (
+                <NavLink key={item.to} to={item.to} className={({ isActive }) => iconClass(isActive)}>
+                  <Icon className="h-6 w-6" />
+                  <span className={tooltipClass()}>{item.label}</span>
+                </NavLink>
+              );
+            })}
+          </nav>
 
           <div className="space-y-2">
             {bottomItems.map((item) => {
