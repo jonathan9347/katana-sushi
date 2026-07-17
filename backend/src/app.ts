@@ -107,19 +107,11 @@ function getPersistableImageValue(imageUrl?: string | null) {
     return imageUrl;
   }
 
-  if (!imageUrl.startsWith("/uploads/")) {
+  if (imageUrl.startsWith("/uploads/")) {
     return imageUrl;
   }
 
-  const resolvedPath = path.join(__dirname, "..", imageUrl.replace(/^\/+/, ""));
-
-  if (!fs.existsSync(resolvedPath) || !fs.statSync(resolvedPath).isFile()) {
-    return imageUrl;
-  }
-
-  const mimeType = getMimeTypeFromPath(resolvedPath);
-  const buffer = fs.readFileSync(resolvedPath);
-  return `data:${mimeType};base64,${buffer.toString("base64")}`;
+  return imageUrl;
 }
 
 async function normalizeProductImage(product: { id: string; image_url: string | null }) {
@@ -269,8 +261,10 @@ app.use(express.json());
 app.use(
   "/uploads",
   express.static(path.join(__dirname, "..", "uploads"), {
+    maxAge: 30 * 24 * 60 * 60 * 1000,
     setHeaders: (res) => {
       res.setHeader("Cross-Origin-Resource-Policy", "cross-origin");
+      res.setHeader("Cache-Control", "public, max-age=2592000, stale-while-revalidate=86400");
     }
   })
 );
