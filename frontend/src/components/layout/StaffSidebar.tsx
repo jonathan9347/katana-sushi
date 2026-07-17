@@ -54,8 +54,8 @@ function tooltipClass() {
 }
 
 function iconClass(isActive: boolean) {
-  return `group relative flex h-12 w-full items-center justify-center rounded-md transition ${
-    isActive ? "bg-red-700 text-white" : "text-slate-600 hover:bg-slate-100 hover:text-slate-950"
+  return `group relative flex h-14 w-full items-center justify-center rounded-3xl transform transition duration-200 ${
+    isActive ? "bg-red-700 text-white scale-110 shadow-lg" : "text-slate-600 hover:bg-slate-100 hover:text-slate-950 hover:scale-110"
   }`;
 }
 
@@ -78,12 +78,8 @@ export default function StaffSidebar() {
   return (
     <>
       <aside className="hidden h-screen w-20 border-r border-slate-200 bg-white md:flex md:flex-col md:justify-between">
-        <div className="flex flex-col items-center gap-6 px-2 pt-6">
-          <button className="flex h-12 w-12 items-center justify-center rounded-2xl bg-slate-100 text-slate-700 shadow-sm">
-            <Home className="h-6 w-6" />
-          </button>
-          <div className="text-[10px] font-semibold uppercase tracking-[0.3em] text-slate-400">Main</div>
-          <nav className="flex flex-col items-center gap-2">
+        <div className="flex flex-col items-center gap-3 px-2 pt-6">
+          <nav className="flex flex-col items-center gap-3">
             {topItems.map((item) => {
               const Icon = item.icon;
 
@@ -98,11 +94,6 @@ export default function StaffSidebar() {
         </div>
 
         <div className="flex flex-col items-center gap-4 px-2 pb-6">
-          <div className="flex flex-col items-center gap-2">
-            <span className="h-2 w-2 rounded-full bg-slate-400" />
-            <span className="h-2 w-2 rounded-full bg-red-500" />
-            <span className="h-2 w-2 rounded-full bg-violet-500" />
-          </div>
 
           <div className="flex flex-col items-center gap-2 w-full">
             {bottomItems.map((item) => {
