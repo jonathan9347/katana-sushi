@@ -164,6 +164,13 @@
   color: var(--customer-muted) !important;
 }
 
+[data-theme="light"] .customer-app [class*="text-neutral-500"],
+[data-theme="light"] .customer-app [class*="text-neutral-400"],
+[data-theme="light"] .customer-app [class*="text-neutral-300"],
+[data-theme="light"] .customer-app [class*="text-neutral-200"] {
+  color: var(--customer-text) !important;
+}
+
 .customer-app [class*="bg-katana-black"] { background-color: var(--customer-bg) !important; }
 .customer-app [class*="bg-katana-surface"] { background-color: var(--customer-surface) !important; }
 .customer-app [class*="bg-katana-elevated"] { background-color: var(--customer-surface-2) !important; }
