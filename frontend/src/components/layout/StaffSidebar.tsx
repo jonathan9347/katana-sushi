@@ -77,7 +77,7 @@ export default function StaffSidebar() {
 
   return (
     <>
-      <aside className="hidden h-screen w-20 border-r border-slate-200 bg-white md:flex md:flex-col md:justify-between">
+      <aside className="hidden h-screen w-20 shrink-0 border-r border-slate-200 bg-white md:sticky md:top-0 md:flex md:flex-col md:justify-between">
         <div className="flex flex-col items-center gap-3 px-2 pt-6">
           <nav className="flex flex-col items-center gap-3">
             {topItems.map((item) => {
