@@ -52,6 +52,13 @@ const fallbackProducts: Product[] = [
   { id: "iced-tea", name: "House Iced Tea", category: "Beverage", price: 90, description: "Cold brewed tea" }
 ];
 
+const PRODUCT_IMAGE_QUERY_OPTIONS = {
+  staleTime: 5 * 60 * 1000,
+  gcTime: 30 * 60 * 1000,
+  refetchOnMount: false,
+  refetchOnWindowFocus: false
+};
+
 function today() {
   return todayManilaDateKey();
 }
@@ -99,7 +106,8 @@ export default function ReservationForm() {
   const { data: productsData } = useQuery({
     queryKey: ["customer-menu-products"],
     queryFn: async () => (await api.get<{ products: Product[] }>("/api/products")).data.products,
-    retry: 1
+    retry: 1,
+    ...PRODUCT_IMAGE_QUERY_OPTIONS
   });
 
   const { data: unlimitedSettingsData } = useQuery({
@@ -109,6 +117,11 @@ export default function ReservationForm() {
   });
 
   const products = productsData?.length ? productsData : fallbackProducts;
+  const productImageUrls = useMemo(() => {
+    return Array.from(
+      new Set(products.map((product) => getProductImageUrl(product)).filter((url): url is string => Boolean(url)))
+    );
+  }, [products]);
   const productGroups = useMemo(() => {
     const groups = new Map<string, Product[]>();
 
@@ -160,6 +173,14 @@ export default function ReservationForm() {
   }, [selectedUnlimitedProductQuantities, unlimitedProducts]);
 
   const selectedUnlimitedCount = useMemo(() => Object.values(selectedUnlimitedProductQuantities).reduce((a, b) => a + (b || 0), 0), [selectedUnlimitedProductQuantities]);
+
+  useEffect(() => {
+    productImageUrls.forEach((url) => {
+      const image = new Image();
+      image.decoding = "async";
+      image.src = url;
+    });
+  }, [productImageUrls]);
 
   const addProduct = (product: Product) => {
     if (!product.id || product.is_available === false) {
@@ -607,7 +628,7 @@ export default function ReservationForm() {
                         </div>
 
                         <div className="space-y-6">
-                          {productGroups.map((group) => (
+                          {productGroups.map((group, groupIndex) => (
                             <section key={group.category} id={categorySectionId(group.category)} className="scroll-mt-28 md:scroll-mt-24">
                               <div className="mb-3 flex items-center justify-between gap-3">
                                 <h3 className="text-xs font-black uppercase tracking-[0.16em] text-neutral-300">{group.category}</h3>
@@ -615,15 +636,16 @@ export default function ReservationForm() {
                                 <span className="text-xs font-semibold text-neutral-500">{group.products.length}</span>
                               </div>
                               <div className="space-y-3 md:grid md:grid-cols-2 md:gap-4 md:space-y-0 lg:grid-cols-3 xl:grid-cols-4">
-                                {group.products.map((product) => {
+                                {group.products.map((product, index) => {
                                   const disabled = product.is_available === false;
                                   const imageSrc = getProductImageUrl(product);
+                                  const eagerImage = groupIndex === 0 && index < 6;
 
                                   return (
                                     <article key={product.id} className={`grid h-[160px] grid-cols-[104px_minmax(0,1fr)] overflow-hidden rounded-lg border sm:h-[132px] sm:grid-cols-[112px_minmax(0,1fr)] md:flex md:h-[320px] md:flex-col md:rounded-xl ${disabled ? "border-katana-border bg-katana-surface opacity-60" : "border-katana-border bg-katana-elevated"}`}>
                                       <div className="h-[160px] w-[104px] bg-katana-surface sm:h-[132px] sm:w-[112px] md:h-40 md:w-full">
                                         {imageSrc ? (
-                                          <img src={imageSrc} alt={product.name} className="h-full w-full object-cover" />
+                                          <img src={imageSrc} alt={product.name} loading={eagerImage ? "eager" : "lazy"} fetchPriority={eagerImage ? "high" : "auto"} decoding="async" className="h-full w-full object-cover" />
                                         ) : (
                                           <div className="flex h-full items-center justify-center px-3 text-center text-xs font-bold uppercase tracking-[0.14em] text-katana-red">
                                             No image
@@ -741,7 +763,7 @@ export default function ReservationForm() {
                         </div>
 
                         <div className="space-y-5">
-                          {unlimitedProductGroups.map((group) => (
+                          {unlimitedProductGroups.map((group, groupIndex) => (
                             <section key={group.category}>
                               <div className="mb-2 flex items-center justify-between gap-3">
                                 <h3 className="text-xs font-black uppercase tracking-[0.16em] text-neutral-300">{group.category}</h3>
@@ -749,9 +771,10 @@ export default function ReservationForm() {
                                 <span className="text-xs font-semibold text-neutral-500">{group.products.length}</span>
                               </div>
                               <div className="grid grid-cols-2 gap-2 md:grid-cols-3 xl:grid-cols-4">
-                                {group.products.map((product) => {
+                                {group.products.map((product, index) => {
                                   const selected = (selectedUnlimitedProductQuantities[product.id] ?? 0) > 0;
                                   const imageSrc = getProductImageUrl(product);
+                                  const eagerImage = groupIndex === 0 && index < 6;
 
                                   return (
                                     <button
@@ -762,7 +785,7 @@ export default function ReservationForm() {
                                     >
                                       {imageSrc ? (
                                         <div className="h-28 w-full overflow-hidden rounded-t-lg bg-katana-surface">
-                                          <img src={imageSrc} alt={product.name} className="h-full w-full object-contain" />
+                                          <img src={imageSrc} alt={product.name} loading={eagerImage ? "eager" : "lazy"} fetchPriority={eagerImage ? "high" : "auto"} decoding="async" className="h-full w-full object-contain" />
                                         </div>
                                       ) : null}
 

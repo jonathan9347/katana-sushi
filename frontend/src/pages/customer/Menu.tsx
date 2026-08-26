@@ -24,6 +24,13 @@ const fallbackProducts: Product[] = [
   { id: "iced-tea", name: "House Iced Tea", category: "Beverage", price: 90, description: "Cold brewed tea" }
 ];
 
+const PRODUCT_IMAGE_QUERY_OPTIONS = {
+  staleTime: 5 * 60 * 1000,
+  gcTime: 30 * 60 * 1000,
+  refetchOnMount: false,
+  refetchOnWindowFocus: false
+};
+
 function money(value: string | number) {
   return new Intl.NumberFormat("en-PH", { style: "currency", currency: "PHP", maximumFractionDigits: 0 }).format(Number(value));
 }
@@ -36,9 +43,15 @@ export default function Menu() {
   const productsQuery = useQuery({
     queryKey: ["customer-menu-products"],
     queryFn: async () => (await api.get<{ products: Product[] }>("/api/products")).data.products,
-    retry: 1
+    retry: 1,
+    ...PRODUCT_IMAGE_QUERY_OPTIONS
   });
   const products = productsQuery.data?.length ? productsQuery.data : fallbackProducts;
+  const productImageUrls = useMemo(() => {
+    return Array.from(
+      new Set(products.map((product) => resolveImageUrl(product.image_url)).filter((url): url is string => Boolean(url)))
+    );
+  }, [products]);
   const guestFavorites = useMemo(() => {
     const availableProducts = products.filter((product) => product.is_available !== false);
     return availableProducts.slice(0, 4);
@@ -59,6 +72,14 @@ export default function Menu() {
     .filter((group) => group.products.length > 0);
 
   const activeCategory = category === "All" ? scrollActiveCategory : category;
+
+  useEffect(() => {
+    productImageUrls.forEach((url) => {
+      const image = new Image();
+      image.decoding = "async";
+      image.src = url;
+    });
+  }, [productImageUrls]);
 
   useEffect(() => {
     if (category !== "All") {
@@ -107,6 +128,8 @@ export default function Menu() {
               <img
                 src="/images/Menu-head.png"
                 alt="Katana Sushi menu showcase"
+                fetchPriority="high"
+                decoding="async"
                 className="mx-auto h-[220px] w-full max-w-[420px] object-contain transition duration-500 ease-out group-hover:scale-105 group-hover:[transform:rotateY(8deg)_rotateX(-6deg)] sm:h-[260px] lg:h-[320px]"
               />
             </div>
@@ -129,7 +152,7 @@ export default function Menu() {
                 <article key={product.id} className="customer-card overflow-hidden">
                   {imageSrc ? (
                     <div className="aspect-[4/3] overflow-hidden bg-slate-900">
-                      <img src={imageSrc} alt={product.name} className="h-full w-full object-cover" />
+                      <img src={imageSrc} alt={product.name} loading="eager" fetchPriority="high" decoding="async" className="h-full w-full object-cover" />
                     </div>
                   ) : (
                     <div className="flex aspect-[4/3] items-center justify-center bg-katana-elevated text-5xl">
@@ -172,14 +195,15 @@ export default function Menu() {
             <section key={group.category} data-category={group.category} ref={(el) => (groupRefs.current[group.category] = el)}>
               <h2 className="font-display text-2xl font-bold text-white">{group.category}</h2>
               <div className="mt-4 grid gap-4 lg:grid-cols-4">
-                {group.products.map((product) => {
+                {group.products.map((product, index) => {
                   const imageSrc = resolveImageUrl(product.image_url);
+                  const eagerImage = group.category === grouped[0]?.category && index < 4;
 
                   return (
                     <article key={product.id} className="customer-card overflow-hidden">
                       {imageSrc ? (
                         <div className="aspect-[4/3] overflow-hidden bg-slate-900">
-                          <img src={imageSrc} alt={product.name} className="h-full w-full object-cover" />
+                          <img src={imageSrc} alt={product.name} loading={eagerImage ? "eager" : "lazy"} fetchPriority={eagerImage ? "high" : "auto"} decoding="async" className="h-full w-full object-cover" />
                         </div>
                       ) : (
                         <div className="flex aspect-[4/3] items-center justify-center bg-katana-elevated text-5xl">
