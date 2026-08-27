@@ -1,5 +1,5 @@
 import { Edit } from "lucide-react";
-import { resolveImageUrl } from "../../lib/api";
+import { resolveBackendImageUrl, resolveImageUrl } from "../../lib/api";
 import { Button } from "../ui/button";
 
 export type MenuProduct = {
@@ -36,13 +36,25 @@ type ProductCardProps = {
 
 export default function ProductCard({ canEdit, product, onEdit, onToggleAvailable }: ProductCardProps) {
   const available = product.is_available !== false;
-  const imageSrc = resolveImageUrl(product.image_url ?? product.imageUrl);
+  const imageUrl = product.image_url ?? product.imageUrl;
+  const imageSrc = resolveImageUrl(imageUrl);
 
   return (
     <article className="grid min-h-[300px] gap-3 rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
       {imageSrc ? (
         <div className="h-40 overflow-hidden rounded-lg bg-slate-100">
-          <img src={imageSrc} alt={product.name} className="h-full w-full object-cover" />
+          <img
+            src={imageSrc}
+            alt={product.name}
+            onError={(event) => {
+              const backendImageUrl = resolveBackendImageUrl(imageUrl);
+
+              if (backendImageUrl && event.currentTarget.src !== backendImageUrl) {
+                event.currentTarget.src = backendImageUrl;
+              }
+            }}
+            className="h-full w-full object-cover"
+          />
         </div>
       ) : (
         <div className="flex h-40 items-center justify-center rounded-lg bg-slate-100 text-5xl">🍣</div>

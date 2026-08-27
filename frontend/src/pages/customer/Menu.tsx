@@ -1,7 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { Search } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { api, resolveImageUrl } from "../../lib/api";
+import { api, resolveBackendImageUrl, resolveImageUrl } from "../../lib/api";
 
 type Product = {
   id: string;
@@ -14,14 +14,14 @@ type Product = {
 };
 
 const fallbackProducts: Product[] = [
-  { id: "california", name: "California Maki", category: "Classic Roll", price: 290, description: "Crabstick, cucumber, mango" },
-  { id: "mango", name: "Mango Roll", category: "Classic Roll", price: 220, description: "Crabstick, mango, sesame" },
-  { id: "volcano", name: "Volcano Roll", category: "Special Roll", price: 220, description: "Crab, mango, cucumber" },
-  { id: "tuna", name: "Tuna Mayo Roll", category: "Classic Roll", price: 220, description: "Tuna mayo, cucumber" },
-  { id: "crunchy", name: "Crunchy Roll", category: "Fried Roll", price: 240, description: "Crisp tempura flakes" },
-  { id: "salmon-nigiri", name: "Salmon Nigiri", category: "Nigiri", price: 170, description: "Fresh salmon over sushi rice" },
-  { id: "salmon-sashimi", name: "Salmon Sashimi", category: "Sashimi", price: 320, description: "Fresh sliced salmon" },
-  { id: "iced-tea", name: "House Iced Tea", category: "Beverage", price: 90, description: "Cold brewed tea" }
+  { id: "california", name: "California Maki", category: "Classic Roll", price: 290, description: "Crabstick, cucumber, mango", image_url: "/images/sushi2.png" },
+  { id: "mango", name: "Mango Roll", category: "Classic Roll", price: 220, description: "Crabstick, mango, sesame", image_url: "/images/sushi4.png" },
+  { id: "volcano", name: "Volcano Roll", category: "Special Roll", price: 220, description: "Crab, mango, cucumber", image_url: "/images/sushi5.png" },
+  { id: "tuna", name: "Tuna Mayo Roll", category: "Classic Roll", price: 220, description: "Tuna mayo, cucumber", image_url: "/images/Menu-head.png" },
+  { id: "crunchy", name: "Crunchy Roll", category: "Fried Roll", price: 240, description: "Crisp tempura flakes", image_url: "/images/sushi2.png" },
+  { id: "salmon-nigiri", name: "Salmon Nigiri", category: "Nigiri", price: 170, description: "Fresh salmon over sushi rice", image_url: "/images/sushi4.png" },
+  { id: "salmon-sashimi", name: "Salmon Sashimi", category: "Sashimi", price: 320, description: "Fresh sliced salmon", image_url: "/images/sushi5.png" },
+  { id: "iced-tea", name: "House Iced Tea", category: "Beverage", price: 90, description: "Cold brewed tea", image_url: "/images/unli-dining.jpg" }
 ];
 
 const PRODUCT_IMAGE_QUERY_OPTIONS = {
@@ -33,6 +33,14 @@ const PRODUCT_IMAGE_QUERY_OPTIONS = {
 
 function money(value: string | number) {
   return new Intl.NumberFormat("en-PH", { style: "currency", currency: "PHP", maximumFractionDigits: 0 }).format(Number(value));
+}
+
+function fallbackToBackendImage(element: HTMLImageElement, imageUrl?: string | null) {
+  const backendImageUrl = resolveBackendImageUrl(imageUrl);
+
+  if (backendImageUrl && element.src !== backendImageUrl) {
+    element.src = backendImageUrl;
+  }
 }
 
 export default function Menu() {
@@ -152,7 +160,7 @@ export default function Menu() {
                 <article key={product.id} className="customer-card overflow-hidden">
                   {imageSrc ? (
                     <div className="aspect-[4/3] overflow-hidden bg-slate-900">
-                      <img src={imageSrc} alt={product.name} loading="eager" fetchPriority="high" decoding="async" className="h-full w-full object-cover" />
+                      <img src={imageSrc} alt={product.name} loading="eager" fetchPriority="high" decoding="async" onError={(event) => fallbackToBackendImage(event.currentTarget, product.image_url)} className="h-full w-full object-cover" />
                     </div>
                   ) : (
                     <div className="flex aspect-[4/3] items-center justify-center bg-katana-elevated text-5xl">
@@ -203,7 +211,7 @@ export default function Menu() {
                     <article key={product.id} className="customer-card overflow-hidden">
                       {imageSrc ? (
                         <div className="aspect-[4/3] overflow-hidden bg-slate-900">
-                          <img src={imageSrc} alt={product.name} loading={eagerImage ? "eager" : "lazy"} fetchPriority={eagerImage ? "high" : "auto"} decoding="async" className="h-full w-full object-cover" />
+                          <img src={imageSrc} alt={product.name} loading={eagerImage ? "eager" : "lazy"} fetchPriority={eagerImage ? "high" : "auto"} decoding="async" onError={(event) => fallbackToBackendImage(event.currentTarget, product.image_url)} className="h-full w-full object-cover" />
                         </div>
                       ) : (
                         <div className="flex aspect-[4/3] items-center justify-center bg-katana-elevated text-5xl">

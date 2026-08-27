@@ -414,10 +414,11 @@ app.use(express.json());
 app.use(
   "/uploads",
   express.static(path.join(__dirname, "..", "uploads"), {
-    maxAge: 30 * 24 * 60 * 60 * 1000,
+    immutable: true,
+    maxAge: "1y",
     setHeaders: (res) => {
       res.setHeader("Cross-Origin-Resource-Policy", "cross-origin");
-      res.setHeader("Cache-Control", "public, max-age=2592000, stale-while-revalidate=86400");
+      res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
     }
   })
 );

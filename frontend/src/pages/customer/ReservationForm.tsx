@@ -3,7 +3,7 @@ import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { Banknote, CalendarCheck, Check, ChevronDown, Landmark, ShoppingCart, Smartphone } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
-import { api, resolveImageUrl } from "../../lib/api";
+import { api, resolveBackendImageUrl, resolveImageUrl } from "../../lib/api";
 import { getApiErrorMessage } from "../../lib/errors";
 import { createPaymentIntent, verifyPayment, buildReservationReference, type PaymentMethod } from "../../lib/payment";
 import { formatTime12, timeOptions, todayManilaDateKey } from "../../lib/dateTime";
@@ -43,13 +43,13 @@ type ReservationSuccess = {
 };
 
 const fallbackProducts: Product[] = [
-  { id: "california", name: "California Maki", category: "Classic Roll", price: 290, description: "Crabstick, cucumber, mango" },
-  { id: "mango", name: "Mango Roll", category: "Classic Roll", price: 220, description: "Crabstick, mango, sesame" },
-  { id: "volcano", name: "Volcano Roll", category: "Special Roll", price: 220, description: "Crab, mango, cucumber" },
-  { id: "tuna", name: "Tuna Mayo Roll", category: "Classic Roll", price: 220, description: "Tuna mayo, cucumber" },
-  { id: "crunchy", name: "Crunchy Roll", category: "Fried Roll", price: 240, description: "Crisp tempura flakes" },
-  { id: "salmon-nigiri", name: "Salmon Nigiri", category: "Nigiri", price: 170, description: "Fresh salmon over sushi rice" },
-  { id: "iced-tea", name: "House Iced Tea", category: "Beverage", price: 90, description: "Cold brewed tea" }
+  { id: "california", name: "California Maki", category: "Classic Roll", price: 290, description: "Crabstick, cucumber, mango", image_url: "/images/sushi2.png" },
+  { id: "mango", name: "Mango Roll", category: "Classic Roll", price: 220, description: "Crabstick, mango, sesame", image_url: "/images/sushi4.png" },
+  { id: "volcano", name: "Volcano Roll", category: "Special Roll", price: 220, description: "Crab, mango, cucumber", image_url: "/images/sushi5.png" },
+  { id: "tuna", name: "Tuna Mayo Roll", category: "Classic Roll", price: 220, description: "Tuna mayo, cucumber", image_url: "/images/Menu-head.png" },
+  { id: "crunchy", name: "Crunchy Roll", category: "Fried Roll", price: 240, description: "Crisp tempura flakes", image_url: "/images/sushi2.png" },
+  { id: "salmon-nigiri", name: "Salmon Nigiri", category: "Nigiri", price: 170, description: "Fresh salmon over sushi rice", image_url: "/images/sushi4.png" },
+  { id: "iced-tea", name: "House Iced Tea", category: "Beverage", price: 90, description: "Cold brewed tea", image_url: "/images/unli-dining.jpg" }
 ];
 
 const PRODUCT_IMAGE_QUERY_OPTIONS = {
@@ -73,6 +73,14 @@ function categorySectionId(category: string) {
 
 function getProductImageUrl(product: Product) {
   return resolveImageUrl(product.image_url ?? product.imageUrl ?? product.image ?? product.thumbnail);
+}
+
+function fallbackToBackendImage(element: HTMLImageElement, product: Product) {
+  const backendImageUrl = resolveBackendImageUrl(product.image_url ?? product.imageUrl ?? product.image ?? product.thumbnail);
+
+  if (backendImageUrl && element.src !== backendImageUrl) {
+    element.src = backendImageUrl;
+  }
 }
 
 export default function ReservationForm() {
@@ -645,7 +653,7 @@ export default function ReservationForm() {
                                     <article key={product.id} className={`grid h-[160px] grid-cols-[104px_minmax(0,1fr)] overflow-hidden rounded-lg border sm:h-[132px] sm:grid-cols-[112px_minmax(0,1fr)] md:flex md:h-[320px] md:flex-col md:rounded-xl ${disabled ? "border-katana-border bg-katana-surface opacity-60" : "border-katana-border bg-katana-elevated"}`}>
                                       <div className="h-[160px] w-[104px] bg-katana-surface sm:h-[132px] sm:w-[112px] md:h-40 md:w-full">
                                         {imageSrc ? (
-                                          <img src={imageSrc} alt={product.name} loading={eagerImage ? "eager" : "lazy"} fetchPriority={eagerImage ? "high" : "auto"} decoding="async" className="h-full w-full object-cover" />
+                                          <img src={imageSrc} alt={product.name} loading={eagerImage ? "eager" : "lazy"} fetchPriority={eagerImage ? "high" : "auto"} decoding="async" onError={(event) => fallbackToBackendImage(event.currentTarget, product)} className="h-full w-full object-cover" />
                                         ) : (
                                           <div className="flex h-full items-center justify-center px-3 text-center text-xs font-bold uppercase tracking-[0.14em] text-katana-red">
                                             No image
@@ -785,7 +793,7 @@ export default function ReservationForm() {
                                     >
                                       {imageSrc ? (
                                         <div className="h-28 w-full overflow-hidden rounded-t-lg bg-katana-surface">
-                                          <img src={imageSrc} alt={product.name} loading={eagerImage ? "eager" : "lazy"} fetchPriority={eagerImage ? "high" : "auto"} decoding="async" className="h-full w-full object-contain" />
+                                          <img src={imageSrc} alt={product.name} loading={eagerImage ? "eager" : "lazy"} fetchPriority={eagerImage ? "high" : "auto"} decoding="async" onError={(event) => fallbackToBackendImage(event.currentTarget, product)} className="h-full w-full object-contain" />
                                         </div>
                                       ) : null}
 

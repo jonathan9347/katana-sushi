@@ -34,6 +34,26 @@ function getCandidateBaseUrls() {
 const apiBaseUrls = getCandidateBaseUrls();
 let activeBaseUrl = apiBaseUrls[0];
 
+export function getActiveApiBaseUrl() {
+  return activeBaseUrl;
+}
+
+export function resolveBackendImageUrl(imageUrl?: string | null) {
+  if (!imageUrl) {
+    return null;
+  }
+
+  if (/^(data:|blob:|https?:\/\/|\/\/)/i.test(imageUrl)) {
+    return imageUrl;
+  }
+
+  if (!activeBaseUrl) {
+    return imageUrl;
+  }
+
+  return new URL(imageUrl, `${trimTrailingSlash(activeBaseUrl)}/`).toString();
+}
+
 export function resolveImageUrl(imageUrl?: string | null) {
   if (!imageUrl) {
     return null;
@@ -43,13 +63,9 @@ export function resolveImageUrl(imageUrl?: string | null) {
     return imageUrl;
   }
 
-  // If the image path is rooted (starts with '/'), treat frontend-hosted
-  // images (e.g. '/images/...') as static assets served by the site.
-  // Only prefix the backend base URL for uploaded images under '/uploads/'.
   if (imageUrl.startsWith("/")) {
-    if (imageUrl.startsWith("/uploads/")) {
-      if (!activeBaseUrl) return imageUrl;
-      return new URL(imageUrl, `${trimTrailingSlash(activeBaseUrl)}/`).toString();
+    if (imageUrl.startsWith("/uploads/") && import.meta.env.DEV) {
+      return resolveBackendImageUrl(imageUrl);
     }
 
     return imageUrl;
