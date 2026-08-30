@@ -152,7 +152,7 @@ export default function Menu() {
             </div>
             <p className="text-sm leading-relaxed text-katana-muted">A curated selection of our most-loved dishes, chosen for their bold flavors and crowd-pleasing appeal.</p>
           </div>
-          <div className="mt-6 grid gap-4 lg:grid-cols-4">
+          <div className="mt-6 grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
             {guestFavorites.map((product) => {
               const imageSrc = resolveImageUrl(product.image_url);
 
@@ -167,12 +167,12 @@ export default function Menu() {
                       🍣
                     </div>
                   )}
-                  <div className="p-4">
+                  <div className="p-3 sm:p-4">
                     <div className="flex items-start justify-between gap-3">
-                      <h3 className="font-display text-lg font-bold text-white">{product.name}</h3>
+                      <h3 className="font-display text-base font-bold text-white sm:text-lg">{product.name}</h3>
                       <p className="text-sm font-bold text-katana-red">{money(product.price)}</p>
                     </div>
-                    <p className="mt-2 text-sm leading-relaxed text-katana-muted">{product.description ?? "House specialty"}</p>
+                    <p className="mt-2 text-xs leading-relaxed text-katana-muted sm:text-sm">{product.description ?? "House specialty"}</p>
                   </div>
                 </article>
               );
@@ -202,7 +202,7 @@ export default function Menu() {
           {grouped.map((group) => (
             <section key={group.category} data-category={group.category} ref={(el) => (groupRefs.current[group.category] = el)}>
               <h2 className="font-display text-2xl font-bold text-white">{group.category}</h2>
-              <div className="mt-4 grid gap-4 lg:grid-cols-4">
+              <div className="mt-4 grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
                 {group.products.map((product, index) => {
                   const imageSrc = resolveImageUrl(product.image_url);
                   const eagerImage = group.category === grouped[0]?.category && index < 4;
@@ -218,12 +218,12 @@ export default function Menu() {
                           🍣
                         </div>
                       )}
-                      <div className="p-4">
+                      <div className="p-3 sm:p-4">
                         <div className="flex items-start justify-between gap-3">
-                          <h3 className="font-display text-lg font-bold text-white">{product.name}</h3>
+                          <h3 className="font-display text-base font-bold text-white sm:text-lg">{product.name}</h3>
                           <p className="text-sm font-bold text-katana-red">{money(product.price)}</p>
                         </div>
-                        <p className="mt-2 text-sm leading-relaxed text-katana-muted">{product.description ?? "House specialty"}</p>
+                        <p className="mt-2 text-xs leading-relaxed text-katana-muted sm:text-sm">{product.description ?? "House specialty"}</p>
                         {product.is_available === false && (
                           <p className="mt-3 text-xs font-bold uppercase tracking-[0.14em] text-katana-muted">Unavailable</p>
                         )}
