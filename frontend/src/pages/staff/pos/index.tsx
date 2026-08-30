@@ -8,6 +8,7 @@ import StartUnlimitedModal from "./StartUnlimitedModal";
 import UnlimitedSession from "./UnlimitedSession";
 import { PosProduct, usePosCart } from "./store";
 import { api } from "../../../lib/api";
+import { defaultSystemSettings, fetchSystemSettings, getTaxRate, taxLabel, type SystemSettings } from "../../../lib/systemSettings";
 import { useToast } from "../../../hooks/useToast";
 import { Button } from "../../../components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "../../../components/ui/card";
@@ -93,16 +94,25 @@ export default function PosPage() {
     enabled: allowed
   });
 
+  const systemSettingsQuery = useQuery({
+    queryKey: ["system-settings"],
+    queryFn: fetchSystemSettings,
+    enabled: allowed,
+    retry: 1
+  });
+
+  const systemSettings = systemSettingsQuery.data ?? defaultSystemSettings;
+
   const totals = useMemo(() => {
     const subtotal = items.reduce((sum, item) => sum + Number(item.product.price) * item.quantity, 0);
-    const tax = subtotal * 0.12;
+    const tax = Number((subtotal * getTaxRate(systemSettings)).toFixed(2));
 
     return {
       subtotal,
       tax,
-      total: subtotal + tax
+      total: Number((subtotal + tax).toFixed(2))
     };
-  }, [items]);
+  }, [items, systemSettings]);
 
   const categories = useMemo(() => {
     const productCategories = new Set((productsQuery.data ?? []).map((product) => product.category));
@@ -142,7 +152,7 @@ export default function PosPage() {
       queryClient.invalidateQueries({ queryKey: ["products"] });
       queryClient.invalidateQueries({ queryKey: ["pos", "transactions"] });
       toast("Payment completed.");
-      printReceipt(transaction);
+      printReceipt(transaction, systemSettings);
     },
     onError: (error) => {
       console.error("Checkout failed", error);
@@ -312,7 +322,7 @@ export default function PosPage() {
 
               <div className="mt-auto grid gap-2 border-t border-slate-200 pt-4 text-sm">
                 <TotalLine label="Subtotal" value={totals.subtotal} />
-                <TotalLine label="Tax (12%)" value={totals.tax} />
+                <TotalLine label={taxLabel(systemSettings)} value={totals.tax} />
                 <TotalLine label="Total" value={totals.total} strong />
                 <Button
                   className="mt-2 min-h-12"
@@ -356,7 +366,7 @@ function TotalLine({ label, value, strong = false }: { label: string; value: num
   );
 }
 
-function printReceipt(transaction: PosTransaction) {
+function printReceipt(transaction: PosTransaction, settings: SystemSettings) {
   const receipt = window.open("", "_blank", "width=380,height=640");
 
   if (!receipt) {
@@ -370,6 +380,7 @@ function printReceipt(transaction: PosTransaction) {
         <title>${transaction.transaction_number}</title>
         <style>
           body { font-family: Arial, sans-serif; margin: 16px; color: #111827; }
+          @page { size: ${settings.receipt_paper_size === "A4" ? "A4" : settings.receipt_paper_size}; margin: 8mm; }
           h1 { font-size: 18px; margin: 0 0 4px; text-align: center; }
           p { margin: 4px 0; }
           table { border-collapse: collapse; width: 100%; margin-top: 12px; }
@@ -380,7 +391,7 @@ function printReceipt(transaction: PosTransaction) {
         </style>
       </head>
       <body>
-        <h1>Katana Sushi</h1>
+        <h1>${settings.restaurant_name}</h1>
         <p>Transaction: ${transaction.transaction_number}</p>
         <p>Date: ${new Date(transaction.created_at).toLocaleString()}</p>
         <p>Payment: ${transaction.payment_method.toUpperCase()}</p>
@@ -408,7 +419,7 @@ function printReceipt(transaction: PosTransaction) {
             : ""
         }
         <div class="line"></div>
-        <p style="text-align:center">Thank you.</p>
+        <p style="text-align:center">${settings.receipt_footer}</p>
         <script>
           window.onload = () => {
             window.print();

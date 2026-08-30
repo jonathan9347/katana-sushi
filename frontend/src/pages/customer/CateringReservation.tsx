@@ -6,6 +6,7 @@ import { api } from "../../lib/api";
 import { getApiErrorMessage } from "../../lib/errors";
 import { createPaymentIntent, verifyPayment, buildReservationReference, type PaymentMethod } from "../../lib/payment";
 import { todayManilaDateKey } from "../../lib/dateTime";
+import { defaultSystemSettings, downpaymentLabel, fetchSystemSettings, getDownpaymentRate, getTaxRate, taxLabel } from "../../lib/systemSettings";
 
 type CateringPackage = {
   id: string;
@@ -128,6 +129,13 @@ export default function CateringReservation() {
     retry: 1
   });
 
+  const { data: systemSettingsData } = useQuery({
+    queryKey: ["system-settings"],
+    queryFn: fetchSystemSettings,
+    retry: 1
+  });
+
+  const systemSettings = systemSettingsData ?? defaultSystemSettings;
   const packages = packagesQuery.data ?? [];
   const packagesByStation = useMemo(() => {
     const map: { [k: string]: CateringPackage[] } = {};
@@ -159,7 +167,7 @@ export default function CateringReservation() {
     window.scrollTo({ top: 0, behavior: "smooth" });
   }, [step]);
 
-  const headcountNumber = selectedPackageByStation[form.station_types[0]]?.minPax ?? 10;
+  const headcountNumber = Math.max(selectedPackageByStation[form.station_types[0]]?.minPax ?? systemSettings.minimum_catering_pax, systemSettings.minimum_catering_pax);
   const subtotal = useMemo(() => {
     return stations.reduce((sum, s) => {
       if (!form.station_types.includes(s.id)) return sum;
@@ -167,17 +175,17 @@ export default function CateringReservation() {
       return sum + getPackagePrice(pkg);
     }, 0);
   }, [form.station_types, packagesByStation, JSON.stringify(form.package_by_station)]);
-  const tax = Number((subtotal * 0.12).toFixed(2));
+  const tax = Number((subtotal * getTaxRate(systemSettings)).toFixed(2));
   const totalPrice = Number((subtotal + tax).toFixed(2));
   const isFullPayment = form.payment_plan === "full_payment";
-  const paymentAmount = Number((isFullPayment ? totalPrice : Number((totalPrice * 0.5).toFixed(2))).toFixed(2));
+  const paymentAmount = Number((isFullPayment ? totalPrice : Number((totalPrice * getDownpaymentRate(systemSettings)).toFixed(2))).toFixed(2));
   const remaining = Number((totalPrice - paymentAmount).toFixed(2));
   const [summaryOpen, setSummaryOpen] = useState(false);
   const stationCount = form.station_types.length;
   const subtotalTotal = Number((subtotal * stationCount).toFixed(2));
-  const taxTotal = Number((subtotalTotal * 0.12).toFixed(2));
+  const taxTotal = Number((subtotalTotal * getTaxRate(systemSettings)).toFixed(2));
   const totalPriceTotal = Number((subtotalTotal + taxTotal).toFixed(2));
-  const paymentAmountTotal = Number((isFullPayment ? totalPriceTotal : Number((totalPriceTotal * 0.5).toFixed(2))).toFixed(2));
+  const paymentAmountTotal = Number((isFullPayment ? totalPriceTotal : Number((totalPriceTotal * getDownpaymentRate(systemSettings)).toFixed(2))).toFixed(2));
   const remainingTotal = Number((totalPriceTotal - paymentAmountTotal).toFixed(2));
 
   function setField(field: keyof typeof form, value: any) {
@@ -482,7 +490,7 @@ export default function CateringReservation() {
               <div className="flex items-center justify-between">
                 <h3 className="text-sm font-bold uppercase tracking-wide text-white">Booking summary</h3>
                 <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-neutral-300">
-                  <span className="rounded-full border border-katana-border bg-katana-surface px-3 py-1 text-neutral-200">{isFullPayment ? "Full payment" : "50% initial"}</span>
+                  <span className="rounded-full border border-katana-border bg-katana-surface px-3 py-1 text-neutral-200">{isFullPayment ? "Full payment" : `${systemSettings.default_downpayment_percent}% initial`}</span>
                 </div>
               </div>
               <div className="mt-4 space-y-3 text-sm text-neutral-300">
@@ -515,7 +523,7 @@ export default function CateringReservation() {
                     <span className="text-right">{money(subtotalTotal)}</span>
                 </div>
                   <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3">
-                    <span className="text-left">Tax (12%)</span>
+                    <span className="text-left">{taxLabel(systemSettings)}</span>
                     <span className="text-right">{money(taxTotal)}</span>
                 </div>
                   <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 text-base font-bold text-white">
@@ -523,7 +531,7 @@ export default function CateringReservation() {
                     <span className="text-right">{money(totalPriceTotal)}</span>
                 </div>
                   <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 text-sm text-neutral-300">
-                    <span className="text-left">{isFullPayment ? "Amount now" : "Downpayment (50%)"}</span>
+                    <span className="text-left">{isFullPayment ? "Amount now" : downpaymentLabel(systemSettings)}</span>
                     <span className="text-right">{money(paymentAmountTotal)}</span>
                 </div>
                   <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 text-sm text-neutral-300">
@@ -541,7 +549,7 @@ export default function CateringReservation() {
                   onClick={() => setField("payment_plan", "initial_only")}
                   className={`rounded-2xl border px-4 py-4 text-left text-sm font-bold ${form.payment_plan === "initial_only" ? "border-katana-red bg-katana-red/15 text-white" : "border-katana-border bg-katana-surface text-neutral-300"}`}
                 >
-                      <p className="font-semibold">50% initial</p>
+                      <p className="font-semibold">{systemSettings.default_downpayment_percent}% initial</p>
                       <p className="mt-2 text-sm text-neutral-300">Pay {money(paymentAmountTotal)} now. Remaining {money(remainingTotal)} due at event.</p>
                 </button>
                 <button
@@ -682,7 +690,7 @@ export default function CateringReservation() {
                       <span className="text-left sm:text-right">{money(subtotalTotal)}</span>
                     </div>
                     <div className="grid grid-cols-[minmax(0,5rem)_minmax(0,1fr)] items-center gap-3 sm:grid-cols-[minmax(0,6rem)_minmax(0,1fr)]">
-                      <span>Tax (12%)</span>
+                      <span>{taxLabel(systemSettings)}</span>
                       <span className="text-left sm:text-right">{money(taxTotal)}</span>
                     </div>
                     <div className="grid grid-cols-[minmax(0,5rem)_minmax(0,1fr)] items-center gap-3 sm:grid-cols-[minmax(0,6rem)_minmax(0,1fr)] text-base font-bold text-slate-900">

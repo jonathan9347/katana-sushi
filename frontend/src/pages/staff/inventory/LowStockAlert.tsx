@@ -7,10 +7,10 @@ import { RawMaterial } from "./types";
 
 export default function LowStockAlert() {
   const lowStockQuery = useQuery({
-    queryKey: ["inventory", "materials"],
+    queryKey: ["inventory", "low-stock"],
     queryFn: async () => {
-      const response = await api.get<{ materials: RawMaterial[] }>("/api/inventory/materials");
-      return response.data.materials.filter((material) => Number(material.current_stock) <= Number(material.reorder_level));
+      const response = await api.get<{ materials: RawMaterial[] }>("/api/inventory/materials/low-stock");
+      return response.data.materials;
     }
   });
 

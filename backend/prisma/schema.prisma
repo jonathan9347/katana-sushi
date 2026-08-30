@@ -326,6 +326,33 @@ model UnlimitedIncludedProduct {
   @@map("unlimited_included_products")
 }
 
+model SystemSetting {
+  id               String   @id @default(cuid())
+  singleton_key    String   @unique @default("default")
+  restaurant_name  String   @default("Katana Sushi")
+  timezone         String   @default("Asia/Manila")
+  currency         String   @default("PHP")
+  tax_rate_percent Float    @default(12)
+  receipt_paper_size String @default("80mm")
+  receipt_footer   String   @default("Thank you for dining with us!")
+  max_party_size    Int     @default(30)
+  reservation_duration_minutes Int @default(90)
+  reservation_grace_period_minutes Int @default(15)
+  minimum_catering_pax Int @default(10)
+  default_downpayment_percent Float @default(50)
+  auto_lock_catering_ingredients Boolean @default(true)
+  release_catering_locks_on_completion Boolean @default(true)
+  default_reorder_level Float @default(10)
+  low_stock_threshold_percent Float @default(100)
+  auto_reorder_enabled Boolean @default(false)
+  email_notifications_enabled Boolean @default(true)
+  sms_notifications_enabled Boolean @default(false)
+  low_stock_alerts_enabled Boolean @default(true)
+  updated_at       DateTime @updatedAt
+
+  @@map("system_settings")
+}
+
 model CateringPackage {
   id             String   @id @default(cuid())
   name           String

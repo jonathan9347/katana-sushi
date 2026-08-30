@@ -5,7 +5,7 @@ services:
     rootDir: backend
     plan: free
     region: oregon
-    buildCommand: npm install --include=dev && npm run build && npm run prisma:generate
+    buildCommand: npm install --include=dev && npm run prisma:generate && npm run build
     preDeployCommand: npm run prisma:push && npm run prisma:seed:prod
     startCommand: npm run start
     envVars:

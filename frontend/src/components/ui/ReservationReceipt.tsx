@@ -1,7 +1,9 @@
 import { Printer } from "lucide-react";
 import type React from "react";
+import { useQuery } from "@tanstack/react-query";
 import { formatManilaDate, formatTime12 } from "../../lib/dateTime";
 import { formatCurrencyPHP, formatPaymentPlan, formatStatus, formatVenueType } from "../../lib/reservationDetails";
+import { defaultSystemSettings, fetchSystemSettings, getTaxRate, taxLabel } from "../../lib/systemSettings";
 import { Button } from "./button";
 
 export type ReservationProduct = {
@@ -141,12 +143,12 @@ function getPackageItems(packageItems: unknown): string[] {
     .filter(Boolean);
 }
 
-function getTotals(reservation: ReservationReceiptData) {
+function getTotals(reservation: ReservationReceiptData, taxRate: number) {
   const products = reservation.selected_products ?? [];
   const productSubtotal = products.reduce((sum, item) => sum + numberValue(item.price) * numberValue(item.quantity), 0);
   const total = numberValue(reservation.total_price);
-  const subtotal = numberValue(reservation.subtotal) || productSubtotal || (total ? Number((total / 1.12).toFixed(2)) : 0);
-  const tax = reservation.tax !== undefined && reservation.tax !== null ? numberValue(reservation.tax) : Number((subtotal * 0.12).toFixed(2));
+  const subtotal = numberValue(reservation.subtotal) || productSubtotal || (total ? Number((total / (1 + taxRate)).toFixed(2)) : 0);
+  const tax = reservation.tax !== undefined && reservation.tax !== null ? numberValue(reservation.tax) : Number((subtotal * taxRate).toFixed(2));
 
   return {
     subtotal,
@@ -174,10 +176,16 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 }
 
 export function ReservationReceipt({ reservation, actions, paymentControls, showPrintButton = true, onClose }: ReservationReceiptProps) {
+  const { data: systemSettingsData } = useQuery({
+    queryKey: ["system-settings"],
+    queryFn: fetchSystemSettings,
+    retry: 1
+  });
+  const systemSettings = systemSettingsData ?? defaultSystemSettings;
   const products = reservation.selected_products ?? [];
   const packageItems = getPackageItems(reservation.package_items);
   const locks = reservation.ingredient_locks ?? [];
-  const totals = getTotals(reservation);
+  const totals = getTotals(reservation, getTaxRate(systemSettings));
   const isCatering = reservation.type === "catering";
   const isUnlimited = reservation.reservation_type === "unlimited";
   const eventDate = reservation.event_date ?? reservation.date;
@@ -271,7 +279,7 @@ export function ReservationReceipt({ reservation, actions, paymentControls, show
 
           <div className="mt-4 space-y-1 border-t border-dashed border-slate-300 pt-3 text-sm">
             <div className="flex justify-between gap-4"><span>Subtotal</span><span>{money(totals.subtotal)}</span></div>
-            <div className="flex justify-between gap-4"><span>Tax (12%)</span><span>{money(totals.tax)}</span></div>
+            <div className="flex justify-between gap-4"><span>{taxLabel(systemSettings)}</span><span>{money(totals.tax)}</span></div>
             <div className="flex justify-between gap-4 text-base font-black"><span>Total</span><span>{money(totals.total)}</span></div>
           </div>
         </Section>

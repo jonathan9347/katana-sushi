@@ -48,7 +48,18 @@ initSupabase().catch((error) => {
   console.error("Failed to initialize Supabase client:", error);
 });
 
-export const prisma = new PrismaClient();
+function getPgbouncerDatabaseUrl() {
+  const databaseUrl = process.env.DATABASE_URL;
+  if (!databaseUrl || databaseUrl.includes("pgbouncer=true")) {
+    return databaseUrl;
+  }
+
+  return `${databaseUrl}${databaseUrl.includes("?") ? "&" : "?"}pgbouncer=true&connection_limit=1`;
+}
+
+export const prisma = new PrismaClient({
+  datasources: { db: { url: getPgbouncerDatabaseUrl() } }
+});
 const app = express();
 const notificationService = new NotificationService();
 
@@ -438,7 +449,7 @@ const reservationBodySchema = z.object({
   customer_email: z.string().email(),
   date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
   time: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/),
-  party_size: z.coerce.number().int().min(1).max(30),
+  party_size: z.coerce.number().int().min(1),
   special_requests: z.string().optional()
 });
 
@@ -447,7 +458,7 @@ const cateringInquiryBodySchema = z.object({
   customer_phone: z.string().regex(/^09\d{9}$/),
   customer_email: z.string().email(),
   event_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
-  headcount: z.coerce.number().int().min(10),
+  headcount: z.coerce.number().int().min(1),
   venue_address: z.string().min(5),
   package_type: z.enum(["sushi_station", "sashimi_bar", "tempura_live"]).optional().nullable(),
   downpayment_acknowledged: z.coerce.boolean().refine(Boolean),
@@ -509,7 +520,7 @@ const cateringReservationBodySchema = z.object({
   customer_phone: z.string().regex(/^09\d{9}$/),
   customer_email: z.string().email(),
   event_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
-  headcount: z.coerce.number().int().min(10),
+  headcount: z.coerce.number().int().min(1),
   venue_address: z.string().min(5),
   package_id: z.string().min(1),
   payment_plan: z.enum(["initial_only", "full_payment"]).default("initial_only"),
@@ -1102,8 +1113,13 @@ async function getAvailableCapacity(date: Date, time: string) {
 app.post("/api/reservations", async (req, res, next) => {
   try {
     const rawBody = reservationBodySchema.parse(req.body);
+    const systemSettings = await getSystemSettings();
     const date = manilaDateToUtc(rawBody.date);
     const body = { ...rawBody, date };
+
+    if (body.party_size > systemSettings.max_party_size) {
+      return res.status(400).json({ message: `Party size cannot exceed ${systemSettings.max_party_size} guests.` });
+    }
 
     if (isPastDate(body.date)) {
       return res.status(400).json({ message: "Date cannot be in the past" });
@@ -1175,6 +1191,98 @@ app.get("/api/unlimited/settings", async (_req, res, next) => {
   }
 });
 
+app.get("/api/settings/system", async (_req, res, next) => {
+  try {
+    const settings = await getSystemSettings();
+    return res.json({ settings });
+  } catch (error) {
+    return next(error);
+  }
+});
+
+app.put("/api/admin/settings/system", async (req, res, next) => {
+  try {
+    const user = requireRole(req, res, ["admin", "cashier", "receptionist", "event_coordinator", "inventory_manager", "chef", "staff"]);
+
+    if (!user) {
+      return;
+    }
+
+    const body = z
+      .object({
+        restaurant_name: z.string().min(1).max(120),
+        timezone: z.string().min(1).max(80),
+        currency: z.string().min(1).max(8),
+        tax_rate_percent: z.coerce.number().min(0).max(100),
+        receipt_paper_size: z.string().min(1).max(20),
+        receipt_footer: z.string().min(1).max(240),
+        max_party_size: z.coerce.number().int().min(1).max(500),
+        reservation_duration_minutes: z.coerce.number().int().min(15).max(480),
+        reservation_grace_period_minutes: z.coerce.number().int().min(0).max(120),
+        minimum_catering_pax: z.coerce.number().int().min(1).max(1000),
+        default_downpayment_percent: z.coerce.number().min(0).max(100),
+        auto_lock_catering_ingredients: z.coerce.boolean(),
+        release_catering_locks_on_completion: z.coerce.boolean(),
+        default_reorder_level: z.coerce.number().nonnegative(),
+        low_stock_threshold_percent: z.coerce.number().min(0).max(500),
+        auto_reorder_enabled: z.coerce.boolean(),
+        email_notifications_enabled: z.coerce.boolean(),
+        sms_notifications_enabled: z.coerce.boolean(),
+        low_stock_alerts_enabled: z.coerce.boolean()
+      })
+      .parse(req.body);
+    const currentSettings = await getSystemSettings();
+    const role = normalizeRole(user.role);
+    const allFields = Object.keys(defaultSystemSettings) as Array<keyof SystemSettingsInput>;
+    const fieldsByRole: Record<string, Array<keyof SystemSettingsInput>> = {
+      admin: allFields,
+      cashier: [
+        "tax_rate_percent",
+        "receipt_paper_size",
+        "receipt_footer",
+        "email_notifications_enabled",
+        "sms_notifications_enabled",
+        "low_stock_alerts_enabled"
+      ],
+      receptionist: [
+        "max_party_size",
+        "reservation_duration_minutes",
+        "reservation_grace_period_minutes",
+        "email_notifications_enabled",
+        "sms_notifications_enabled"
+      ],
+      event_coordinator: [
+        "minimum_catering_pax",
+        "default_downpayment_percent",
+        "auto_lock_catering_ingredients",
+        "release_catering_locks_on_completion",
+        "email_notifications_enabled",
+        "sms_notifications_enabled"
+      ],
+      inventory_manager: [
+        "default_reorder_level",
+        "low_stock_threshold_percent",
+        "auto_reorder_enabled",
+        "low_stock_alerts_enabled",
+        "email_notifications_enabled",
+        "sms_notifications_enabled"
+      ],
+      chef: ["low_stock_alerts_enabled", "email_notifications_enabled", "sms_notifications_enabled"],
+      staff: ["email_notifications_enabled", "sms_notifications_enabled"]
+    };
+    const editableFields = fieldsByRole[role ?? "staff"] ?? [];
+    const filteredSettings = editableFields.reduce(
+      (next, field) => ({ ...next, [field]: body[field] }),
+      { ...currentSettings }
+    ) as SystemSettingsInput;
+    const settings = await updateSystemSettings(filteredSettings);
+
+    return res.json({ settings });
+  } catch (error) {
+    return next(error);
+  }
+});
+
 app.get("/api/catering/packages", async (_req, res, next) => {
   try {
     const packages = await Promise.all(
@@ -1196,17 +1304,24 @@ app.post("/api/catering/reservations", async (req, res, next) => {
       return res.status(400).json({ message: "Event date cannot be in the past" });
     }
 
-    const selectedPackage = await prisma.cateringPackage.findUnique({ where: { id: body.package_id } });
+    const [selectedPackage, systemSettings] = await Promise.all([
+      prisma.cateringPackage.findUnique({ where: { id: body.package_id } }),
+      getSystemSettings()
+    ]);
 
     if (!selectedPackage) {
       return res.status(404).json({ message: "Selected catering package not found" });
     }
 
+    if (body.headcount < systemSettings.minimum_catering_pax) {
+      return res.status(400).json({ message: `Catering requires at least ${systemSettings.minimum_catering_pax} pax.` });
+    }
+
     const subtotal = getCateringPackagePrice(body.package_id);
-    const tax = Number((subtotal * 0.12).toFixed(2));
+    const tax = calculateTax(subtotal, systemSettings.tax_rate_percent);
     const total_price = Number((subtotal + tax).toFixed(2));
     const isFullPayment = body.payment_plan === "full_payment";
-    const downpayment_amount = Number((isFullPayment ? total_price : Number((total_price * 0.5).toFixed(2))).toFixed(2));
+    const downpayment_amount = Number((isFullPayment ? total_price : Number((total_price * (systemSettings.default_downpayment_percent / 100)).toFixed(2))).toFixed(2));
     const remaining_balance = Number((total_price - downpayment_amount).toFixed(2));
 
     const reservation_id = body.reservation_id ?? (await generateReadableId("CAT", body.event_date, "reservation_id"));
@@ -1549,10 +1664,11 @@ app.put("/api/staff/catering/reservations/:id/approve", async (req, res, next) =
       return;
     }
 
+    const systemSettings = await getSystemSettings();
     const reservation = await prisma.$transaction(async (tx) => {
       const updated = await tx.cateringReservation.update({ where: { id: req.params.id }, data: { status: "confirmed" } });
 
-      if (updated.package_id && updated.headcount && !updated.ingredients_locked) {
+      if (systemSettings.auto_lock_catering_ingredients && updated.package_id && updated.headcount && !updated.ingredients_locked) {
         await createCateringIngredientLocks(tx, updated.id, updated.package_id, updated.headcount);
       }
 
@@ -1681,15 +1797,23 @@ app.post("/api/reservations/dine-in", async (req, res, next) => {
       return res.status(400).json({ message: "Time must be within operating hours" });
     }
 
-    const unlimitedSettings = body.reservation_type === "unlimited" ? await getUnlimitedSettings() : null;
+    const [unlimitedSettings, systemSettings] = await Promise.all([
+      body.reservation_type === "unlimited" ? getUnlimitedSettings() : Promise.resolve(null),
+      getSystemSettings()
+    ]);
+
+    if (body.party_size > systemSettings.max_party_size) {
+      return res.status(400).json({ message: `Party size cannot exceed ${systemSettings.max_party_size} guests.` });
+    }
+
     const subtotal =
       body.reservation_type === "unlimited"
         ? Number(unlimitedSettings?.price_per_person ?? 599) * body.party_size
         : body.selected_products?.reduce((sum, item) => sum + Number(item.price) * Number(item.quantity), 0) ?? 0;
-    const tax = Number((subtotal * 0.12).toFixed(2));
+    const tax = calculateTax(subtotal, systemSettings.tax_rate_percent);
     const total_price = Number((subtotal + tax).toFixed(2));
     const isFullPayment = body.payment_plan === "full_payment";
-    const downpayment_amount = Number((isFullPayment ? total_price : Number((total_price * 0.5).toFixed(2))).toFixed(2));
+    const downpayment_amount = Number((isFullPayment ? total_price : Number((total_price * (systemSettings.default_downpayment_percent / 100)).toFixed(2))).toFixed(2));
     const remaining_balance = Number((total_price - downpayment_amount).toFixed(2));
     const booking_id = body.booking_id ?? (await generateReadableId(body.reservation_type === "unlimited" ? "KTN-UNL" : "KTN-DINE", body.date, "booking_id"));
 
@@ -1742,11 +1866,16 @@ app.post("/api/reservations/dine-in", async (req, res, next) => {
 app.post("/api/catering/inquiry", async (req, res, next) => {
   try {
     const rawBody = cateringInquiryBodySchema.parse(req.body);
+    const systemSettings = await getSystemSettings();
     const event_date = manilaDateToUtc(rawBody.event_date);
     const body = { ...rawBody, event_date };
 
     if (isPastDate(body.event_date)) {
       return res.status(400).json({ message: "Event date cannot be in the past" });
+    }
+
+    if (body.headcount < systemSettings.minimum_catering_pax) {
+      return res.status(400).json({ message: `Catering requires at least ${systemSettings.minimum_catering_pax} pax.` });
     }
 
     const inquiry_id = await generateReadableId("CAT", body.event_date, "inquiry_id");
@@ -2328,12 +2457,16 @@ async function completeCateringReservation(req: Request, res: Response, next: Ne
         throw Object.assign(new Error("Cannot complete event until remaining balance is fully settled."), { statusCode: 400 });
       }
 
-      await releaseCateringLocks(
-        tx,
-        req.params.id,
-        user.sub,
-        `Catering reservation ${current.reservation_id ?? current.inquiry?.inquiry_id ?? req.params.id}`
-      );
+      const systemSettings = await getSystemSettings();
+
+      if (systemSettings.release_catering_locks_on_completion) {
+        await releaseCateringLocks(
+          tx,
+          req.params.id,
+          user.sub,
+          `Catering reservation ${current.reservation_id ?? current.inquiry?.inquiry_id ?? req.params.id}`
+        );
+      }
       return tx.cateringReservation.update({ where: { id: req.params.id }, data: { status: "completed" } });
     });
 
@@ -2419,12 +2552,19 @@ app.get("/api/inventory/materials", async (_req, res, next) => {
 
 app.get("/api/inventory/materials/low-stock", async (_req, res, next) => {
   try {
-    const materials = await prisma.rawMaterial.findMany({
-      where: { is_deleted: false },
-      orderBy: { name: "asc" }
-    });
+    const [materials, systemSettings] = await Promise.all([
+      prisma.rawMaterial.findMany({
+        where: { is_deleted: false },
+        orderBy: { name: "asc" }
+      }),
+      getSystemSettings()
+    ]);
+    const thresholdMultiplier = systemSettings.low_stock_alerts_enabled
+      ? systemSettings.low_stock_threshold_percent / 100
+      : 0;
+
     res.json({
-      materials: materials.filter((material) => Number(material.current_stock) <= Number(material.reorder_level))
+      materials: materials.filter((material) => Number(material.current_stock) <= Number(material.reorder_level) * thresholdMultiplier)
     });
   } catch (error) {
     next(error);
@@ -3968,20 +4108,23 @@ app.post("/api/pos/transaction", async (req, res, next) => {
         items: z.array(posItemSchema).min(1)
       })
       .parse(req.body);
-    const products = await prisma.sellingProduct.findMany({
-      where: { id: { in: body.items.map((item) => item.productId) }, is_deleted: false },
-      include: {
-        recipes: {
-          include: {
-            recipe_ingredients: {
-              include: {
-                raw_material: true
+    const [products, systemSettings] = await Promise.all([
+      prisma.sellingProduct.findMany({
+        where: { id: { in: body.items.map((item) => item.productId) }, is_deleted: false },
+        include: {
+          recipes: {
+            include: {
+              recipe_ingredients: {
+                include: {
+                  raw_material: true
+                }
               }
             }
           }
         }
-      }
-    });
+      }),
+      getSystemSettings()
+    ]);
     const productsById = new Map(products.map((product) => [product.id, product]));
     const missingItem = body.items.find((item) => !productsById.has(item.productId));
 
@@ -3994,7 +4137,7 @@ app.post("/api/pos/transaction", async (req, res, next) => {
       const unitPrice = item.unitPrice ?? Number(product?.price ?? 0);
       return total + unitPrice * item.quantity;
     }, 0);
-    const tax = Number((subtotal * 0.12).toFixed(2));
+    const tax = calculateTax(subtotal, systemSettings.tax_rate_percent);
     const total = Number((subtotal + tax).toFixed(2));
 
     if (body.paymentMethod === "cash" && Number(body.cashReceived ?? 0) < total) {
@@ -4801,6 +4944,100 @@ async function getUnlimitedSettings() {
   });
 }
 
+type SystemSettingsRecord = {
+  id: string;
+  singleton_key: string;
+  restaurant_name: string;
+  timezone: string;
+  currency: string;
+  tax_rate_percent: number;
+  receipt_paper_size: string;
+  receipt_footer: string;
+  max_party_size: number;
+  reservation_duration_minutes: number;
+  reservation_grace_period_minutes: number;
+  minimum_catering_pax: number;
+  default_downpayment_percent: number;
+  auto_lock_catering_ingredients: boolean;
+  release_catering_locks_on_completion: boolean;
+  default_reorder_level: number;
+  low_stock_threshold_percent: number;
+  auto_reorder_enabled: boolean;
+  email_notifications_enabled: boolean;
+  sms_notifications_enabled: boolean;
+  low_stock_alerts_enabled: boolean;
+  updated_at: Date;
+};
+
+type SystemSettingsInput = Pick<
+  SystemSettingsRecord,
+  | "restaurant_name"
+  | "timezone"
+  | "currency"
+  | "tax_rate_percent"
+  | "receipt_paper_size"
+  | "receipt_footer"
+  | "max_party_size"
+  | "reservation_duration_minutes"
+  | "reservation_grace_period_minutes"
+  | "minimum_catering_pax"
+  | "default_downpayment_percent"
+  | "auto_lock_catering_ingredients"
+  | "release_catering_locks_on_completion"
+  | "default_reorder_level"
+  | "low_stock_threshold_percent"
+  | "auto_reorder_enabled"
+  | "email_notifications_enabled"
+  | "sms_notifications_enabled"
+  | "low_stock_alerts_enabled"
+>;
+
+const defaultSystemSettings: SystemSettingsInput = {
+  restaurant_name: "Katana Sushi",
+  timezone: "Asia/Manila",
+  currency: "PHP",
+  tax_rate_percent: 12,
+  receipt_paper_size: "80mm",
+  receipt_footer: "Thank you for dining with us!",
+  max_party_size: 30,
+  reservation_duration_minutes: 90,
+  reservation_grace_period_minutes: 15,
+  minimum_catering_pax: 10,
+  default_downpayment_percent: 50,
+  auto_lock_catering_ingredients: true,
+  release_catering_locks_on_completion: true,
+  default_reorder_level: 10,
+  low_stock_threshold_percent: 100,
+  auto_reorder_enabled: false,
+  email_notifications_enabled: true,
+  sms_notifications_enabled: false,
+  low_stock_alerts_enabled: true
+};
+
+function calculateTax(subtotal: number, taxRatePercent: number) {
+  return Number((subtotal * (taxRatePercent / 100)).toFixed(2));
+}
+
+async function ensureSystemSettingsRow() {
+  return prisma.systemSetting.upsert({
+    where: { singleton_key: "default" },
+    create: { id: "system-settings-default", singleton_key: "default", ...defaultSystemSettings },
+    update: {}
+  });
+}
+
+async function getSystemSettings() {
+  return ensureSystemSettingsRow();
+}
+
+async function updateSystemSettings(settings: SystemSettingsInput) {
+  return prisma.systemSetting.upsert({
+    where: { singleton_key: "default" },
+    create: { id: "system-settings-default", singleton_key: "default", ...settings },
+    update: settings
+  });
+}
+
 async function deductRecipeForProduct(
   tx: Parameters<Parameters<typeof prisma.$transaction>[0]>[0],
   product: {
@@ -5159,6 +5396,7 @@ app.post("/api/pos/unlimited/end", async (req, res, next) => {
 });
 
 async function autoCompleteOverdueCateringReservations() {
+  const systemSettings = await getSystemSettings();
   const todayStart = startOfDay(new Date());
   const overdueReservations = await prisma.cateringReservation.findMany({
     where: {
@@ -5187,12 +5425,14 @@ async function autoCompleteOverdueCateringReservations() {
         return;
       }
 
-      await releaseCateringLocks(
-        tx,
-        reservation.id,
-        undefined,
-        `Catering reservation ${reservation.reservation_id ?? reservation.inquiry?.inquiry_id ?? reservation.id}`
-      );
+      if (systemSettings.release_catering_locks_on_completion) {
+        await releaseCateringLocks(
+          tx,
+          reservation.id,
+          undefined,
+          `Catering reservation ${reservation.reservation_id ?? reservation.inquiry?.inquiry_id ?? reservation.id}`
+        );
+      }
       await tx.cateringReservation.update({
         where: { id: reservation.id },
         data: { status: "completed" }

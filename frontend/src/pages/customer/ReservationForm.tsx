@@ -7,6 +7,7 @@ import { api, resolveBackendImageUrl, resolveImageUrl } from "../../lib/api";
 import { getApiErrorMessage } from "../../lib/errors";
 import { createPaymentIntent, verifyPayment, buildReservationReference, type PaymentMethod } from "../../lib/payment";
 import { formatTime12, timeOptions, todayManilaDateKey } from "../../lib/dateTime";
+import { defaultSystemSettings, downpaymentLabel, fetchSystemSettings, getDownpaymentRate, getTaxRate, taxLabel } from "../../lib/systemSettings";
 
 type Product = {
   id: string;
@@ -124,6 +125,13 @@ export default function ReservationForm() {
     retry: 1
   });
 
+  const { data: systemSettingsData } = useQuery({
+    queryKey: ["system-settings"],
+    queryFn: fetchSystemSettings,
+    retry: 1
+  });
+
+  const systemSettings = systemSettingsData ?? defaultSystemSettings;
   const products = productsData?.length ? productsData : fallbackProducts;
   const productImageUrls = useMemo(() => {
     return Array.from(
@@ -260,9 +268,9 @@ export default function ReservationForm() {
     return cartItems.reduce((sum, item) => sum + item.price * item.quantity, 0);
   }, [reservationType, unlimitedSettingsData, cartItems, form.party_size]);
 
-  const tax = Number((subtotal * 0.12).toFixed(2));
+  const tax = Number((subtotal * getTaxRate(systemSettings)).toFixed(2));
   const totalPrice = Number((subtotal + tax).toFixed(2));
-  const downpayment = Number((totalPrice * 0.5).toFixed(2));
+  const downpayment = Number((totalPrice * getDownpaymentRate(systemSettings)).toFixed(2));
   const remaining = Number((totalPrice - downpayment).toFixed(2));
   const cartItemCount = useMemo(() => cartItems.reduce((sum, item) => sum + item.quantity, 0), [cartItems]);
   const isFullPayment = paymentPlan === "full_payment";
@@ -540,7 +548,7 @@ export default function ReservationForm() {
                   <label className="block">
                     <span className="customer-label">Number of Guests *</span>
                     <select className="customer-input" value={form.party_size} onChange={(event) => setField("party_size", event.target.value)} required>
-                      {Array.from({ length: 12 }, (_, index) => index + 1).map((count) => (
+                      {Array.from({ length: systemSettings.max_party_size }, (_, index) => index + 1).map((count) => (
                         <option key={count} value={count}>{count} people</option>
                       ))}
                     </select>
@@ -857,7 +865,7 @@ export default function ReservationForm() {
                         <div className="mt-4 rounded-lg border border-katana-border bg-katana-surface p-3">
                           <p className="text-xs font-semibold uppercase text-neutral-300">Rules</p>
                           <ul className="mt-2 space-y-1 text-xs text-neutral-300">
-                            <li>90 minutes dining time.</li>
+                            <li>{systemSettings.reservation_duration_minutes} minutes dining time.</li>
                             <li>No leftovers; extra charges apply.</li>
                             <li>One table, same package for all guests.</li>
                           </ul>
@@ -898,7 +906,7 @@ export default function ReservationForm() {
                             <p>{money(subtotal)}</p>
                           </div>
                           <div className="flex items-center justify-between text-sm text-neutral-300">
-                            <p>Tax (12%)</p>
+                            <p>{taxLabel(systemSettings)}</p>
                             <p>{money(tax)}</p>
                           </div>
                           <div className="mt-3 flex items-center justify-between text-base font-bold text-white">
@@ -906,7 +914,7 @@ export default function ReservationForm() {
                             <p>{money(totalPrice)}</p>
                           </div>
                           <div className="mt-3 flex items-center justify-between text-sm text-neutral-300">
-                            <p>Downpayment (50%)</p>
+                            <p>{downpaymentLabel(systemSettings)}</p>
                             <p>{money(downpayment)}</p>
                           </div>
                           <div className="flex items-center justify-between text-sm text-neutral-300">
@@ -926,7 +934,7 @@ export default function ReservationForm() {
                           onClick={() => setPaymentPlan("initial_only")}
                           className={`rounded-2xl border px-4 py-4 text-left text-sm font-bold ${paymentPlan === "initial_only" ? "border-katana-red bg-katana-red/15 text-white" : "border-katana-border bg-katana-surface text-neutral-300"}`}
                         >
-                          <p className="font-semibold">50% INITIAL</p>
+                          <p className="font-semibold">{systemSettings.default_downpayment_percent}% INITIAL</p>
                           <p className="mt-2 text-sm text-neutral-300">Pay {money(downpayment)} now. Remaining {money(remaining)} due at restaurant.</p>
                         </button>
                         <button
@@ -984,9 +992,9 @@ export default function ReservationForm() {
                       <ul className="mt-3 list-disc space-y-2 pl-5">
                         <li>Payment is required to confirm your reservation.</li>
                         <li>Reserved guests are charged based on the reserved headcount.</li>
-                        <li>Dining time is limited to 1 hour and 30 minutes upon serving of food.</li>
+                        <li>Dining time is limited to {systemSettings.reservation_duration_minutes} minutes upon serving of food.</li>
                         <li>Please arrive on time to avoid delays.</li>
-                        <li>Reservations delayed by more than 15 minutes may be released to the next guest.</li>
+                        <li>Reservations delayed by more than {systemSettings.reservation_grace_period_minutes} minutes may be released to the next guest.</li>
                       </ul>
                     </section>
                   </div>
