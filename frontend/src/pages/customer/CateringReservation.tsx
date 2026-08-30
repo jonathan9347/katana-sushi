@@ -101,7 +101,6 @@ export default function CateringReservation() {
     customer_name: string;
     customer_phone: string;
     customer_email: string;
-    special_requests: string;
     payment_method: PaymentMethod;
     payment_plan: "initial_only" | "full_payment";
     acknowledged: boolean;
@@ -113,7 +112,6 @@ export default function CateringReservation() {
     customer_name: "",
     customer_phone: "",
     customer_email: "",
-    special_requests: "",
     payment_method: "cash",
     payment_plan: "initial_only",
     acknowledged: false
@@ -275,8 +273,7 @@ export default function CateringReservation() {
           payment_method: form.payment_method,
           payment_plan: form.payment_plan,
           payment_transaction_id: verification.transactionId,
-          reservation_id: reservationReference,
-          special_requests: form.special_requests || undefined
+          reservation_id: reservationReference
         }
       );
 
@@ -384,10 +381,6 @@ export default function CateringReservation() {
               <label className="block sm:col-span-2">
                 <span className="customer-label">Venue Address *</span>
                 <textarea className="min-h-24 customer-input" placeholder="Complete event venue address" value={form.venue_address} onChange={(event) => setField("venue_address", event.target.value)} required />
-              </label>
-              <label className="block sm:col-span-2">
-                <span className="customer-label">Special Requests</span>
-                <textarea className="min-h-24 customer-input" value={form.special_requests} onChange={(event) => setField("special_requests", event.target.value)} />
               </label>
             </div>
             )}

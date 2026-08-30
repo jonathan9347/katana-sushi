@@ -1,7 +1,7 @@
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 
 import { Link } from "react-router-dom";
-import { Banknote, CalendarCheck, Check, ChevronDown, Landmark, ShoppingCart, Smartphone } from "lucide-react";
+import { Banknote, CalendarCheck, Check, ChevronDown, Landmark, Minus, Plus, ShoppingCart, Smartphone } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { api, resolveBackendImageUrl, resolveImageUrl } from "../../lib/api";
 import { getApiErrorMessage } from "../../lib/errors";
@@ -92,8 +92,7 @@ export default function ReservationForm() {
     party_size: "4",
     customer_name: "",
     customer_phone: "",
-    customer_email: "",
-    special_requests: ""
+    customer_email: ""
   });
   const [reservationType, setReservationType] = useState<"dine_in" | "unlimited">("dine_in");
 
@@ -441,8 +440,7 @@ export default function ReservationForm() {
         payment_plan: paymentPlan,
         payment_method: paymentMethod,
         payment_transaction_id: verification.transactionId,
-        booking_id: reservationReference,
-        special_requests: form.special_requests
+        booking_id: reservationReference
       });
 
       setSuccess({
@@ -546,14 +544,6 @@ export default function ReservationForm() {
                     </select>
                   </label>
                   <label className="block">
-                    <span className="customer-label">Number of Guests *</span>
-                    <select className="customer-input" value={form.party_size} onChange={(event) => setField("party_size", event.target.value)} required>
-                      {Array.from({ length: systemSettings.max_party_size }, (_, index) => index + 1).map((count) => (
-                        <option key={count} value={count}>{count} people</option>
-                      ))}
-                    </select>
-                  </label>
-                  <label className="block">
                     <span className="customer-label">Your Name *</span>
                     <input className="customer-input" value={form.customer_name} onChange={(event) => setField("customer_name", event.target.value)} required />
                   </label>
@@ -565,10 +555,32 @@ export default function ReservationForm() {
                     <span className="customer-label">Email *</span>
                     <input className="customer-input" type="email" value={form.customer_email} onChange={(event) => setField("customer_email", event.target.value)} required />
                   </label>
-                  <label className="lg:col-span-2 block">
-                    <span className="customer-label">Special Requests</span>
-                    <textarea className="min-h-24 customer-input" value={form.special_requests} onChange={(event) => setField("special_requests", event.target.value)} />
-                  </label>
+                  <div className="block">
+                    <span className="customer-label">Number of Guests *</span>
+                    <div className="flex items-center gap-3">
+                      <button
+                        aria-label="Decrease number of guests"
+                        className="flex h-12 w-12 items-center justify-center rounded-xl border border-katana-border bg-katana-elevated text-white transition hover:border-katana-red disabled:cursor-not-allowed disabled:opacity-40"
+                        disabled={Number(form.party_size) <= 1}
+                        type="button"
+                        onClick={() => setField("party_size", String(Math.max(1, Number(form.party_size) - 1)))}
+                      >
+                        <Minus className="h-5 w-5" />
+                      </button>
+                      <output className="flex h-12 min-w-24 items-center justify-center rounded-xl border border-katana-border bg-katana-surface px-4 text-center font-bold text-white">
+                        {form.party_size} {Number(form.party_size) === 1 ? "person" : "people"}
+                      </output>
+                      <button
+                        aria-label="Increase number of guests"
+                        className="flex h-12 w-12 items-center justify-center rounded-xl border border-katana-border bg-katana-elevated text-white transition hover:border-katana-red disabled:cursor-not-allowed disabled:opacity-40"
+                        disabled={Number(form.party_size) >= systemSettings.max_party_size}
+                        type="button"
+                        onClick={() => setField("party_size", String(Math.min(systemSettings.max_party_size, Number(form.party_size) + 1)))}
+                      >
+                        <Plus className="h-5 w-5" />
+                      </button>
+                    </div>
+                  </div>
                 </div>
               )}
 
