@@ -1,7 +1,7 @@
 {
   "private": true,
   "scripts": {
-    "build": "cd backend && npm install && npm run build",
+    "build": "cd backend && npm install && npm run prisma:generate && npm run build",
     "start": "cd backend && npm run start",
     "prisma:generate": "cd backend && npx prisma generate --schema=prisma/schema.prisma",
     "prisma:push": "cd backend && npx prisma db push --schema=prisma/schema.prisma"
