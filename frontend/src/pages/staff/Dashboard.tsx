@@ -6,6 +6,7 @@ import InventoryDashboard from "../../components/dashboard/InventoryDashboard";
 import ReceptionDashboard from "../../components/dashboard/ReceptionDashboard";
 import EventDashboard from "../../components/dashboard/EventDashboard";
 import ChefDashboard from "../../components/dashboard/ChefDashboard";
+import FeedbackAnalysisTable from "../../components/dashboard/FeedbackAnalysisTable";
 
 export default function Dashboard() {
   const { user } = useAuth();
@@ -20,6 +21,7 @@ export default function Dashboard() {
     event_coordinator: <EventDashboard />,
     chef: <ChefDashboard />
   }[role as keyof Record<string, JSX.Element>] ?? <AdminDashboard />;
+  const canViewFeedbackAnalysis = ["admin", "receptionist", "event_coordinator"].includes(role);
 
   return (
     <main className="min-h-screen bg-slate-100 px-4 py-8 lg:px-8">
@@ -40,7 +42,10 @@ export default function Dashboard() {
           </Link>
         </div>
 
-        <section className="grid gap-6">{dashboardComponent}</section>
+        <section className="grid gap-6">
+          {dashboardComponent}
+          {canViewFeedbackAnalysis && <FeedbackAnalysisTable />}
+        </section>
       </div>
     </main>
   );

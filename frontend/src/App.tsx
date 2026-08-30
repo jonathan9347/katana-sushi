@@ -9,6 +9,7 @@ import UnlimitedSettings from "./pages/admin/UnlimitedSettings";
 import CateringInquiry from "./pages/customer/CateringInquiry";
 import CateringReservation from "./pages/customer/CateringReservation";
 import CateringReservationIntro from "./pages/customer/CateringReservationIntro";
+import Feedback from "./pages/customer/Feedback";
 import CustomerHome from "./pages/customer/Home";
 import DineInReservationIntro from "./pages/customer/DineInReservationIntro";
 import Menu from "./pages/customer/Menu";
@@ -66,6 +67,7 @@ export default function App() {
       <Route path="/catering" element={<CustomerPage><CateringReservationIntro /></CustomerPage>} />
       <Route path="/catering/book" element={<CustomerPage><CateringReservation /></CustomerPage>} />
       <Route path="/catering/inquiry" element={<CustomerPage><CateringInquiry /></CustomerPage>} />
+      <Route path="/feedback" element={<CustomerPage><Feedback /></CustomerPage>} />
       <Route path="/staff/login" element={<Login />} />
       <Route path="/staff/dashboard" element={<StaffPage roles={["admin", "inventory_manager", "cashier", "receptionist", "event_coordinator", "chef"]}><Dashboard /></StaffPage>} />
       <Route path="/staff/inventory" element={<StaffPage roles={["admin", "inventory_manager"]}><InventoryPage /></StaffPage>} />

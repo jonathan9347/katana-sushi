@@ -470,6 +470,22 @@ model CateringIngredientLock {
   @@map("catering_ingredient_locks")
 }
 
+model CustomerFeedback {
+  id             String   @id @default(cuid())
+  feedback_id    String   @unique
+  customer_name  String
+  customer_email String?
+  customer_phone String?
+  visit_type     String
+  rating         Int
+  message        String
+  status         String   @default("new")
+  created_at     DateTime @default(now())
+  updated_at     DateTime @updatedAt
+
+  @@map("customer_feedback")
+}
+
 model ConversionRule {
   id            String   @id @default(cuid())
   name          String

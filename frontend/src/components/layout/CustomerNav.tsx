@@ -1,4 +1,4 @@
-import { CalendarDays, ClipboardList, Home, Menu, MoonStar, PartyPopper, Search, SunMedium, UtensilsCrossed, X } from "lucide-react";
+import { CalendarDays, ClipboardList, Home, Menu, MessageSquareHeart, MoonStar, PartyPopper, Search, SunMedium, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import { NavLink } from "react-router-dom";
 
@@ -8,7 +8,8 @@ const navItems = [
   { to: "/reserve", label: "Dine In", icon: CalendarDays },
 
   { to: "/catering", label: "Catering", icon: PartyPopper },
-  { to: "/reservation/status", label: "Status", icon: Search }
+  { to: "/reservation/status", label: "Status", icon: Search },
+  { to: "/feedback", label: "Feedback", icon: MessageSquareHeart }
 ];
 
 function linkClass(isActive: boolean) {

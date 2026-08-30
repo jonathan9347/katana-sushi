@@ -65,6 +65,7 @@ const notificationService = new NotificationService();
 
 export async function ensureDemoSeed() {
   try {
+    await ensureCustomerFeedbackTable();
     const userCount = await prisma.user.count();
     const productCount = await prisma.sellingProduct.count();
 
@@ -86,6 +87,24 @@ export async function ensureDemoSeed() {
     console.error("✗ Failed to initialize demo seed data:", error);
     throw error;
   }
+}
+
+async function ensureCustomerFeedbackTable() {
+  await prisma.$executeRaw`
+    CREATE TABLE IF NOT EXISTS customer_feedback (
+      id TEXT PRIMARY KEY,
+      feedback_id TEXT UNIQUE NOT NULL,
+      customer_name TEXT NOT NULL,
+      customer_email TEXT,
+      customer_phone TEXT,
+      visit_type TEXT NOT NULL,
+      rating INTEGER NOT NULL,
+      message TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'new',
+      created_at TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP
+    )
+  `;
 }
 
 // Lightweight health check — does not depend on the database. Use for uptime
@@ -463,6 +482,15 @@ const cateringInquiryBodySchema = z.object({
   package_type: z.enum(["sushi_station", "sashimi_bar", "tempura_live"]).optional().nullable(),
   downpayment_acknowledged: z.coerce.boolean().refine(Boolean),
   message: z.string().optional()
+});
+
+const customerFeedbackBodySchema = z.object({
+  customer_name: z.string().min(1),
+  customer_email: z.string().email().optional().or(z.literal("")),
+  customer_phone: z.string().regex(/^09\d{9}$/).optional().or(z.literal("")),
+  visit_type: z.enum(["dine_in", "takeout", "delivery", "catering", "general"]),
+  rating: z.coerce.number().int().min(1).max(5),
+  message: z.string().min(10)
 });
 
 const reservationDineInBodySchema = z.object({
@@ -1144,6 +1172,48 @@ async function generateReadableId(prefix: string, date: Date, field: "booking_id
   return `${prefix}-${stamp}-${String(count + 1).padStart(4, "0")}`;
 }
 
+async function generateFeedbackId() {
+  const stamp = manilaDateKey(new Date()).replace(/-/g, "");
+  const rows = await prisma.$queryRaw<Array<{ count: bigint }>>`
+    SELECT COUNT(*)::bigint AS count
+    FROM customer_feedback
+    WHERE feedback_id LIKE ${`FDB-${stamp}%`}
+  `;
+  const count = Number(rows[0]?.count ?? 0);
+
+  return `FDB-${stamp}-${String(count + 1).padStart(4, "0")}`;
+}
+
+function createFeedbackRowId() {
+  return `fb_${Date.now()}_${Math.round(Math.random() * 1e9)}`;
+}
+
+function analyzeFeedback(message: string, rating: number) {
+  const text = message.toLowerCase();
+  const complaintWords = ["bad", "cold", "late", "slow", "rude", "wrong", "dirty", "complain", "complaint", "poor", "terrible", "awful", "disappointed", "refund", "overpriced"];
+  const suggestionWords = ["suggest", "please add", "recommend", "should", "could", "improve", "more", "less", "option", "hope"];
+  const praiseWords = ["good", "great", "excellent", "amazing", "love", "loved", "perfect", "delicious", "fresh", "friendly", "fast", "thank"];
+  const questionWords = ["?", "how", "when", "where", "can you", "do you"];
+
+  if (rating <= 2 || complaintWords.some((word) => text.includes(word))) {
+    return "Complaint";
+  }
+
+  if (suggestionWords.some((word) => text.includes(word))) {
+    return "Suggestion";
+  }
+
+  if (rating >= 4 || praiseWords.some((word) => text.includes(word))) {
+    return "Praise";
+  }
+
+  if (questionWords.some((word) => text.includes(word))) {
+    return "Question";
+  }
+
+  return "General Feedback";
+}
+
 const totalRestaurantCapacity = 50;
 
 async function getAvailableCapacity(date: Date, time: string) {
@@ -1161,6 +1231,83 @@ async function getAvailableCapacity(date: Date, time: string) {
 
   return Math.max(totalRestaurantCapacity - (approvedGuests._sum.party_size ?? 0), 0);
 }
+
+app.post("/api/feedback", async (req, res, next) => {
+  try {
+    await ensureCustomerFeedbackTable();
+    const body = customerFeedbackBodySchema.parse(req.body);
+    const feedback_id = await generateFeedbackId();
+    const rows = await prisma.$queryRaw<Array<{ feedback_id: string }>>`
+      INSERT INTO customer_feedback (
+        id,
+        feedback_id,
+        customer_name,
+        customer_email,
+        customer_phone,
+        visit_type,
+        rating,
+        message
+      )
+      VALUES (
+        ${createFeedbackRowId()},
+        ${feedback_id},
+        ${body.customer_name.trim()},
+        ${body.customer_email?.trim() || null},
+        ${body.customer_phone?.trim() || null},
+        ${body.visit_type},
+        ${body.rating},
+        ${body.message.trim()}
+      )
+      RETURNING feedback_id
+    `;
+
+    return res.status(201).json({
+      success: true,
+      feedback_id: rows[0]?.feedback_id ?? feedback_id,
+      message: "Thank you for sharing your feedback."
+    });
+  } catch (error) {
+    return next(error);
+  }
+});
+
+app.get("/api/staff/feedback/analysis", async (req, res, next) => {
+  try {
+    const user = requireRole(req, res, ["admin", "receptionist", "event_coordinator"]);
+
+    if (!user) {
+      return;
+    }
+
+    await ensureCustomerFeedbackTable();
+
+    const rows = await prisma.$queryRaw<
+      Array<{
+        id: string;
+        feedback_id: string;
+        customer_name: string;
+        visit_type: string;
+        rating: number;
+        message: string;
+        status: string;
+        created_at: Date;
+      }>
+    >`
+      SELECT id, feedback_id, customer_name, visit_type, rating, message, status, created_at
+      FROM customer_feedback
+      ORDER BY created_at DESC
+      LIMIT 25
+    `;
+    const feedback = rows.map((item) => ({
+      ...item,
+      analysis: analyzeFeedback(item.message, item.rating)
+    }));
+
+    return res.json({ feedback });
+  } catch (error) {
+    return next(error);
+  }
+});
 
 app.post("/api/reservations", async (req, res, next) => {
   try {
