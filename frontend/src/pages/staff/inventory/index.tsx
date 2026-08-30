@@ -1,8 +1,9 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
-import { Boxes, Calculator, CalendarClock, ClipboardList, PackageSearch, ReceiptText, Scale, Trash2 } from "lucide-react";
+import { Boxes, Calculator, CalendarClock, ClipboardList, Images, PackageSearch, ReceiptText, Scale, Trash2 } from "lucide-react";
 import SectionNav, { SectionNavTab } from "../../../components/layout/SectionNav";
 import BatchManagement from "./BatchManagement";
+import CateringOptionPhotos from "./CateringOptionPhotos";
 import ConversionRulesEditor from "./ConversionRulesEditor";
 import LowStockAlert from "./LowStockAlert";
 import MaterialsList from "./MaterialsList";
@@ -12,11 +13,12 @@ import WasteDisposal from "./WasteDisposal";
 import YieldEstimator from "./YieldEstimator";
 import { StaffRole } from "./types";
 
-type InventoryTab = "materials" | "menu-products" | "yield" | "low-stock" | "batches" | "waste" | "transactions" | "conversion-rules";
+type InventoryTab = "materials" | "menu-products" | "catering-photos" | "yield" | "low-stock" | "batches" | "waste" | "transactions" | "conversion-rules";
 
 const tabs: Array<SectionNavTab<InventoryTab> & { adminOnly?: boolean }> = [
   { id: "materials", label: "Materials", icon: <Boxes className="h-4 w-4" /> },
   { id: "menu-products", label: "Menu Products", icon: <PackageSearch className="h-4 w-4" /> },
+  { id: "catering-photos", label: "Catering Photos", icon: <Images className="h-4 w-4" />, adminOnly: true },
   { id: "yield", label: "Yield Estimator", icon: <Calculator className="h-4 w-4" /> },
   { id: "low-stock", label: "Low Stock Alerts", icon: <ClipboardList className="h-4 w-4" /> },
   { id: "batches", label: "Batches & Expiry", icon: <CalendarClock className="h-4 w-4" /> },
@@ -68,6 +70,7 @@ export default function InventoryPage({ readOnly = false }: { readOnly?: boolean
 
         {activeTab === "materials" && <MaterialsList role={role} />}
         {activeTab === "menu-products" && <SellingProductsList role={role} />}
+        {activeTab === "catering-photos" && role === "admin" && <CateringOptionPhotos />}
         {activeTab === "yield" && <YieldEstimator />}
         {activeTab === "low-stock" && <LowStockAlert />}
         {activeTab === "batches" && <BatchManagement />}

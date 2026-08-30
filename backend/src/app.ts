@@ -612,6 +612,12 @@ const sushiStationInclusions = [
   "Salmon Nigiri"
 ];
 
+const cateringGalleryImages = {
+  sushiStation: ["/images/cateringf.jpg", "/images/sushi2.png", "/images/sushi4.png"],
+  sashimiBar: ["/images/catering-banner.jpg", "/images/sushi5.png", "/images/Menu-head.png"],
+  tempuraLive: ["/images/unli-dining.jpg", "/images/hero-banner.jpg", "/images/cateringf.jpg"]
+};
+
 const cateringStationPackages = [
   {
     id: "pkg_sushi_50_60",
@@ -621,8 +627,8 @@ const cateringStationPackages = [
     pricePerPerson: 0,
     minPax: 50,
     maxPax: 60,
-    imageUrl: "/images/catering/sushi-station.jpg",
-    items: { pricingType: "flat", flatPrice: 6000, inclusions: sushiStationInclusions }
+    imageUrl: cateringGalleryImages.sushiStation[0],
+    items: { pricingType: "flat", flatPrice: 6000, inclusions: sushiStationInclusions, galleryImages: cateringGalleryImages.sushiStation }
   },
   {
     id: "pkg_sushi_75_85",
@@ -632,8 +638,8 @@ const cateringStationPackages = [
     pricePerPerson: 0,
     minPax: 75,
     maxPax: 85,
-    imageUrl: "/images/catering/sushi-station.jpg",
-    items: { pricingType: "flat", flatPrice: 9000, inclusions: sushiStationInclusions }
+    imageUrl: cateringGalleryImages.sushiStation[0],
+    items: { pricingType: "flat", flatPrice: 9000, inclusions: sushiStationInclusions, galleryImages: cateringGalleryImages.sushiStation }
   },
   {
     id: "pkg_sushi_100_120",
@@ -643,8 +649,8 @@ const cateringStationPackages = [
     pricePerPerson: 0,
     minPax: 100,
     maxPax: 120,
-    imageUrl: "/images/catering/sushi-station.jpg",
-    items: { pricingType: "flat", flatPrice: 12000, inclusions: sushiStationInclusions }
+    imageUrl: cateringGalleryImages.sushiStation[0],
+    items: { pricingType: "flat", flatPrice: 12000, inclusions: sushiStationInclusions, galleryImages: cateringGalleryImages.sushiStation }
   },
   {
     id: "pkg_sushi_150_170",
@@ -654,8 +660,8 @@ const cateringStationPackages = [
     pricePerPerson: 0,
     minPax: 150,
     maxPax: 170,
-    imageUrl: "/images/catering/sushi-station.jpg",
-    items: { pricingType: "flat", flatPrice: 17500, inclusions: sushiStationInclusions }
+    imageUrl: cateringGalleryImages.sushiStation[0],
+    items: { pricingType: "flat", flatPrice: 17500, inclusions: sushiStationInclusions, galleryImages: cateringGalleryImages.sushiStation }
   },
   {
     id: "pkg_sushi_200_220",
@@ -665,8 +671,8 @@ const cateringStationPackages = [
     pricePerPerson: 0,
     minPax: 200,
     maxPax: 220,
-    imageUrl: "/images/catering/sushi-station.jpg",
-    items: { pricingType: "flat", flatPrice: 23000, inclusions: sushiStationInclusions }
+    imageUrl: cateringGalleryImages.sushiStation[0],
+    items: { pricingType: "flat", flatPrice: 23000, inclusions: sushiStationInclusions, galleryImages: cateringGalleryImages.sushiStation }
   },
   {
     id: "pkg_sashimi_20_29",
@@ -676,8 +682,8 @@ const cateringStationPackages = [
     pricePerPerson: 0,
     minPax: 20,
     maxPax: 29,
-    imageUrl: "/images/catering/sashimi-bar.jpg",
-    items: { pricingType: "range", minPrice: 15000, maxPrice: 21750, inclusions: ["Whole tuna sashimi service"] }
+    imageUrl: cateringGalleryImages.sashimiBar[0],
+    items: { pricingType: "range", minPrice: 15000, maxPrice: 21750, inclusions: ["Whole tuna sashimi service"], galleryImages: cateringGalleryImages.sashimiBar }
   },
   {
     id: "pkg_sashimi_30_40",
@@ -687,8 +693,8 @@ const cateringStationPackages = [
     pricePerPerson: 0,
     minPax: 30,
     maxPax: 40,
-    imageUrl: "/images/catering/sashimi-bar.jpg",
-    items: { pricingType: "range", minPrice: 22500, maxPrice: 30000, inclusions: ["Whole tuna sashimi service"] }
+    imageUrl: cateringGalleryImages.sashimiBar[0],
+    items: { pricingType: "range", minPrice: 22500, maxPrice: 30000, inclusions: ["Whole tuna sashimi service"], galleryImages: cateringGalleryImages.sashimiBar }
   },
   {
     id: "pkg_tempura_live",
@@ -698,8 +704,8 @@ const cateringStationPackages = [
     pricePerPerson: 0,
     minPax: 10,
     maxPax: 999,
-    imageUrl: "/images/catering/tempura-live.jpg",
-    items: { pricingType: "quote", inclusions: ["Live tempura cooking station"] }
+    imageUrl: cateringGalleryImages.tempuraLive[0],
+    items: { pricingType: "quote", inclusions: ["Live tempura cooking station"], galleryImages: cateringGalleryImages.tempuraLive }
   }
 ];
 
@@ -743,6 +749,46 @@ function getCateringPackageProductNames(packageId: string) {
     .filter((item): item is string => Boolean(item));
 }
 
+function getCateringGalleryImages(items: Prisma.JsonValue | null | undefined) {
+  if (!items || typeof items !== "object" || Array.isArray(items)) {
+    return [];
+  }
+
+  const galleryImages = (items as { galleryImages?: unknown }).galleryImages;
+
+  if (!Array.isArray(galleryImages)) {
+    return [];
+  }
+
+  return galleryImages.filter((item): item is string => typeof item === "string" && item.trim().length > 0);
+}
+
+function setCateringGalleryImages(items: Prisma.JsonValue | null | undefined, galleryImages: Array<string | null>) {
+  const itemObject = items && typeof items === "object" && !Array.isArray(items) ? items : {};
+  const cleanGalleryImages = galleryImages.map((imageUrl) => getPersistableImageValue(imageUrl));
+
+  return {
+    ...itemObject,
+    galleryImages: cleanGalleryImages
+  } as Prisma.InputJsonValue;
+}
+
+function mergeCateringPackageItems(defaultItems: unknown, existingItems?: Prisma.JsonValue | null) {
+  const defaultObject = typeof defaultItems === "object" && defaultItems !== null && !Array.isArray(defaultItems)
+    ? defaultItems
+    : {};
+  const existingGalleryImages = getCateringGalleryImages(existingItems);
+
+  if (existingGalleryImages.length === 0) {
+    return defaultItems as Prisma.InputJsonValue;
+  }
+
+  return {
+    ...defaultObject,
+    galleryImages: existingGalleryImages
+  } as Prisma.InputJsonValue;
+}
+
 async function ensureCateringStationPackage(packageId: string) {
   const stationPackage = cateringStationPackages.find((item) => item.id === packageId);
 
@@ -750,18 +796,24 @@ async function ensureCateringStationPackage(packageId: string) {
     return null;
   }
 
-  return prisma.cateringPackage.upsert({
-    where: { id: stationPackage.id },
-    update: {
-      name: stationPackage.name,
-      description: stationPackage.description,
-      pricePerPerson: stationPackage.pricePerPerson,
-      minPax: stationPackage.minPax,
-      maxPax: stationPackage.maxPax,
-      imageUrl: stationPackage.imageUrl,
-      items: stationPackage.items
-    },
-    create: {
+  const existingPackage = await prisma.cateringPackage.findUnique({ where: { id: stationPackage.id } });
+
+  if (existingPackage) {
+    return prisma.cateringPackage.update({
+      where: { id: stationPackage.id },
+      data: {
+        name: stationPackage.name,
+        description: stationPackage.description,
+        pricePerPerson: stationPackage.pricePerPerson,
+        minPax: stationPackage.minPax,
+        maxPax: stationPackage.maxPax,
+        items: mergeCateringPackageItems(stationPackage.items, existingPackage.items)
+      }
+    });
+  }
+
+  return prisma.cateringPackage.create({
+    data: {
       id: stationPackage.id,
       name: stationPackage.name,
       description: stationPackage.description,
@@ -1289,6 +1341,136 @@ app.get("/api/catering/packages", async (_req, res, next) => {
       cateringStationPackages.map((stationPackage) => ensureCateringStationPackage(stationPackage.id))
     );
     return res.json({ packages });
+  } catch (error) {
+    return next(error);
+  }
+});
+
+app.put(
+  "/api/admin/catering/packages/:id/photos",
+  upload.fields([
+    { name: "imageFile_0", maxCount: 1 },
+    { name: "imageFile_1", maxCount: 1 },
+    { name: "imageFile_2", maxCount: 1 }
+  ]),
+  async (req, res, next) => {
+  try {
+    const user = requireRole(req, res, ["admin"]);
+
+    if (!user) {
+      return;
+    }
+
+    const stationPackage = await ensureCateringStationPackage(req.params.id);
+
+    if (!stationPackage) {
+      return res.status(404).json({ message: "Catering option not found." });
+    }
+
+    const body = z
+      .object({
+        image_urls: z.string().optional()
+      })
+      .parse(req.body);
+
+    const imageUrls = body.image_urls ? JSON.parse(body.image_urls) : [];
+
+    if (!Array.isArray(imageUrls)) {
+      return res.status(400).json({ message: "Image URLs must be a list." });
+    }
+
+    const filesByField = req.files && !Array.isArray(req.files) ? req.files : {};
+    const uploadedImages = await Promise.all(
+      Array.from({ length: 3 }, async (_, index) => {
+        const file = filesByField[`imageFile_${index}`]?.[0];
+
+        if (!file) {
+          return null;
+        }
+
+        const localUploadPath = path.join(uploadDir, file.filename);
+        if (useSupabaseStorage && supabase && supabaseStorageBucket) {
+          const supabasePath = `catering-packages/${file.filename}`;
+          return uploadFileToSupabase(localUploadPath, supabasePath);
+        }
+
+        return `/uploads/products/${file.filename}`;
+      })
+    );
+
+    const galleryImages = Array.from({ length: 3 }, (_, index) => {
+      const uploadedImage = uploadedImages[index];
+
+      if (uploadedImage) {
+        return uploadedImage;
+      }
+
+      const imageUrl = imageUrls[index];
+      return typeof imageUrl === "string" && imageUrl.trim().length > 0 ? imageUrl.trim() : null;
+    });
+
+    const cateringPackage = await prisma.cateringPackage.update({
+      where: { id: req.params.id },
+      data: {
+        imageUrl: galleryImages[0],
+        items: setCateringGalleryImages(stationPackage.items, galleryImages)
+      }
+    });
+
+    return res.json({ package: cateringPackage });
+  } catch (error) {
+    if (error instanceof SyntaxError) {
+      return res.status(400).json({ message: "Invalid image URL list." });
+    }
+
+    return next(error);
+  }
+});
+
+app.put("/api/admin/catering/packages/:id/photo", upload.single("imageFile"), async (req, res, next) => {
+  try {
+    const user = requireRole(req, res, ["admin"]);
+
+    if (!user) {
+      return;
+    }
+
+    const stationPackage = await ensureCateringStationPackage(req.params.id);
+
+    if (!stationPackage) {
+      return res.status(404).json({ message: "Catering option not found." });
+    }
+
+    const body = z
+      .object({
+        image_url: z.string().optional().nullable()
+      })
+      .parse(req.body);
+
+    let imageUrl: string | null | undefined;
+
+    if (req.file) {
+      const localUploadPath = path.join(uploadDir, req.file.filename);
+      if (useSupabaseStorage && supabase && supabaseStorageBucket) {
+        const supabasePath = `catering-packages/${req.file.filename}`;
+        imageUrl = await uploadFileToSupabase(localUploadPath, supabasePath);
+      } else {
+        imageUrl = `/uploads/products/${req.file.filename}`;
+      }
+    } else if (body.image_url !== undefined) {
+      imageUrl = body.image_url;
+    }
+
+    if (imageUrl === undefined) {
+      return res.status(400).json({ message: "Add an image file or image URL." });
+    }
+
+    const cateringPackage = await prisma.cateringPackage.update({
+      where: { id: req.params.id },
+      data: { imageUrl: getPersistableImageValue(imageUrl) }
+    });
+
+    return res.json({ package: cateringPackage });
   } catch (error) {
     return next(error);
   }
