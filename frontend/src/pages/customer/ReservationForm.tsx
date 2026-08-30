@@ -528,7 +528,12 @@ export default function ReservationForm() {
               </div>
             </div>
 
-            <form onSubmit={handleSubmit} className="space-y-6 px-3 py-5 pb-28 md:p-6 md:pb-36">
+            <form
+              onSubmit={handleSubmit}
+              className={`space-y-6 px-3 py-5 md:p-6 ${
+                step === 2 && reservationType === "dine_in" ? "pb-28 md:pb-36" : "pb-5 md:pb-6"
+              }`}
+            >
               {step === 1 && (
                 <div className="grid gap-4 lg:grid-cols-2">
                   <label className="block">
