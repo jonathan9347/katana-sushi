@@ -50,7 +50,7 @@ function getStoredUser() {
 }
 
 function tooltipClass() {
-  return "pointer-events-none absolute left-full top-1/2 z-[70] ml-2 -translate-y-1/2 whitespace-nowrap rounded bg-slate-900 px-2 py-1 text-xs font-bold text-white opacity-0 shadow-lg transition-opacity delay-200 group-hover:opacity-100";
+  return "pointer-events-none absolute left-full top-1/2 z-[120] ml-3 -translate-y-1/2 whitespace-nowrap rounded bg-slate-900 px-2 py-1 text-xs font-bold text-white opacity-0 shadow-lg transition-opacity delay-200 group-hover:opacity-100";
 }
 
 function iconClass(isActive: boolean) {
@@ -77,7 +77,7 @@ export default function StaffSidebar() {
 
   return (
     <>
-      <aside className="hidden h-screen w-20 shrink-0 border-r border-slate-200 bg-white md:sticky md:top-0 md:flex md:flex-col md:justify-between">
+      <aside className="hidden h-screen w-20 shrink-0 border-r border-slate-200 bg-white md:sticky md:top-0 md:z-[100] md:flex md:flex-col md:justify-between">
         <div className="flex flex-col items-center gap-3 px-2 pt-6">
           <nav className="flex flex-col items-center gap-3">
             {topItems.map((item) => {
@@ -113,7 +113,7 @@ export default function StaffSidebar() {
                 <span className={tooltipClass()}>Profile</span>
               </button>
               {profileOpen && (
-                <div className="absolute left-full bottom-0 ml-3 w-56 rounded-lg border border-slate-200 bg-white p-2 shadow-xl">
+                <div className="absolute left-full bottom-0 z-[120] ml-3 w-56 rounded-lg border border-slate-200 bg-white p-2 shadow-xl">
                   <div className="border-b border-slate-200 px-3 py-2">
                     <p className="truncate text-sm font-black text-slate-950">{user.name ?? "Staff User"}</p>
                     <p className="truncate text-xs text-slate-500">{role.replace("_", " ")}</p>

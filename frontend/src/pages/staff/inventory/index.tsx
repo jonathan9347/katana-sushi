@@ -56,8 +56,8 @@ export default function InventoryPage({ readOnly = false }: { readOnly?: boolean
   }
 
   return (
-    <main className="min-h-screen bg-slate-100 px-4 py-6 lg:px-8">
-      <div className="mx-auto grid max-w-7xl gap-5">
+    <main className="min-h-screen bg-slate-100 px-4 py-6 lg:pl-4 lg:pr-8">
+      <div className="grid w-full gap-5">
         <div className="flex flex-col gap-2 md:flex-row md:items-end md:justify-between">
           <div>
             <p className="text-sm font-medium uppercase text-red-700">Staff</p>
@@ -66,17 +66,23 @@ export default function InventoryPage({ readOnly = false }: { readOnly?: boolean
           <p className="text-sm text-slate-500">Signed in as {role.replace("_", " ")}</p>
         </div>
 
-        <SectionNav activeTab={activeTab} tabs={visibleTabs} onTabChange={setActiveTab} />
+        <div className="grid gap-5 lg:grid-cols-[240px_minmax(0,1fr)] lg:items-start">
+          <aside className="lg:sticky lg:top-6">
+            <SectionNav activeTab={activeTab} orientation="vertical" tabs={visibleTabs} onTabChange={setActiveTab} />
+          </aside>
 
-        {activeTab === "materials" && <MaterialsList role={role} />}
-        {activeTab === "menu-products" && <SellingProductsList role={role} />}
-        {activeTab === "catering-photos" && role === "admin" && <CateringOptionPhotos />}
-        {activeTab === "yield" && <YieldEstimator />}
-        {activeTab === "low-stock" && <LowStockAlert />}
-        {activeTab === "batches" && <BatchManagement />}
-        {activeTab === "waste" && <WasteDisposal />}
-        {activeTab === "transactions" && <TransactionHistory />}
-        {activeTab === "conversion-rules" && role === "admin" && <ConversionRulesEditor />}
+          <section className="min-w-0">
+            {activeTab === "materials" && <MaterialsList role={role} />}
+            {activeTab === "menu-products" && <SellingProductsList role={role} />}
+            {activeTab === "catering-photos" && role === "admin" && <CateringOptionPhotos />}
+            {activeTab === "yield" && <YieldEstimator />}
+            {activeTab === "low-stock" && <LowStockAlert />}
+            {activeTab === "batches" && <BatchManagement />}
+            {activeTab === "waste" && <WasteDisposal />}
+            {activeTab === "transactions" && <TransactionHistory />}
+            {activeTab === "conversion-rules" && role === "admin" && <ConversionRulesEditor />}
+          </section>
+        </div>
       </div>
     </main>
   );

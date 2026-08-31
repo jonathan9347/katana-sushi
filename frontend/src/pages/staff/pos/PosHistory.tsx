@@ -133,11 +133,11 @@ export default function PosHistory() {
   }
 
   return (
-    <main className="min-h-screen bg-slate-100 px-4 py-6 lg:px-8">
-      <div className="mx-auto grid max-w-7xl gap-5">
+    <main className="min-h-screen bg-slate-100 px-4 py-6 lg:pl-4 lg:pr-8">
+      <div className="grid w-full gap-5">
         <div className="flex flex-col gap-2 md:flex-row md:items-end md:justify-between">
           <div>
-            <p className="text-sm font-medium uppercase text-red-700">POS</p>
+            <p className="text-sm font-medium uppercase text-red-700">Point of Sale</p>
             <h1 className="text-3xl font-semibold text-slate-950">Transaction History</h1>
           </div>
           <div className="flex gap-2">
@@ -148,14 +148,18 @@ export default function PosHistory() {
           </div>
         </div>
 
-        <SectionNav tabs={posTabs} />
+        <div className="grid gap-5 lg:grid-cols-[220px_minmax(0,1fr)] lg:items-start">
+          <aside className="lg:sticky lg:top-6">
+            <SectionNav orientation="vertical" tabs={posTabs} />
+          </aside>
 
-        <Card>
-          <CardHeader>
-            <CardTitle>Filters</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="grid gap-3 md:grid-cols-5">
+          <section className="grid min-w-0 gap-5">
+            <Card>
+              <CardHeader>
+                <CardTitle>Filters</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="grid gap-3 md:grid-cols-5">
               <input className="h-10 rounded-md border border-slate-300 px-3 text-sm" type="date" value={from} onChange={(event) => setFrom(event.target.value)} />
               <input className="h-10 rounded-md border border-slate-300 px-3 text-sm" type="date" value={to} onChange={(event) => setTo(event.target.value)} />
               <Select value={paymentMethod} onChange={(event) => setPaymentMethod(event.target.value)}>
@@ -183,19 +187,19 @@ export default function PosHistory() {
                 value={search}
                 onChange={(event) => setSearch(event.target.value)}
               />
-            </div>
-          </CardContent>
-        </Card>
+                </div>
+              </CardContent>
+            </Card>
 
-        <Card>
-          <CardHeader>
-            <CardTitle>Summary</CardTitle>
-          </CardHeader>
-          <CardContent>
-            {summaryQuery.isLoading && <p className="text-sm text-slate-500">Loading summary...</p>}
-            {summaryQuery.isError && <p className="text-sm text-red-700">Unable to load summary.</p>}
-            {summaryQuery.data && (
-              <div className="grid gap-3 md:grid-cols-3 xl:grid-cols-6">
+            <Card>
+              <CardHeader>
+                <CardTitle>Summary</CardTitle>
+              </CardHeader>
+              <CardContent>
+                {summaryQuery.isLoading && <p className="text-sm text-slate-500">Loading summary...</p>}
+                {summaryQuery.isError && <p className="text-sm text-red-700">Unable to load summary.</p>}
+                {summaryQuery.data && (
+                  <div className="grid gap-3 md:grid-cols-3 xl:grid-cols-6">
                 <SummaryTile label="Total Sales" value={money(summaryQuery.data.totalSales)} />
                 <SummaryTile label="Transactions" value={summaryQuery.data.totalTransactions.toLocaleString()} />
                 <SummaryTile label="Avg. Order" value={money(summaryQuery.data.averageOrderValue)} />
@@ -234,24 +238,24 @@ export default function PosHistory() {
                   value={`${money(summaryQuery.data.byPayment.cash?.total ?? 0)} / ${money(summaryQuery.data.byPayment.gcash?.total ?? 0)} / ${money(summaryQuery.data.byPayment.bank_transfer?.total ?? 0)}`}
                   meta={`${summaryQuery.data.byPayment.cash?.count ?? 0} cash, ${summaryQuery.data.byPayment.gcash?.count ?? 0} GCash, ${summaryQuery.data.byPayment.bank_transfer?.count ?? 0} BPI`}
                 />
-              </div>
-            )}
-          </CardContent>
-        </Card>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
 
-        <Card>
-          <CardHeader className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
-            <CardTitle>Transactions</CardTitle>
-            <p className="text-sm font-semibold text-slate-700">Total Sales: {money(totalSales)}</p>
-          </CardHeader>
-          <CardContent>
-            {transactionsQuery.isLoading && <p className="text-sm text-slate-500">Loading transactions...</p>}
-            {transactionsQuery.isError && <p className="text-sm text-red-700">Unable to load transactions.</p>}
-            {transactionsQuery.data && (
-              <div className="overflow-x-auto">
-                <Table>
-                  <TableHeader>
-                    <TableRow>
+            <Card>
+              <CardHeader className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+                <CardTitle>Transactions</CardTitle>
+                <p className="text-sm font-semibold text-slate-700">Total Sales: {money(totalSales)}</p>
+              </CardHeader>
+              <CardContent>
+                {transactionsQuery.isLoading && <p className="text-sm text-slate-500">Loading transactions...</p>}
+                {transactionsQuery.isError && <p className="text-sm text-red-700">Unable to load transactions.</p>}
+                {transactionsQuery.data && (
+                  <div className="overflow-x-auto">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
                       <TableHead>Transaction #</TableHead>
                       <TableHead>Date/Time</TableHead>
                       <TableHead>Customer</TableHead>
@@ -262,11 +266,11 @@ export default function PosHistory() {
                       <TableHead>Cashier</TableHead>
                       <TableHead>Actions</TableHead>
 
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {filteredTransactions.map((transaction) => (
-                      <TableRow key={transaction.id}>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {filteredTransactions.map((transaction) => (
+                          <TableRow key={transaction.id}>
                         <TableCell className="font-medium">{transaction.transaction_number}</TableCell>
                         <TableCell>{formatManilaDateTime(transaction.created_at)}</TableCell>
                         <TableCell>{transaction.customer_name || "Walk-in"}</TableCell>
@@ -296,14 +300,16 @@ export default function PosHistory() {
                             )}
                           </div>
                         </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </div>
-            )}
-          </CardContent>
-        </Card>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          </section>
+        </div>
       </div>
 
       <TransactionDetailsModal

@@ -202,25 +202,29 @@ export default function PosPage() {
   }
 
   return (
-    <main className="min-h-screen bg-slate-100 px-4 py-4">
-      <div className="mx-auto grid max-w-[1180px] gap-4">
+    <main className="min-h-screen bg-slate-100 px-4 py-4 lg:pr-6">
+      <div className="grid w-full gap-4">
         <div className="flex items-center justify-between">
           <div>
-            <p className="text-sm font-medium uppercase text-red-700">Staff</p>
-            <h1 className="text-3xl font-semibold text-slate-950">Point of Sale</h1>
+            <p className="text-sm font-medium uppercase text-red-700">Point of Sale</p>
+            <h1 className="text-3xl font-semibold text-slate-950">New Sale</h1>
           </div>
           <p className="text-sm text-slate-500">Signed in as {role}</p>
         </div>
 
-        <SectionNav tabs={posTabs} />
+        <div className="grid gap-4 lg:grid-cols-[220px_minmax(0,1fr)] lg:items-start">
+          <aside className="lg:sticky lg:top-6">
+            <SectionNav orientation="vertical" tabs={posTabs} />
+          </aside>
 
-        <div className="grid min-h-[calc(100vh-112px)] grid-cols-[7fr_3fr] gap-4">
-          {unlimitedSessionId ? (
-            <div className="col-span-2">
-              <UnlimitedSession sessionId={unlimitedSessionId} onExit={() => setUnlimitedSessionId(null)} />
-            </div>
-          ) : (
-          <>
+          <section className="min-w-0">
+            <div className="grid min-h-[calc(100vh-112px)] gap-4 xl:grid-cols-[7fr_3fr]">
+              {unlimitedSessionId ? (
+                <div className="xl:col-span-2">
+                  <UnlimitedSession sessionId={unlimitedSessionId} onExit={() => setUnlimitedSessionId(null)} />
+                </div>
+              ) : (
+              <>
           <Card className="min-w-0">
             <CardHeader className="gap-3">
               <div className="flex items-center justify-between gap-3">
@@ -237,7 +241,7 @@ export default function PosPage() {
             <CardContent>
               {productsQuery.isLoading && <p className="text-sm text-slate-500">Loading products...</p>}
               {productsQuery.isError && <p className="text-sm text-red-700">Unable to load products.</p>}
-              <div className="grid grid-cols-3 gap-3">
+              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4">
                 {visibleProducts.map((product) => (
                   <button
                     key={product.id}
@@ -336,6 +340,8 @@ export default function PosPage() {
           </Card>
           </>
           )}
+            </div>
+          </section>
         </div>
       </div>
 

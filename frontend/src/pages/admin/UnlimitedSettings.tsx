@@ -124,8 +124,8 @@ export default function UnlimitedSettings() {
   }
 
   return (
-    <main className="min-h-screen bg-slate-100 px-4 py-6 lg:px-8">
-      <div className="mx-auto grid max-w-7xl gap-5">
+    <main className="min-h-screen bg-slate-100 px-4 py-6 lg:pl-4 lg:pr-8">
+      <div className="grid w-full gap-5">
         <div className="flex flex-col gap-2 md:flex-row md:items-end md:justify-between">
           <div>
             <p className="text-sm font-medium uppercase text-red-700">Point of Sale</p>
@@ -133,14 +133,18 @@ export default function UnlimitedSettings() {
           </div>
         </div>
 
-        <SectionNav tabs={posTabs} />
+        <div className="grid gap-5 lg:grid-cols-[220px_minmax(0,1fr)] lg:items-start">
+          <aside className="lg:sticky lg:top-6">
+            <SectionNav orientation="vertical" tabs={posTabs} />
+          </aside>
 
-        <Card>
-          <CardHeader>
-            <CardTitle>Pricing and Rules</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <form className="grid gap-4 md:grid-cols-4" onSubmit={saveSettings}>
+          <section className="grid min-w-0 gap-5">
+            <Card>
+              <CardHeader>
+                <CardTitle>Pricing and Rules</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <form className="grid gap-4 md:grid-cols-4" onSubmit={saveSettings}>
               <label className="grid gap-1 text-sm font-medium text-slate-700">
                 <span>Price per Person</span>
                 <input className="h-10 rounded-md border border-slate-300 px-3" type="number" value={settingsForm.price_per_person} onChange={(event) => setSettingsForm((current) => ({ ...current, price_per_person: event.target.value }))} />
@@ -156,20 +160,20 @@ export default function UnlimitedSettings() {
               <div className="flex items-end">
                 <Button disabled={saveSettingsMutation.isPending}>Save Settings</Button>
               </div>
-            </form>
-          </CardContent>
-        </Card>
+                </form>
+              </CardContent>
+            </Card>
 
-        <Card>
-          <CardHeader className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
-            <CardTitle>Included Products</CardTitle>
-            <Button disabled={saveIncludedMutation.isPending} onClick={() => saveIncludedMutation.mutate()}>
-              Save Product Inclusion
-            </Button>
-          </CardHeader>
-          <CardContent>
-            {productsQuery.isLoading && <p className="text-sm text-slate-500">Loading products...</p>}
-            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            <Card>
+              <CardHeader className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+                <CardTitle>Included Products</CardTitle>
+                <Button disabled={saveIncludedMutation.isPending} onClick={() => saveIncludedMutation.mutate()}>
+                  Save Product Inclusion
+                </Button>
+              </CardHeader>
+              <CardContent>
+                {productsQuery.isLoading && <p className="text-sm text-slate-500">Loading products...</p>}
+                <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
               {productsQuery.data?.map((product) => (
                 <label key={product.id} className="flex min-h-20 items-start gap-3 rounded-md border border-slate-200 bg-white p-3 text-sm">
                   <input
@@ -184,9 +188,11 @@ export default function UnlimitedSettings() {
                   </span>
                 </label>
               ))}
-            </div>
-          </CardContent>
-        </Card>
+                </div>
+              </CardContent>
+            </Card>
+          </section>
+        </div>
       </div>
     </main>
   );
