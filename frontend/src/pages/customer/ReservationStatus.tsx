@@ -1,6 +1,6 @@
 import { FormEvent, useEffect, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
-import { CalendarPlus, CheckCircle2, Clock3, Search, XCircle } from "lucide-react";
+import { CalendarPlus, Check, CheckCircle2, Clock3, Search, XCircle } from "lucide-react";
 import { api } from "../../lib/api";
 import { formatManilaDate, formatTime12 } from "../../lib/dateTime";
 
@@ -28,7 +28,9 @@ export default function ReservationStatus() {
   const [message, setMessage] = useState("");
 
   const statusIcon =
-    result?.status === "approved" || result?.status === "confirmed" || result?.status === "completed" ? (
+    result?.status === "completed" ? (
+      <Check className="h-6 w-6 text-green-500" strokeWidth={3} />
+    ) : result?.status === "approved" || result?.status === "confirmed" ? (
       <CheckCircle2 className="h-6 w-6 text-emerald-400" />
     ) : result?.status === "rejected" || result?.status === "cancelled" ? (
       <XCircle className="h-6 w-6 text-katana-red" />
