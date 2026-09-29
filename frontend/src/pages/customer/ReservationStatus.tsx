@@ -28,7 +28,7 @@ export default function ReservationStatus() {
   const [message, setMessage] = useState("");
 
   const statusIcon =
-    result?.status === "approved" || result?.status === "confirmed" ? (
+    result?.status === "approved" || result?.status === "confirmed" || result?.status === "completed" ? (
       <CheckCircle2 className="h-6 w-6 text-emerald-400" />
     ) : result?.status === "rejected" || result?.status === "cancelled" ? (
       <XCircle className="h-6 w-6 text-katana-red" />

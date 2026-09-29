@@ -6,6 +6,8 @@ import SectionNav, { SectionNavTab } from "../../../components/layout/SectionNav
 import { Dialog } from "../../../components/ui/dialog";
 import { formatManilaDate, manilaDateKey, todayManilaDateKey } from "../../../lib/dateTime";
 import { api } from "../../../lib/api";
+import { getApiErrorMessage } from "../../../lib/errors";
+import { useToast } from "../../../hooks/useToast";
 
 type Inquiry = {
   id: string;
@@ -66,6 +68,7 @@ export default function CateringDashboard() {
   const [activeTab, setActiveTab] = useState<CateringTab>("pending");
   const [completionTarget, setCompletionTarget] = useState<CateringReservation | null>(null);
   const [actionLoading, setActionLoading] = useState<Record<string, boolean>>({});
+  const { toast } = useToast();
   const [eventForm, setEventForm] = useState({ total_price: "", deposit_paid: "", deposit_due_date: "" });
   const [calendarCursor, setCalendarCursor] = useState(() => new Date(`${todayManilaDateKey()}T00:00:00+08:00`));
   const [selectedCalendarDate, setSelectedCalendarDate] = useState(() => todayManilaDateKey());
@@ -152,9 +155,19 @@ export default function CateringDashboard() {
   async function complete(id: string) {
     setActionLoading((current) => ({ ...current, [id]: true }));
     try {
-      await api.put(`/api/staff/catering/reservations/${id}/complete`);
+      const response = await api.put<{ reservation?: { status?: string } }>(
+        `/api/staff/catering/reservations/${id}/complete`,
+        undefined,
+        { timeout: 30_000 }
+      );
+      if (response.data.reservation?.status !== "completed") {
+        throw new Error("The server did not mark this event as completed.");
+      }
       setCompletionTarget(null);
       await Promise.all([reservations.refetch(), pendingReservations.refetch()]);
+      toast("Catering event marked as completed.");
+    } catch (error) {
+      toast(getApiErrorMessage(error, "Unable to complete the catering event."));
     } finally {
       setActionLoading((current) => ({ ...current, [id]: false }));
     }

@@ -2740,11 +2740,26 @@ async function releaseCateringLocks(
     include: { raw_material: true }
   });
 
+  const deductionsByMaterial = new Map<string, { currentStock: number; quantity: number }>();
   for (const lock of locks) {
-    const nextStock = Math.max(Number(lock.raw_material.current_stock) - lock.reserved_quantity, 0);
-    await tx.rawMaterial.update({ where: { id: lock.raw_material_id }, data: { current_stock: nextStock } });
-    await tx.inventoryTransaction.create({
-      data: {
+    const deduction = deductionsByMaterial.get(lock.raw_material_id) ?? {
+      currentStock: Number(lock.raw_material.current_stock),
+      quantity: 0
+    };
+    deduction.quantity += lock.reserved_quantity;
+    deductionsByMaterial.set(lock.raw_material_id, deduction);
+  }
+
+  for (const [rawMaterialId, deduction] of deductionsByMaterial) {
+    await tx.rawMaterial.update({
+      where: { id: rawMaterialId },
+      data: { current_stock: Math.max(deduction.currentStock - deduction.quantity, 0) }
+    });
+  }
+
+  if (locks.length > 0) {
+    await tx.inventoryTransaction.createMany({
+      data: locks.map((lock) => ({
         raw_material_id: lock.raw_material_id,
         transaction_type: "deduct",
         quantity: lock.reserved_quantity,
@@ -2752,7 +2767,7 @@ async function releaseCateringLocks(
         reference: reference ?? `Catering reservation ${reservationId}`,
         reason: "catering_event",
         user_id: userId
-      }
+      }))
     });
   }
 
@@ -2770,6 +2785,7 @@ async function completeCateringReservation(req: Request, res: Response, next: Ne
       return;
     }
 
+    const systemSettings = await getSystemSettings();
     const reservation = await prisma.$transaction(async (tx) => {
       const current = await tx.cateringReservation.findUnique({
         where: { id: req.params.id },
@@ -2786,8 +2802,6 @@ async function completeCateringReservation(req: Request, res: Response, next: Ne
         throw Object.assign(new Error("Cannot complete event until remaining balance is fully settled."), { statusCode: 400 });
       }
 
-      const systemSettings = await getSystemSettings();
-
       if (systemSettings.release_catering_locks_on_completion) {
         await releaseCateringLocks(
           tx,
@@ -2796,8 +2810,9 @@ async function completeCateringReservation(req: Request, res: Response, next: Ne
           `Catering reservation ${current.reservation_id ?? current.inquiry?.inquiry_id ?? req.params.id}`
         );
       }
+
       return tx.cateringReservation.update({ where: { id: req.params.id }, data: { status: "completed" } });
-    });
+    }, { maxWait: 10_000, timeout: 25_000 });
 
     return res.json({ reservation });
   } catch (error) {

@@ -7,6 +7,8 @@ import { MiniCalendar } from "../../../components/ui/MiniCalendar";
 import { ReservationDetailsModal } from "../../../components/ui/ReservationDetailsModal";
 import { Button } from "../../../components/ui/button";
 import { Dialog } from "../../../components/ui/dialog";
+import { useToast } from "../../../hooks/useToast";
+import { getApiErrorMessage } from "../../../lib/errors";
 
 type PaymentHistoryItem = {
   id: string;
@@ -118,6 +120,7 @@ export default function CateringReservations() {
   const [activeReservation, setActiveReservation] = useState<CateringReservation | null>(null);
   const [completionTarget, setCompletionTarget] = useState<CateringReservation | null>(null);
   const [actionLoading, setActionLoading] = useState<Record<string, boolean>>({});
+  const { toast } = useToast();
 
   const query = useQuery<RawCateringReservation[]>({
     queryKey: ["staff-catering-reservations"],
@@ -227,8 +230,18 @@ export default function CateringReservations() {
     const reservation = completionTarget;
     setActionLoading((current) => ({ ...current, [reservation.id]: true }));
     try {
-      await api.put(`/api/staff/catering/reservations/${reservation.id}/complete`);
+      const response = await api.put<{ reservation?: { status?: string } }>(
+        `/api/staff/catering/reservations/${reservation.id}/complete`,
+        undefined,
+        { timeout: 30_000 }
+      );
+      if (response.data.reservation?.status !== "completed") {
+        throw new Error("The server did not mark this event as completed.");
+      }
       await query.refetch();
+      toast("Catering event marked as completed.");
+    } catch (error) {
+      toast(getApiErrorMessage(error, "Unable to complete the catering event."));
     } finally {
       setActionLoading((current) => ({ ...current, [reservation.id]: false }));
       setCompletionTarget(null);
