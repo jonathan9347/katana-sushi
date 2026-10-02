@@ -39,8 +39,32 @@ export async function seedDemoData(prisma: PrismaClient) {
     { name: "Tuna sashimi block", unit: "kg", current_stock: 6, reorder_level: 2, cost_per_unit: 900 },
     { name: "Salmon sashimi block", unit: "kg", current_stock: 6, reorder_level: 2, cost_per_unit: 1050 },
     { name: "Chicken", unit: "kg", current_stock: 6, reorder_level: 2, cost_per_unit: 240 },
-    { name: "Aonori", unit: "kg", current_stock: 1, reorder_level: 0.25, cost_per_unit: 680 }
+    { name: "Aonori", unit: "kg", current_stock: 1, reorder_level: 0.25, cost_per_unit: 680 },
+    { name: "Bottled Water", unit: "bottle", current_stock: 0, reorder_level: 0, cost_per_unit: 0 },
+    { name: "Softdrinks (Coke/Sprite/Royal)", unit: "bottle", current_stock: 0, reorder_level: 0, cost_per_unit: 0 },
+    { name: "Iced Tea", unit: "bottle", current_stock: 0, reorder_level: 0, cost_per_unit: 0 },
+    { name: "Japanese Soda Ramune", unit: "bottle", current_stock: 0, reorder_level: 0, cost_per_unit: 0 },
+    { name: "Green Tea (Hot/Cold)", unit: "cup", current_stock: 0, reorder_level: 0, cost_per_unit: 0 },
+    { name: "Sapporo Beer", unit: "bottle", current_stock: 0, reorder_level: 0, cost_per_unit: 0 },
+    { name: "Asahi Beer", unit: "bottle", current_stock: 0, reorder_level: 0, cost_per_unit: 0 },
+    { name: "Sake (Small)", unit: "bottle", current_stock: 0, reorder_level: 0, cost_per_unit: 0 },
+    { name: "Sake (Large)", unit: "bottle", current_stock: 0, reorder_level: 0, cost_per_unit: 0 },
+    { name: "Calamansi Juice", unit: "bottle", current_stock: 0, reorder_level: 0, cost_per_unit: 0 },
+    { name: "Mango Shake", unit: "cup", current_stock: 0, reorder_level: 0, cost_per_unit: 0 }
   ];
+  const beverageMaterialNames = new Set([
+    "Bottled Water",
+    "Softdrinks (Coke/Sprite/Royal)",
+    "Iced Tea",
+    "Japanese Soda Ramune",
+    "Green Tea (Hot/Cold)",
+    "Sapporo Beer",
+    "Asahi Beer",
+    "Sake (Small)",
+    "Sake (Large)",
+    "Calamansi Juice",
+    "Mango Shake"
+  ]);
 
   const classicBase = [
     { material: "Rice", quantity: 0.2, unit: "kg" },
@@ -282,7 +306,12 @@ export async function seedDemoData(prisma: PrismaClient) {
     })
   );
 
-  await prisma.rawMaterial.createMany({ data: rawMaterials });
+  await prisma.rawMaterial.createMany({
+    data: rawMaterials.map((material) => ({
+      ...material,
+      category: beverageMaterialNames.has(material.name) ? "Beverage" : "Raw Material"
+    }))
+  });
 
   const materials = await prisma.rawMaterial.findMany();
   const materialByName = new Map(materials.map((material) => [material.name, material.id]));

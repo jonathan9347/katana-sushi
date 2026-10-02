@@ -49,7 +49,7 @@ export default function ReservationSettings() {
             <NumberField label="Minimum Catering Pax" value={form.minimum_catering_pax} onChange={(value) => setForm((current) => ({ ...current, minimum_catering_pax: value }))} />
           </div>
           <div className="mt-6">
-            <Button type="submit" disabled={isSaving}>Save Reservation Settings</Button>
+            <Button disabled={isSaving}>Save Reservation Settings</Button>
           </div>
         </form>
       </CardContent>

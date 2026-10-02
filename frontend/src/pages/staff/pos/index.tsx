@@ -82,6 +82,7 @@ export default function PosPage() {
       const response = await api.get<{ products: PosProduct[] }>("/api/products");
       return response.data.products;
     },
+    refetchInterval: 15_000,
     enabled: allowed
   });
 
@@ -242,21 +243,39 @@ export default function PosPage() {
               {productsQuery.isLoading && <p className="text-sm text-slate-500">Loading products...</p>}
               {productsQuery.isError && <p className="text-sm text-red-700">Unable to load products.</p>}
               <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4">
-                {visibleProducts.map((product) => (
-                  <button
-                    key={product.id}
-                    className="flex min-h-32 flex-col justify-between rounded-md border border-slate-200 bg-white p-4 text-left shadow-sm transition hover:border-red-200 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50"
-                    disabled={product.is_available === false}
-                    type="button"
-                    onClick={() => addItem(product)}
-                  >
-                    <span>
-                      <span className="block text-base font-semibold text-slate-950">{product.name}</span>
-                      <span className="mt-1 block text-xs font-medium uppercase text-slate-500">{product.category}</span>
-                    </span>
-                    <span className="text-lg font-semibold text-red-700">{money(Number(product.price))}</span>
-                  </button>
-                ))}
+                {visibleProducts.map((product) => {
+                  const cartQuantity = items.find((item) => item.product.id === product.id)?.quantity ?? 0;
+                  const availableStock = product.available_stock === null || product.available_stock === undefined
+                    ? 0
+                    : Math.floor(product.available_stock);
+                  const isSoldOut = availableStock === 0;
+                  const disabled = product.is_available === false || isSoldOut || cartQuantity >= availableStock;
+
+                  return (
+                    <button
+                      key={product.id}
+                      className="flex min-h-32 flex-col justify-between rounded-md border border-slate-200 bg-white p-4 text-left shadow-sm transition hover:border-red-200 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60"
+                      disabled={disabled}
+                      type="button"
+                      onClick={() => addItem(product)}
+                    >
+                      <span>
+                        <span className="block text-base font-semibold text-slate-950">{product.name}</span>
+                        <span className="mt-1 block text-xs font-medium uppercase text-slate-500">{product.category}</span>
+                      </span>
+                      <span className="mt-3 flex items-end justify-between gap-2">
+                        <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-bold ${isSoldOut || product.is_available === false ? "bg-red-100 text-red-800" : "bg-emerald-100 text-emerald-800"}`}>
+                          {product.is_available === false
+                            ? `Unavailable · ${availableStock} in stock`
+                            : isSoldOut
+                              ? "Out of stock · 0 available"
+                              : `${availableStock} available`}
+                        </span>
+                        <span className="text-lg font-semibold text-red-700">{money(Number(product.price))}</span>
+                      </span>
+                    </button>
+                  );
+                })}
               </div>
             </CardContent>
           </Card>
@@ -295,7 +314,10 @@ export default function PosPage() {
                     Cart is empty
                   </div>
                 )}
-                {items.map((item) => (
+                {items.map((item) => {
+                  const currentProduct = productsQuery.data?.find((product) => product.id === item.product.id) ?? item.product;
+
+                  return (
                   <div key={item.product.id} className="rounded-md border border-slate-200 bg-white p-3">
                     <div className="flex items-start justify-between gap-3">
                       <div>
@@ -314,14 +336,20 @@ export default function PosPage() {
                         <span className="grid h-11 min-w-11 place-items-center rounded-md border border-slate-200 text-sm font-semibold">
                           {item.quantity}
                         </span>
-                        <Button size="sm" variant="outline" onClick={() => addItem(item.product)}>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          disabled={currentProduct.available_stock != null && item.quantity >= currentProduct.available_stock}
+                          onClick={() => addItem(currentProduct)}
+                        >
                           <Plus className="h-4 w-4" />
                         </Button>
                       </div>
                       <p className="font-semibold text-slate-950">{money(Number(item.product.price) * item.quantity)}</p>
                     </div>
                   </div>
-                ))}
+                  );
+                })}
               </div>
 
               <div className="mt-auto grid gap-2 border-t border-slate-200 pt-4 text-sm">

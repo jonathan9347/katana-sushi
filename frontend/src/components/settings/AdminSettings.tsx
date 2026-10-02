@@ -68,7 +68,7 @@ export default function AdminSettings() {
             </div>
           </div>
           <div className="mt-6">
-            <Button type="submit" disabled={isSaving}>Save Admin Settings</Button>
+            <Button disabled={isSaving}>Save Admin Settings</Button>
           </div>
         </form>
       </CardContent>

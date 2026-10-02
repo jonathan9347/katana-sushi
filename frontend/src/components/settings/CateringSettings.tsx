@@ -43,7 +43,7 @@ export default function CateringSettings() {
             <Toggle label="Release Locks After Event" checked={form.release_catering_locks_on_completion} onChange={(checked) => setForm((current) => ({ ...current, release_catering_locks_on_completion: checked }))} />
           </div>
           <div className="mt-6">
-            <Button type="submit" disabled={isSaving}>Save Catering Settings</Button>
+            <Button disabled={isSaving}>Save Catering Settings</Button>
           </div>
         </form>
       </CardContent>

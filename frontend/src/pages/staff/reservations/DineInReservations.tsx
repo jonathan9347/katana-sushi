@@ -7,6 +7,7 @@ import { MiniCalendar } from "../../../components/ui/MiniCalendar";
 import { ReservationDetailsModal } from "../../../components/ui/ReservationDetailsModal";
 import { QuickStatsWidget } from "../../../components/dinein/QuickStatsWidget";
 import { Button } from "../../../components/ui/button";
+import { Dialog } from "../../../components/ui/dialog";
 import DineInPayRemainingModal from "./DineInPayRemainingModal";
 
 
@@ -57,6 +58,9 @@ export default function DineInReservations() {
   const [selectedDate, setSelectedDate] = useState(today());
   const [cursor, setCursor] = useState(() => new Date(`${today()}T00:00:00+08:00`));
   const [activeReservation, setActiveReservation] = useState<StaffReservation | null>(null);
+  const [cancelTarget, setCancelTarget] = useState<StaffReservation | null>(null);
+  const [cancelReason, setCancelReason] = useState("");
+  const [cancelCashAmount, setCancelCashAmount] = useState("0");
   const [payOpen, setPayOpen] = useState(false);
   const [actionLoading, setActionLoading] = useState<Record<string, boolean>>({});
 
@@ -139,6 +143,24 @@ export default function DineInReservations() {
     }
   }
 
+  async function handleCancel(reservation: StaffReservation) {
+    setActionLoading((current) => ({ ...current, [reservation.id]: true }));
+    try {
+      await api.put(`/api/staff/reservations/${reservation.id}/cancel`, {
+        reason: cancelReason || "Customer cancelled reservation.",
+        amount: Number(cancelCashAmount || 0),
+        payment_method: "cash",
+        cash_received: Number(cancelCashAmount || 0)
+      });
+      setCancelTarget(null);
+      setCancelReason("");
+      setCancelCashAmount("0");
+      await query.refetch();
+    } finally {
+      setActionLoading((current) => ({ ...current, [reservation.id]: false }));
+    }
+  }
+
   const modalActions: Array<{
     label: string;
     onClick: () => void;
@@ -191,6 +213,20 @@ export default function DineInReservations() {
                 label: "Pay remaining & complete",
                 onClick: () => {
                   setPayOpen(true);
+                },
+                variant: "danger" as const,
+                disabled: actionLoading[activeReservation.id]
+              }
+            ]
+          : []),
+        ...((activeReservation.status === "pending" || activeReservation.status === "pending_approval" || activeReservation.status === "confirmed" || activeReservation.status === "seated")
+          ? [
+              {
+                label: "Cancel reservation",
+                onClick: () => {
+                  setCancelTarget(activeReservation);
+                  setCancelReason("Customer cancelled the reservation.");
+                  setCancelCashAmount(String(Number(activeReservation.remaining_balance ?? activeReservation.total_price ?? 0).toFixed(2)));
                 },
                 variant: "danger" as const,
                 disabled: actionLoading[activeReservation.id]
@@ -325,6 +361,32 @@ export default function DineInReservations() {
           setActiveReservation(null);
         }}
       />
+
+      <Dialog open={Boolean(cancelTarget)} title="Cancel reservation" onClose={() => setCancelTarget(null)} panelClassName="max-w-xl">
+        {cancelTarget ? (
+          <div className="grid gap-4">
+            <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-800">
+              <p className="font-semibold">This action will cancel the reservation, clear its remaining balance, and record the cancellation cash amount.</p>
+            </div>
+            <label className="grid gap-1 text-sm font-semibold text-slate-700">
+              Cancellation reason
+              <textarea className="min-h-24 rounded-md border border-slate-300 px-3 py-2 text-sm" value={cancelReason} onChange={(event) => setCancelReason(event.target.value)} />
+            </label>
+            <label className="grid gap-1 text-sm font-semibold text-slate-700">
+              Recorded cash amount
+              <input className="h-10 rounded-md border border-slate-300 px-3 text-sm" type="number" min="0" step="0.01" value={cancelCashAmount} onChange={(event) => setCancelCashAmount(event.target.value)} />
+            </label>
+            <div className="flex justify-end gap-2">
+              <Button variant="outline" onClick={() => setCancelTarget(null)}>
+                Close
+              </Button>
+              <Button variant="danger" onClick={() => void handleCancel(cancelTarget)} disabled={actionLoading[cancelTarget.id]}>
+                {actionLoading[cancelTarget.id] ? "Cancelling..." : "Confirm cancellation"}
+              </Button>
+            </div>
+          </div>
+        ) : null}
+      </Dialog>
     </main>
   );
 }

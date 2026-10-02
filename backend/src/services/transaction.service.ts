@@ -1,17 +1,6 @@
 import { PrismaClient } from "@prisma/client";
 
-function getPgbouncerDatabaseUrl() {
-  const databaseUrl = process.env.DATABASE_URL;
-  if (!databaseUrl || databaseUrl.includes("pgbouncer=true")) {
-    return databaseUrl;
-  }
-
-  return `${databaseUrl}${databaseUrl.includes("?") ? "&" : "?"}pgbouncer=true&connection_limit=1`;
-}
-
-const prisma = new PrismaClient({
-  datasources: { db: { url: getPgbouncerDatabaseUrl() } }
-});
+const prisma = new PrismaClient();
 
 type Label =
   | "Dine-in Sale"

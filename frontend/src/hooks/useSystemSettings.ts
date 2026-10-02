@@ -25,15 +25,7 @@ export function useSystemSettings() {
       queryClient.invalidateQueries({ queryKey: ["inventory", "low-stock"] });
       toast("Settings saved.");
     },
-    onError: (error) => {
-      // Prefer backend-provided message when available to help debugging
-      const message =
-        typeof error === "object" && error && "response" in error
-          ? (error as any).response?.data?.message ?? "Unable to save settings."
-          : "Unable to save settings.";
-      console.error("Save system settings failed:", error);
-      toast(message);
-    }
+    onError: () => toast("Unable to save settings.")
   });
 
   return {

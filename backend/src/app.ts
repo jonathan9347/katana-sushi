@@ -11,6 +11,7 @@ import multer from "multer";
 import { Prisma, PrismaClient } from "@prisma/client";
 import { z } from "zod";
 import { NotificationService } from "./services/notification.service";
+import { emailService } from "./services/email.service";
 import { generateTransactionNumber } from "./utils/transactionNumber";
 import paymentRoutes from "./routes/payment.routes";
 import { seedDemoData } from "./services/demoSeed.service";
@@ -48,18 +49,7 @@ initSupabase().catch((error) => {
   console.error("Failed to initialize Supabase client:", error);
 });
 
-function getPgbouncerDatabaseUrl() {
-  const databaseUrl = process.env.DATABASE_URL;
-  if (!databaseUrl || databaseUrl.includes("pgbouncer=true")) {
-    return databaseUrl;
-  }
-
-  return `${databaseUrl}${databaseUrl.includes("?") ? "&" : "?"}pgbouncer=true&connection_limit=1`;
-}
-
-export const prisma = new PrismaClient({
-  datasources: { db: { url: getPgbouncerDatabaseUrl() } }
-});
+export const prisma = new PrismaClient();
 const app = express();
 const notificationService = new NotificationService();
 
@@ -791,16 +781,6 @@ function getCateringGalleryImages(items: Prisma.JsonValue | null | undefined) {
   return galleryImages.filter((item): item is string => typeof item === "string" && item.trim().length > 0);
 }
 
-function setCateringGalleryImages(items: Prisma.JsonValue | null | undefined, galleryImages: Array<string | null>) {
-  const itemObject = items && typeof items === "object" && !Array.isArray(items) ? items : {};
-  const cleanGalleryImages = galleryImages.map((imageUrl) => getPersistableImageValue(imageUrl));
-
-  return {
-    ...itemObject,
-    galleryImages: cleanGalleryImages
-  } as Prisma.InputJsonValue;
-}
-
 function mergeCateringPackageItems(defaultItems: unknown, existingItems?: Prisma.JsonValue | null) {
   const defaultObject = typeof defaultItems === "object" && defaultItems !== null && !Array.isArray(defaultItems)
     ? defaultItems
@@ -936,6 +916,49 @@ async function deductFromBatchesFEFO(tx: PrismaTx, materialId: string, quantity:
   }
 
   return deductions;
+}
+
+async function cancelReservationIngredientLocks(
+  tx: Prisma.TransactionClient,
+  reservationId: string,
+  userId?: string,
+  reason?: string
+) {
+  const locks = await tx.cateringIngredientLock.findMany({
+    where: { catering_reservation_id: reservationId, is_released: false },
+    include: { raw_material: true }
+  });
+
+  if (locks.length === 0) {
+    return;
+  }
+
+  for (const lock of locks) {
+    const currentStock = Number(lock.raw_material.current_stock ?? 0);
+    const restoredQuantity = Number(lock.reserved_quantity ?? 0);
+
+    await tx.rawMaterial.update({
+      where: { id: lock.raw_material_id },
+      data: { current_stock: currentStock + restoredQuantity }
+    });
+  }
+
+  await tx.cateringIngredientLock.updateMany({
+    where: { catering_reservation_id: reservationId, is_released: false },
+    data: { is_released: true, released_at: new Date() }
+  });
+
+  await tx.inventoryTransaction.createMany({
+    data: locks.map((lock) => ({
+      raw_material_id: lock.raw_material_id,
+      transaction_type: "return",
+      quantity: Number(lock.reserved_quantity),
+      unit: lock.unit,
+      reference: reason ?? `Reservation cancellation ${reservationId}`,
+      reason: "reservation_cancelled",
+      user_id: userId
+    }))
+  });
 }
 
 async function createCateringIngredientLocks(
@@ -1338,6 +1361,21 @@ app.post("/api/reservations", async (req, res, next) => {
       }
     });
 
+    void emailService.sendBookingConfirmation({
+      bookingId: reservation.booking_id,
+      email: reservation.customer_email,
+      name: reservation.customer_name,
+      date: reservation.date,
+      time: reservation.time,
+      partySize: reservation.party_size,
+      items: Array.isArray(reservation.selected_products) ? reservation.selected_products as any : undefined,
+      total: reservation.total_price,
+      downpayment: reservation.downpayment_amount,
+      remaining: reservation.remaining_balance,
+      status: reservation.status,
+      specialRequests: reservation.special_requests
+    }).catch((error) => console.error("Failed to send booking confirmation email:", error));
+
     return res.status(201).json({
       success: true,
       booking_id: reservation.booking_id,
@@ -1430,51 +1468,7 @@ app.put("/api/admin/settings/system", async (req, res, next) => {
         low_stock_alerts_enabled: z.coerce.boolean()
       })
       .parse(req.body);
-    const currentSettings = await getSystemSettings();
-    const role = normalizeRole(user.role);
-    const allFields = Object.keys(defaultSystemSettings) as Array<keyof SystemSettingsInput>;
-    const fieldsByRole: Record<string, Array<keyof SystemSettingsInput>> = {
-      admin: allFields,
-      cashier: [
-        "tax_rate_percent",
-        "receipt_paper_size",
-        "receipt_footer",
-        "email_notifications_enabled",
-        "sms_notifications_enabled",
-        "low_stock_alerts_enabled"
-      ],
-      receptionist: [
-        "max_party_size",
-        "reservation_duration_minutes",
-        "reservation_grace_period_minutes",
-        "email_notifications_enabled",
-        "sms_notifications_enabled"
-      ],
-      event_coordinator: [
-        "minimum_catering_pax",
-        "default_downpayment_percent",
-        "auto_lock_catering_ingredients",
-        "release_catering_locks_on_completion",
-        "email_notifications_enabled",
-        "sms_notifications_enabled"
-      ],
-      inventory_manager: [
-        "default_reorder_level",
-        "low_stock_threshold_percent",
-        "auto_reorder_enabled",
-        "low_stock_alerts_enabled",
-        "email_notifications_enabled",
-        "sms_notifications_enabled"
-      ],
-      chef: ["low_stock_alerts_enabled", "email_notifications_enabled", "sms_notifications_enabled"],
-      staff: ["email_notifications_enabled", "sms_notifications_enabled"]
-    };
-    const editableFields = fieldsByRole[role ?? "staff"] ?? [];
-    const filteredSettings = editableFields.reduce(
-      (next, field) => ({ ...next, [field]: body[field] }),
-      { ...currentSettings }
-    ) as SystemSettingsInput;
-    const settings = await updateSystemSettings(filteredSettings);
+    const settings = await updateSystemSettings(body);
 
     return res.json({ settings });
   } catch (error) {
@@ -1489,87 +1483,6 @@ app.get("/api/catering/packages", async (_req, res, next) => {
     );
     return res.json({ packages });
   } catch (error) {
-    return next(error);
-  }
-});
-
-app.put(
-  "/api/admin/catering/packages/:id/photos",
-  upload.fields([
-    { name: "imageFile_0", maxCount: 1 },
-    { name: "imageFile_1", maxCount: 1 },
-    { name: "imageFile_2", maxCount: 1 }
-  ]),
-  async (req, res, next) => {
-  try {
-    const user = requireRole(req, res, ["admin"]);
-
-    if (!user) {
-      return;
-    }
-
-    const stationPackage = await ensureCateringStationPackage(req.params.id);
-
-    if (!stationPackage) {
-      return res.status(404).json({ message: "Catering option not found." });
-    }
-
-    const body = z
-      .object({
-        image_urls: z.string().optional()
-      })
-      .parse(req.body);
-
-    const imageUrls = body.image_urls ? JSON.parse(body.image_urls) : [];
-
-    if (!Array.isArray(imageUrls)) {
-      return res.status(400).json({ message: "Image URLs must be a list." });
-    }
-
-    const filesByField = req.files && !Array.isArray(req.files) ? req.files : {};
-    const uploadedImages = await Promise.all(
-      Array.from({ length: 3 }, async (_, index) => {
-        const file = filesByField[`imageFile_${index}`]?.[0];
-
-        if (!file) {
-          return null;
-        }
-
-        const localUploadPath = path.join(uploadDir, file.filename);
-        if (useSupabaseStorage && supabase && supabaseStorageBucket) {
-          const supabasePath = `catering-packages/${file.filename}`;
-          return uploadFileToSupabase(localUploadPath, supabasePath);
-        }
-
-        return `/uploads/products/${file.filename}`;
-      })
-    );
-
-    const galleryImages = Array.from({ length: 3 }, (_, index) => {
-      const uploadedImage = uploadedImages[index];
-
-      if (uploadedImage) {
-        return uploadedImage;
-      }
-
-      const imageUrl = imageUrls[index];
-      return typeof imageUrl === "string" && imageUrl.trim().length > 0 ? imageUrl.trim() : null;
-    });
-
-    const cateringPackage = await prisma.cateringPackage.update({
-      where: { id: req.params.id },
-      data: {
-        imageUrl: galleryImages[0],
-        items: setCateringGalleryImages(stationPackage.items, galleryImages)
-      }
-    });
-
-    return res.json({ package: cateringPackage });
-  } catch (error) {
-    if (error instanceof SyntaxError) {
-      return res.status(400).json({ message: "Invalid image URL list." });
-    }
-
     return next(error);
   }
 });
@@ -1703,6 +1616,20 @@ app.post("/api/catering/reservations", async (req, res, next) => {
 
       return created;
     });
+
+    void emailService.sendCateringConfirmation({
+      bookingId: reservation.reservation_id ?? inquiry_id,
+      email: reservation.customer_email ?? body.customer_email,
+      name: reservation.customer_name ?? body.customer_name,
+      date: reservation.event_date ?? body.event_date,
+      partySize: reservation.headcount ?? body.headcount,
+      packageName: selectedPackage.name,
+      venueAddress: body.venue_address,
+      total: reservation.total_price,
+      downpayment: reservation.downpayment_amount,
+      remaining: reservation.remaining_balance,
+      status: reservation.status
+    }).catch((error) => console.error("Failed to send catering confirmation email:", error));
 
     return res.status(201).json({
       success: true,
@@ -2011,6 +1938,105 @@ app.put("/api/staff/catering/reservations/:id/approve", async (req, res, next) =
       });
     });
 
+    if (reservation) {
+      void emailService.sendCateringApproval({
+        bookingId: reservation.reservation_id ?? reservation.id,
+        email: reservation.customer_email ?? reservation.inquiry?.customer_email ?? "",
+        name: reservation.customer_name ?? reservation.inquiry?.customer_name ?? "Customer",
+        date: reservation.event_date ?? reservation.inquiry?.event_date ?? new Date(),
+        partySize: reservation.headcount ?? reservation.inquiry?.headcount,
+        packageName: reservation.package?.name,
+        venueAddress: reservation.inquiry?.venue_type,
+        total: reservation.total_price,
+        downpayment: reservation.downpayment_amount,
+        remaining: reservation.remaining_balance,
+        status: reservation.status
+      }).catch((error) => console.error("Failed to send catering approval email:", error));
+    }
+
+    return res.json({ reservation });
+  } catch (error) {
+    return next(error);
+  }
+});
+
+app.put("/api/staff/catering/reservations/:id/cancel", async (req, res, next) => {
+  try {
+    const user = requireRole(req, res, ["admin", "event_coordinator"]);
+
+    if (!user) {
+      return;
+    }
+
+    const body = z.object({
+      reason: z.string().min(1),
+      amount: z.coerce.number().min(0).optional(),
+      payment_method: z.enum(["cash", "gcash", "bank_transfer"]).optional(),
+      reference_number: z.string().optional().nullable(),
+      cash_received: z.coerce.number().min(0).optional().nullable()
+    }).parse(req.body);
+
+    const reservation = await prisma.$transaction(async (tx) => {
+      const current = await tx.cateringReservation.findUnique({
+        where: { id: req.params.id },
+        include: { ingredient_locks: { where: { is_released: false } }, payments: { orderBy: { received_at: "asc" } } }
+      });
+
+      if (!current) {
+        throw Object.assign(new Error("Reservation not found"), { statusCode: 404 });
+      }
+
+      if (current.ingredient_locks.length > 0) {
+        await cancelReservationIngredientLocks(tx, current.id, user.sub, body.reason);
+      }
+
+      const amountRecorded = Number(body.amount ?? current.payments.reduce((total, payment) => total + Number(payment.amount ?? 0), 0));
+      const paymentMethod = (body.payment_method ?? current.payments.at(-1)?.method ?? "cash") as "cash" | "gcash" | "bank_transfer";
+      const referenceNumber = body.reference_number ?? (paymentMethod === "cash" ? null : current.payments.at(-1)?.reference_number ?? null);
+      const cashReceived = body.cash_received ?? (paymentMethod === "cash" ? amountRecorded : null);
+
+      if (amountRecorded > 0) {
+        await tx.reservationPayment.create({
+          data: {
+            catering_reservation_id: current.id,
+            payment_stage: "cancellation",
+            method: paymentMethod,
+            amount: amountRecorded,
+            reference_number: referenceNumber,
+            cash_received: paymentMethod === "cash" ? cashReceived : null,
+            change_due: paymentMethod === "cash" ? roundMoney(Math.max((cashReceived ?? 0) - amountRecorded, 0)) : null,
+            source: "staff",
+            recorded_by_id: user.sub
+          }
+        });
+      }
+
+      if (current.inquiry_id) {
+        await tx.cateringInquiry.update({
+          where: { id: current.inquiry_id },
+          data: {
+            status: "cancelled",
+            admin_notes: body.reason
+          }
+        });
+      }
+
+      return tx.cateringReservation.update({
+        where: { id: current.id },
+        data: {
+          status: "cancelled",
+          remaining_balance: 0,
+          final_payment_status: "cancelled",
+          full_payment_paid: false,
+          full_payment_date: null,
+          remaining_paid_at_venue: false,
+          remaining_paid_date: null,
+          ingredients_locked: false
+        },
+        include: { payments: { orderBy: { received_at: "asc" } }, ingredient_locks: { include: { raw_material: true } } }
+      });
+    });
+
     return res.json({ reservation });
   } catch (error) {
     return next(error);
@@ -2277,6 +2303,80 @@ app.get("/api/staff/reservations/approved", async (req, res, next) => {
   }
 });
 
+app.get("/api/staff/notifications", async (req, res, next) => {
+  try {
+    const user = requireRole(req, res, ["admin", "inventory_manager", "cashier", "receptionist", "event_coordinator", "chef"]);
+
+    if (!user) {
+      return;
+    }
+
+    const role = user.role.toLowerCase();
+    const [dineInReservations, cateringReservations] = await Promise.all([
+      ["admin", "receptionist"].includes(role)
+        ? prisma.reservation.findMany({
+            where: { status: { in: ["pending", "pending_approval"] } },
+            select: {
+              id: true,
+              booking_id: true,
+              customer_name: true,
+              date: true,
+              time: true,
+              status: true,
+              created_at: true
+            },
+            orderBy: { created_at: "desc" },
+            take: 8
+          })
+        : Promise.resolve([]),
+      ["admin", "event_coordinator"].includes(role)
+        ? prisma.cateringReservation.findMany({
+            where: { status: { in: ["pending", "pending_approval"] } },
+            select: {
+              id: true,
+              reservation_id: true,
+              customer_name: true,
+              event_date: true,
+              status: true,
+              created_at: true
+            },
+            orderBy: { created_at: "desc" },
+            take: 8
+          })
+        : Promise.resolve([])
+    ]);
+
+    const notifications = [
+      ...dineInReservations.map((reservation) => ({
+        id: reservation.id,
+        type: "dine_in" as const,
+        reference: reservation.booking_id,
+        customerName: reservation.customer_name,
+        date: reservation.date,
+        time: reservation.time,
+        status: reservation.status,
+        createdAt: reservation.created_at
+      })),
+      ...cateringReservations.map((reservation) => ({
+        id: reservation.id,
+        type: "catering" as const,
+        reference: reservation.reservation_id ?? "Catering booking",
+        customerName: reservation.customer_name ?? "Customer",
+        date: reservation.event_date ?? reservation.created_at,
+        time: null,
+        status: reservation.status ?? "pending_approval",
+        createdAt: reservation.created_at
+      }))
+    ]
+      .sort((first, second) => second.createdAt.getTime() - first.createdAt.getTime())
+      .slice(0, 8);
+
+    return res.json({ notifications });
+  } catch (error) {
+    return next(error);
+  }
+});
+
 app.get("/api/staff/reservations/all", async (req, res, next) => {
   try {
     const user = requireRole(req, res, ["admin", "receptionist"]);
@@ -2395,6 +2495,20 @@ app.put("/api/staff/reservations/:id/approve", async (req, res, next) => {
       { name: reservation.customer_name, phone: reservation.customer_phone, email: reservation.customer_email },
       { date: reservation.date, time: reservation.time }
     );
+    void emailService.sendApprovalNotification({
+      bookingId: reservation.booking_id,
+      email: reservation.customer_email,
+      name: reservation.customer_name,
+      date: reservation.date,
+      time: reservation.time,
+      partySize: reservation.party_size,
+      items: Array.isArray(reservation.selected_products) ? reservation.selected_products as any : undefined,
+      total: reservation.total_price,
+      downpayment: reservation.downpayment_amount,
+      remaining: reservation.remaining_balance,
+      status: reservation.status,
+      specialRequests: reservation.special_requests
+    }).catch((error) => console.error("Failed to send booking approval email:", error));
 
     return res.json({ reservation });
   } catch (error) {
@@ -2426,6 +2540,84 @@ app.put("/api/staff/reservations/:id/reject", async (req, res, next) => {
       reservation.rejected_reason ?? "Unavailable",
       reservation.alternative_suggestions
     );
+    void emailService.sendRejectionNotification(
+      reservation.booking_id,
+      reservation.customer_email,
+      reservation.customer_name,
+      reservation.rejected_reason ?? "Unavailable",
+      reservation.alternative_suggestions
+    ).catch((error) => console.error("Failed to send booking rejection email:", error));
+
+    return res.json({ reservation });
+  } catch (error) {
+    return next(error);
+  }
+});
+
+app.put("/api/staff/reservations/:id/cancel", async (req, res, next) => {
+  try {
+    const user = requireRole(req, res, ["admin", "receptionist"]);
+
+    if (!user) {
+      return;
+    }
+
+    const body = z.object({
+      reason: z.string().min(1),
+      amount: z.coerce.number().min(0).optional(),
+      payment_method: z.enum(["cash", "gcash", "bank_transfer"]).optional(),
+      reference_number: z.string().optional().nullable(),
+      cash_received: z.coerce.number().min(0).optional().nullable()
+    }).parse(req.body);
+
+    const reservation = await prisma.$transaction(async (tx) => {
+      const current = await tx.reservation.findUnique({
+        where: { id: req.params.id },
+        include: { payments: { orderBy: { received_at: "asc" } } }
+      });
+
+      if (!current) {
+        throw Object.assign(new Error("Reservation not found"), { statusCode: 404 });
+      }
+
+      const amountRecorded = Number(body.amount ?? current.payments.reduce((total, payment) => total + Number(payment.amount ?? 0), 0));
+      const paymentMethod = (body.payment_method ?? current.payments.at(-1)?.method ?? "cash") as "cash" | "gcash" | "bank_transfer";
+      const referenceNumber = body.reference_number ?? (paymentMethod === "cash" ? null : current.payments.at(-1)?.reference_number ?? null);
+      const cashReceived = body.cash_received ?? (paymentMethod === "cash" ? amountRecorded : null);
+
+      if (amountRecorded > 0) {
+        await tx.reservationPayment.create({
+          data: {
+            reservation_id: current.id,
+            payment_stage: "cancellation",
+            method: paymentMethod,
+            amount: amountRecorded,
+            reference_number: referenceNumber,
+            cash_received: paymentMethod === "cash" ? cashReceived : null,
+            change_due: paymentMethod === "cash" ? roundMoney(Math.max((cashReceived ?? 0) - amountRecorded, 0)) : null,
+            source: "staff",
+            recorded_by_id: user.sub
+          }
+        });
+      }
+
+      return tx.reservation.update({
+        where: { id: current.id },
+        data: {
+          status: "cancelled",
+          rejected_reason: body.reason,
+          admin_notes: body.reason,
+          remaining_balance: 0,
+          final_payment_status: "cancelled",
+          full_payment_paid: false,
+          full_payment_date: null,
+          remaining_paid_at_venue: false,
+          remaining_paid_date: null,
+          payment_plan: "initial_only"
+        },
+        include: { payments: { orderBy: { received_at: "asc" } } }
+      });
+    });
 
     return res.json({ reservation });
   } catch (error) {
@@ -2639,6 +2831,7 @@ app.post("/api/staff/catering/reservations/confirm", async (req, res, next) => {
       });
       await tx.cateringInquiry.update({ where: { id: body.inquiry_id }, data: { status: "confirmed" } });
       return created;
+
     });
 
     return res.status(201).json({ reservation });
@@ -2851,8 +3044,34 @@ app.post("/api/auth/login", async (req, res, next) => {
   }
 });
 
+async function ensureBeverageStockMaterials() {
+  const beverageProducts = await prisma.sellingProduct.findMany({
+    where: { is_deleted: false, category: { equals: "Beverage", mode: "insensitive" } },
+    select: { name: true }
+  });
+
+  await Promise.all(
+    beverageProducts.map((product) =>
+      prisma.rawMaterial.upsert({
+        where: { name: product.name },
+        update: { category: "Beverage", is_deleted: false },
+        create: {
+          name: product.name,
+          category: "Beverage",
+          unit: normalizedBeverageUnit(product.name),
+          current_stock: 0,
+          reorder_level: 0,
+          cost_per_unit: 0
+        }
+      })
+    )
+  );
+}
+
 app.get("/api/inventory/materials", async (_req, res, next) => {
   try {
+    await ensureBeverageStockMaterials();
+
     const materials = await prisma.rawMaterial.findMany({
       where: { is_deleted: false },
       orderBy: { name: "asc" },
@@ -2948,6 +3167,7 @@ app.post("/api/inventory/materials", async (req, res, next) => {
     const body = z
       .object({
         name: z.string().min(1),
+        category: z.enum(["Beverage", "Raw Material"]).default("Raw Material"),
         unit: z.string().min(1),
         current_stock: z.coerce.number().nonnegative(),
         reorder_level: z.coerce.number().nonnegative(),
@@ -2973,6 +3193,7 @@ app.put("/api/inventory/materials/:id", async (req, res, next) => {
     const body = z
       .object({
         name: z.string().min(1),
+        category: z.enum(["Beverage", "Raw Material"]).default("Raw Material"),
         unit: z.string().min(1),
         current_stock: z.coerce.number().nonnegative(),
         reorder_level: z.coerce.number().nonnegative(),
@@ -3895,6 +4116,7 @@ app.get("/api/products", async (_req, res, next) => {
     }
 
     // Authenticated/staff requests: include recipes for inventory management
+    await ensureBeverageStockMaterials();
     const products = await prisma.sellingProduct.findMany({
       where: { is_deleted: false },
       orderBy: [{ category: "asc" }, { name: "asc" }],
@@ -3919,10 +4141,45 @@ app.get("/api/products", async (_req, res, next) => {
     const productsWithImageUrls = await Promise.all(
       products.map(async (product) => {
         const imageUrl = await normalizeProductImage(product);
+        const ingredients = product.recipes[0]?.recipe_ingredients ?? [];
+        let availableStock = 0;
+
+        if (product.category.toLowerCase() === "beverage" && ingredients.length === 0) {
+          const beverageMaterial = await prisma.rawMaterial.findFirst({
+            where: { name: product.name, is_deleted: false },
+            select: { current_stock: true }
+          });
+          availableStock = Number(beverageMaterial?.current_stock ?? 0);
+        } else if (ingredients.length > 0) {
+          const requiredByMaterial = new Map<string, { currentStock: number; requiredPerProduct: number }>();
+
+          ingredients.forEach((ingredient) => {
+            const material = ingredient.raw_material;
+            const required = convertQuantityToMaterialUnit(
+              Number(ingredient.quantity_per_yield),
+              ingredient.unit,
+              material.unit
+            );
+            const existing = requiredByMaterial.get(material.id);
+            requiredByMaterial.set(material.id, {
+              currentStock: Number(material.current_stock),
+              requiredPerProduct: (existing?.requiredPerProduct ?? 0) + required
+            });
+          });
+
+          availableStock = Math.max(
+            0,
+            Math.floor(
+              Math.min(...Array.from(requiredByMaterial.values()).map((entry) => entry.currentStock / entry.requiredPerProduct))
+            )
+          );
+        }
+
         return {
           ...product,
           image_url: imageUrl,
-          imageUrl
+          imageUrl,
+          available_stock: availableStock
         };
       })
     );
@@ -3966,21 +4223,45 @@ app.post("/api/products", upload.single("imageFile"), async (req, res, next) => 
 
     const persistedImageValue = getPersistableImageValue(imageUrl);
 
-    const product = await prisma.sellingProduct.create({
-      data: {
-        name: body.name,
-        category: body.category,
-        price: body.price,
-        description: body.description || null,
-        image_url: persistedImageValue,
-        is_available: body.is_available ?? true,
-        recipes: {
-          create: {
-            total_yield_quantity: 1,
-            yield_unit: "serving"
+    const shouldTrackBeverageStock = body.category.toLowerCase() === "beverage";
+
+    const product = await prisma.$transaction(async (tx) => {
+      const createdProduct = await tx.sellingProduct.create({
+        data: {
+          name: body.name,
+          category: body.category,
+          price: body.price,
+          description: body.description || null,
+          image_url: persistedImageValue,
+          is_available: body.is_available ?? true,
+          recipes: {
+            create: {
+              total_yield_quantity: 1,
+              yield_unit: "serving"
+            }
           }
         }
+      });
+
+      if (shouldTrackBeverageStock) {
+        const beverageUnit = normalizedBeverageUnit(body.name);
+        await tx.rawMaterial.upsert({
+          where: { name: body.name },
+          update: {
+            is_deleted: false,
+            unit: beverageUnit
+          },
+          create: {
+            name: body.name,
+            unit: beverageUnit,
+            current_stock: 0,
+            reorder_level: 0,
+            cost_per_unit: 0
+          }
+        });
       }
+
+      return createdProduct;
     });
 
     return res.status(201).json({ product });
@@ -4032,6 +4313,24 @@ app.put("/api/products/:id", upload.single("imageFile"), async (req, res, next) 
       where: { id: req.params.id },
       data: updateData
     });
+
+    if (product.category.toLowerCase() === "beverage") {
+      const beverageUnit = normalizedBeverageUnit(product.name);
+      await prisma.rawMaterial.upsert({
+        where: { name: product.name },
+        update: {
+          is_deleted: false,
+          unit: beverageUnit
+        },
+        create: {
+          name: product.name,
+          unit: beverageUnit,
+          current_stock: 0,
+          reorder_level: 0,
+          cost_per_unit: 0
+        }
+      });
+    }
 
     return res.json({ product });
   } catch (error) {
@@ -4141,6 +4440,16 @@ function normalizeRecipeUnit(unit: string) {
   }
 
   return normalized;
+}
+
+function normalizedBeverageUnit(name: string) {
+  const normalizedName = name.toLowerCase();
+
+  if (normalizedName.includes("tea") || normalizedName.includes("juice") || normalizedName.includes("shake")) {
+    return "cup";
+  }
+
+  return "bottle";
 }
 
 function calculateIngredientCost(quantity: number, ingredientUnit: string, material: { unit: string; cost_per_unit: unknown }) {
@@ -4419,6 +4728,8 @@ const posItemSchema = z.object({
   unitPrice: z.coerce.number().nonnegative().optional()
 });
 
+class InsufficientPosStockError extends Error {}
+
 async function createUniqueTransactionNumber() {
   for (let attempt = 0; attempt < 5; attempt += 1) {
     const transactionNumber = generateTransactionNumber();
@@ -4476,6 +4787,12 @@ app.post("/api/pos/transaction", async (req, res, next) => {
       return res.status(400).json({ message: "One or more products were not found" });
     }
 
+    const unavailableItem = body.items.find((item) => productsById.get(item.productId)?.is_available === false);
+
+    if (unavailableItem) {
+      return res.status(409).json({ message: `${productsById.get(unavailableItem.productId)?.name} is unavailable.` });
+    }
+
     const subtotal = body.items.reduce((total, item) => {
       const product = productsById.get(item.productId);
       const unitPrice = item.unitPrice ?? Number(product?.price ?? 0);
@@ -4490,8 +4807,86 @@ app.post("/api/pos/transaction", async (req, res, next) => {
 
     const transactionNumber = await createUniqueTransactionNumber();
     const transaction = await prisma.$transaction(async (tx) => {
-      const stockByMaterialId = new Map<string, number>();
-      const createdTransaction = await tx.posTransaction.create({
+      const deductionsByMaterialId = new Map<string, {
+        materialName: string;
+        unit: string;
+        quantity: number;
+        productName: string;
+      }>();
+
+      for (const item of body.items) {
+        const product = productsById.get(item.productId);
+        const recipeIngredients = product?.recipes[0]?.recipe_ingredients ?? [];
+
+        if (product && product.category.toLowerCase() === "beverage" && recipeIngredients.length === 0) {
+          const beverageMaterial = await tx.rawMaterial.findFirst({
+            where: { name: product.name, is_deleted: false }
+          });
+
+          if (!beverageMaterial) {
+            throw new InsufficientPosStockError(`${product.name} is out of stock.`);
+          }
+
+          const existing = deductionsByMaterialId.get(beverageMaterial.id);
+          deductionsByMaterialId.set(beverageMaterial.id, {
+            materialName: beverageMaterial.name,
+            unit: beverageMaterial.unit,
+            quantity: (existing?.quantity ?? 0) + item.quantity,
+            productName: product.name
+          });
+          continue;
+        }
+
+        for (const ingredient of recipeIngredients) {
+          const material = ingredient.raw_material;
+          const deduction = convertQuantityToMaterialUnit(
+            Number(ingredient.quantity_per_yield) * item.quantity,
+            ingredient.unit,
+            material.unit
+          );
+          const existing = deductionsByMaterialId.get(material.id);
+          deductionsByMaterialId.set(material.id, {
+            materialName: material.name,
+            unit: material.unit,
+            quantity: (existing?.quantity ?? 0) + deduction,
+            productName: product?.name ?? material.name
+          });
+        }
+      }
+
+      for (const [materialId, deduction] of deductionsByMaterialId) {
+        const updated = await tx.rawMaterial.updateMany({
+          where: {
+            id: materialId,
+            is_deleted: false,
+            current_stock: { gte: deduction.quantity }
+          },
+          data: { current_stock: { decrement: deduction.quantity } }
+        });
+
+        if (updated.count === 0) {
+          const material = await tx.rawMaterial.findUnique({
+            where: { id: materialId },
+            select: { current_stock: true }
+          });
+          throw new InsufficientPosStockError(
+            `${deduction.productName} cannot be sold: only ${Number(material?.current_stock ?? 0)} ${deduction.unit} of ${deduction.materialName} remain.`
+          );
+        }
+
+        await tx.inventoryTransaction.create({
+            data: {
+              raw_material_id: materialId,
+              transaction_type: "deduct",
+              quantity: deduction.quantity,
+              unit: deduction.unit,
+              reference: `POS Transaction ${transactionNumber}`,
+              user_id: user.sub
+            }
+          });
+      }
+
+      return tx.posTransaction.create({
         data: {
           transaction_number: transactionNumber,
           customer_name: body.customerName || null,
@@ -4523,44 +4918,14 @@ app.post("/api/pos/transaction", async (req, res, next) => {
           items: { include: { selling_product: true } }
         }
       });
-
-      for (const item of body.items) {
-        const product = productsById.get(item.productId);
-        const recipeIngredients = product?.recipes[0]?.recipe_ingredients ?? [];
-
-        for (const ingredient of recipeIngredients) {
-          const material = ingredient.raw_material;
-          const deduction = convertQuantityToMaterialUnit(
-            Number(ingredient.quantity_per_yield) * item.quantity,
-            ingredient.unit,
-            material.unit
-          );
-          const currentStock = stockByMaterialId.get(material.id) ?? Number(material.current_stock);
-          const nextStock = Math.max(currentStock - deduction, 0);
-
-          await tx.rawMaterial.update({
-            where: { id: material.id },
-            data: { current_stock: nextStock }
-          });
-          await tx.inventoryTransaction.create({
-            data: {
-              raw_material_id: material.id,
-              transaction_type: "deduct",
-              quantity: deduction,
-              unit: material.unit,
-              reference: `POS Transaction ${transactionNumber}`,
-              user_id: user.sub
-            }
-          });
-          stockByMaterialId.set(material.id, nextStock);
-        }
-      }
-
-      return createdTransaction;
     });
 
     return res.status(201).json({ transaction });
   } catch (error) {
+    if (error instanceof InsufficientPosStockError) {
+      return res.status(409).json({ message: error.message });
+    }
+
     return next(error);
   }
 });
@@ -5363,23 +5728,162 @@ function calculateTax(subtotal: number, taxRatePercent: number) {
 }
 
 async function ensureSystemSettingsRow() {
-  return prisma.systemSetting.upsert({
-    where: { singleton_key: "default" },
-    create: { id: "system-settings-default", singleton_key: "default", ...defaultSystemSettings },
-    update: {}
-  });
+  await prisma.$executeRaw`ALTER TABLE system_settings ADD COLUMN IF NOT EXISTS receipt_paper_size TEXT DEFAULT '80mm'`;
+  await prisma.$executeRaw`ALTER TABLE system_settings ADD COLUMN IF NOT EXISTS max_party_size INTEGER DEFAULT 30`;
+  await prisma.$executeRaw`ALTER TABLE system_settings ADD COLUMN IF NOT EXISTS reservation_duration_minutes INTEGER DEFAULT 90`;
+  await prisma.$executeRaw`ALTER TABLE system_settings ADD COLUMN IF NOT EXISTS reservation_grace_period_minutes INTEGER DEFAULT 15`;
+  await prisma.$executeRaw`ALTER TABLE system_settings ADD COLUMN IF NOT EXISTS minimum_catering_pax INTEGER DEFAULT 10`;
+  await prisma.$executeRaw`ALTER TABLE system_settings ADD COLUMN IF NOT EXISTS default_downpayment_percent DOUBLE PRECISION DEFAULT 50`;
+  await prisma.$executeRaw`ALTER TABLE system_settings ADD COLUMN IF NOT EXISTS auto_lock_catering_ingredients BOOLEAN DEFAULT TRUE`;
+  await prisma.$executeRaw`ALTER TABLE system_settings ADD COLUMN IF NOT EXISTS release_catering_locks_on_completion BOOLEAN DEFAULT TRUE`;
+  await prisma.$executeRaw`ALTER TABLE system_settings ADD COLUMN IF NOT EXISTS default_reorder_level DOUBLE PRECISION DEFAULT 10`;
+  await prisma.$executeRaw`ALTER TABLE system_settings ADD COLUMN IF NOT EXISTS low_stock_threshold_percent DOUBLE PRECISION DEFAULT 100`;
+  await prisma.$executeRaw`ALTER TABLE system_settings ADD COLUMN IF NOT EXISTS auto_reorder_enabled BOOLEAN DEFAULT FALSE`;
+  await prisma.$executeRaw`ALTER TABLE system_settings ADD COLUMN IF NOT EXISTS email_notifications_enabled BOOLEAN DEFAULT TRUE`;
+  await prisma.$executeRaw`ALTER TABLE system_settings ADD COLUMN IF NOT EXISTS sms_notifications_enabled BOOLEAN DEFAULT FALSE`;
+  await prisma.$executeRaw`ALTER TABLE system_settings ADD COLUMN IF NOT EXISTS low_stock_alerts_enabled BOOLEAN DEFAULT TRUE`;
+
+  await prisma.$executeRaw`
+    INSERT INTO system_settings (
+      id,
+      singleton_key,
+      restaurant_name,
+      timezone,
+      currency,
+      tax_rate_percent,
+      receipt_paper_size,
+      receipt_footer,
+      max_party_size,
+      reservation_duration_minutes,
+      reservation_grace_period_minutes,
+      minimum_catering_pax,
+      default_downpayment_percent,
+      auto_lock_catering_ingredients,
+      release_catering_locks_on_completion,
+      default_reorder_level,
+      low_stock_threshold_percent,
+      auto_reorder_enabled,
+      email_notifications_enabled,
+      sms_notifications_enabled,
+      low_stock_alerts_enabled,
+      updated_at
+    )
+    VALUES (
+      'system-settings-default',
+      'default',
+      ${defaultSystemSettings.restaurant_name},
+      ${defaultSystemSettings.timezone},
+      ${defaultSystemSettings.currency},
+      ${defaultSystemSettings.tax_rate_percent},
+      ${defaultSystemSettings.receipt_paper_size},
+      ${defaultSystemSettings.receipt_footer},
+      ${defaultSystemSettings.max_party_size},
+      ${defaultSystemSettings.reservation_duration_minutes},
+      ${defaultSystemSettings.reservation_grace_period_minutes},
+      ${defaultSystemSettings.minimum_catering_pax},
+      ${defaultSystemSettings.default_downpayment_percent},
+      ${defaultSystemSettings.auto_lock_catering_ingredients},
+      ${defaultSystemSettings.release_catering_locks_on_completion},
+      ${defaultSystemSettings.default_reorder_level},
+      ${defaultSystemSettings.low_stock_threshold_percent},
+      ${defaultSystemSettings.auto_reorder_enabled},
+      ${defaultSystemSettings.email_notifications_enabled},
+      ${defaultSystemSettings.sms_notifications_enabled},
+      ${defaultSystemSettings.low_stock_alerts_enabled},
+      NOW()
+    )
+    ON CONFLICT (singleton_key) DO NOTHING
+  `;
 }
 
 async function getSystemSettings() {
-  return ensureSystemSettingsRow();
+  await ensureSystemSettingsRow();
+
+  const rows = await prisma.$queryRaw<SystemSettingsRecord[]>`
+    SELECT
+      id,
+      singleton_key,
+      restaurant_name,
+      timezone,
+      currency,
+      tax_rate_percent,
+      receipt_paper_size,
+      receipt_footer,
+      max_party_size,
+      reservation_duration_minutes,
+      reservation_grace_period_minutes,
+      minimum_catering_pax,
+      default_downpayment_percent,
+      auto_lock_catering_ingredients,
+      release_catering_locks_on_completion,
+      default_reorder_level,
+      low_stock_threshold_percent,
+      auto_reorder_enabled,
+      email_notifications_enabled,
+      sms_notifications_enabled,
+      low_stock_alerts_enabled,
+      updated_at
+    FROM system_settings
+    WHERE singleton_key = 'default'
+    LIMIT 1
+  `;
+
+  return rows[0] ?? { id: "system-settings-default", singleton_key: "default", ...defaultSystemSettings, updated_at: new Date() };
 }
 
 async function updateSystemSettings(settings: SystemSettingsInput) {
-  return prisma.systemSetting.upsert({
-    where: { singleton_key: "default" },
-    create: { id: "system-settings-default", singleton_key: "default", ...settings },
-    update: settings
-  });
+  await ensureSystemSettingsRow();
+
+  const rows = await prisma.$queryRaw<SystemSettingsRecord[]>`
+    UPDATE system_settings
+    SET
+      restaurant_name = ${settings.restaurant_name},
+      timezone = ${settings.timezone},
+      currency = ${settings.currency.toUpperCase()},
+      tax_rate_percent = ${settings.tax_rate_percent},
+      receipt_paper_size = ${settings.receipt_paper_size},
+      receipt_footer = ${settings.receipt_footer},
+      max_party_size = ${settings.max_party_size},
+      reservation_duration_minutes = ${settings.reservation_duration_minutes},
+      reservation_grace_period_minutes = ${settings.reservation_grace_period_minutes},
+      minimum_catering_pax = ${settings.minimum_catering_pax},
+      default_downpayment_percent = ${settings.default_downpayment_percent},
+      auto_lock_catering_ingredients = ${settings.auto_lock_catering_ingredients},
+      release_catering_locks_on_completion = ${settings.release_catering_locks_on_completion},
+      default_reorder_level = ${settings.default_reorder_level},
+      low_stock_threshold_percent = ${settings.low_stock_threshold_percent},
+      auto_reorder_enabled = ${settings.auto_reorder_enabled},
+      email_notifications_enabled = ${settings.email_notifications_enabled},
+      sms_notifications_enabled = ${settings.sms_notifications_enabled},
+      low_stock_alerts_enabled = ${settings.low_stock_alerts_enabled},
+      updated_at = NOW()
+    WHERE singleton_key = 'default'
+    RETURNING
+      id,
+      singleton_key,
+      restaurant_name,
+      timezone,
+      currency,
+      tax_rate_percent,
+      receipt_paper_size,
+      receipt_footer,
+      max_party_size,
+      reservation_duration_minutes,
+      reservation_grace_period_minutes,
+      minimum_catering_pax,
+      default_downpayment_percent,
+      auto_lock_catering_ingredients,
+      release_catering_locks_on_completion,
+      default_reorder_level,
+      low_stock_threshold_percent,
+      auto_reorder_enabled,
+      email_notifications_enabled,
+      sms_notifications_enabled,
+      low_stock_alerts_enabled,
+      updated_at
+  `;
+
+  return rows[0] ?? getSystemSettings();
 }
 
 async function deductRecipeForProduct(

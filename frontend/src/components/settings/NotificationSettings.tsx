@@ -54,7 +54,7 @@ export default function NotificationSettings() {
             ))}
           </div>
           <div className="mt-6">
-            <Button type="submit" disabled={isSaving}>Save Preferences</Button>
+            <Button disabled={isSaving}>Save Preferences</Button>
           </div>
         </form>
       </CardContent>

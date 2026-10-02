@@ -31,6 +31,7 @@ model User {
 model RawMaterial {
   id            String   @id @default(cuid())
   name          String   @unique
+  category      String   @default("Raw Material")
   unit          String
   current_stock Decimal  @db.Decimal(12, 3)
   reorder_level Decimal  @db.Decimal(12, 3)

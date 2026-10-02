@@ -3,6 +3,7 @@ export type StaffRole = "admin" | "inventory_manager" | "cashier" | "receptionis
 export type RawMaterial = {
   id: string;
   name: string;
+  category: "Beverage" | "Raw Material";
   unit: string;
   current_stock: string | number;
   reserved_quantity?: string | number;

@@ -6,6 +6,7 @@ export type PosProduct = {
   category: string;
   price: string | number;
   is_available?: boolean;
+  available_stock?: number | null;
 };
 
 export type CartItem = {
@@ -27,10 +28,18 @@ export const usePosCart = create<CartState>((set) => ({
     set((state) => {
       const existingItem = state.items.find((item) => item.product.id === product.id);
 
+      if (
+        product.available_stock !== null &&
+        product.available_stock !== undefined &&
+        (existingItem?.quantity ?? 0) >= product.available_stock
+      ) {
+        return state;
+      }
+
       if (existingItem) {
         return {
           items: state.items.map((item) =>
-            item.product.id === product.id ? { ...item, quantity: item.quantity + 1 } : item
+            item.product.id === product.id ? { ...item, product, quantity: item.quantity + 1 } : item
           )
         };
       }

@@ -16,6 +16,7 @@ type MaterialsListProps = {
 
 type MaterialForm = {
   name: string;
+  category: "Beverage" | "Raw Material";
   unit: string;
   current_stock: string;
   reorder_level: string;
@@ -24,6 +25,7 @@ type MaterialForm = {
 
 const emptyMaterialForm: MaterialForm = {
   name: "",
+  category: "Raw Material",
   unit: "kg",
   current_stock: "0",
   reorder_level: "0",
@@ -33,6 +35,7 @@ const emptyMaterialForm: MaterialForm = {
 function formFromMaterial(material: RawMaterial): MaterialForm {
   return {
     name: material.name,
+    category: material.category ?? "Raw Material",
     unit: material.unit,
     current_stock: String(material.current_stock),
     reorder_level: String(material.reorder_level),
@@ -65,6 +68,7 @@ export default function MaterialsList({ role }: MaterialsListProps) {
     mutationFn: async () =>
       api.post("/api/inventory/materials", {
         name: materialForm.name,
+        category: materialForm.category,
         unit: materialForm.unit,
         current_stock: Number(materialForm.current_stock),
         reorder_level: Number(materialForm.reorder_level),
@@ -87,6 +91,7 @@ export default function MaterialsList({ role }: MaterialsListProps) {
 
       return api.put(`/api/inventory/materials/${editMaterial.id}`, {
         name: materialForm.name,
+        category: materialForm.category,
         unit: materialForm.unit,
         current_stock: Number(materialForm.current_stock),
         reorder_level: Number(materialForm.reorder_level),
@@ -122,6 +127,11 @@ export default function MaterialsList({ role }: MaterialsListProps) {
       material.name.toLowerCase().includes(search.toLowerCase())
     );
   }, [materialsQuery.data, search]);
+
+  const materialGroups = [
+    { category: "Beverage" as const, materials: filteredMaterials.filter((material) => material.category === "Beverage") },
+    { category: "Raw Material" as const, materials: filteredMaterials.filter((material) => material.category !== "Beverage") }
+  ];
 
   function openAddModal() {
     setMaterialForm(emptyMaterialForm);
@@ -170,22 +180,31 @@ export default function MaterialsList({ role }: MaterialsListProps) {
         {materialsQuery.isLoading && <p className="text-sm text-slate-500">Loading materials...</p>}
         {materialsQuery.isError && <p className="text-sm text-red-700">Unable to load materials.</p>}
         {!materialsQuery.isLoading && !materialsQuery.isError && (
-          <div className="overflow-x-auto">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Name</TableHead>
-                  <TableHead>Unit</TableHead>
-                  <TableHead>Total Stock</TableHead>
-                  <TableHead>Reserved</TableHead>
-                  <TableHead>Available</TableHead>
-                  <TableHead>Reorder Level</TableHead>
-                  <TableHead>Cost per Unit</TableHead>
-                  <TableHead>Actions</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {filteredMaterials.map((material) => {
+          <div className="grid gap-6">
+            {materialGroups.map((group) => (
+              <section key={group.category} className="grid gap-3">
+                <h3 className="text-sm font-semibold uppercase text-slate-600">{group.category}s ({group.materials.length})</h3>
+                {group.materials.length === 0 ? (
+                  <p className="rounded-md border border-dashed border-slate-300 p-4 text-sm text-slate-500">
+                    No {group.category.toLowerCase()} items found.
+                  </p>
+                ) : (
+                  <div className="overflow-x-auto">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Name</TableHead>
+                          <TableHead>Unit</TableHead>
+                          <TableHead>Total Stock</TableHead>
+                          <TableHead>Reserved</TableHead>
+                          <TableHead>Available</TableHead>
+                          <TableHead>Reorder Level</TableHead>
+                          <TableHead>Cost per Unit</TableHead>
+                          <TableHead>Actions</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {group.materials.map((material) => {
                   const reserved = Number(material.reserved_quantity ?? 0);
                   const available = Number(material.available_quantity ?? Number(material.current_stock) - reserved);
                   const isLowStock = available <= Number(material.reorder_level);
@@ -195,8 +214,8 @@ export default function MaterialsList({ role }: MaterialsListProps) {
                         .join(", ")}`
                     : "No active catering locks";
 
-                  return (
-                    <TableRow key={material.id} className={isLowStock ? "bg-red-50 text-red-950" : ""}>
+                          return (
+                            <TableRow key={material.id} className={isLowStock ? "bg-red-50 text-red-950" : ""}>
                       <TableCell className="font-medium">{material.name}</TableCell>
                       <TableCell>{material.unit}</TableCell>
                       <TableCell>{Number(material.current_stock).toLocaleString()}</TableCell>
@@ -222,11 +241,15 @@ export default function MaterialsList({ role }: MaterialsListProps) {
                           )}
                         </div>
                       </TableCell>
-                    </TableRow>
-                  );
-                })}
-              </TableBody>
-            </Table>
+                            </TableRow>
+                          );
+                        })}
+                      </TableBody>
+                    </Table>
+                  </div>
+                )}
+              </section>
+            ))}
           </div>
         )}
       </CardContent>
@@ -283,6 +306,7 @@ function MaterialFields({
 }) {
   const fields: Array<{ key: keyof MaterialForm; label: string; editable: boolean }> = [
     { key: "name", label: "Name", editable: true },
+    { key: "category", label: "Category", editable: true },
     { key: "unit", label: "Unit", editable: true },
     { key: "current_stock", label: currentStockLabel, editable: includeCurrentStock },
     { key: "reorder_level", label: "Reorder Level", editable: true },
@@ -294,7 +318,17 @@ function MaterialFields({
       {fields.map((field) => (
         <label key={field.key} className="grid gap-1 text-sm font-medium text-slate-700">
           <span>{field.label}</span>
-          {field.key === "unit" ? (
+          {field.key === "category" ? (
+            <select
+              className="h-10 rounded-md border border-slate-300 px-3 text-sm outline-none focus:border-red-700 focus:ring-2 focus:ring-red-100"
+              required
+              value={form.category}
+              onChange={(event) => onChange({ ...form, category: event.target.value as MaterialForm["category"] })}
+            >
+              <option value="Beverage">Beverage</option>
+              <option value="Raw Material">Raw Material</option>
+            </select>
+          ) : field.key === "unit" ? (
             <select
               className="h-10 rounded-md border border-slate-300 px-3 text-sm outline-none focus:border-red-700 focus:ring-2 focus:ring-red-100"
               required
@@ -304,6 +338,8 @@ function MaterialFields({
               <option value="kg">kg</option>
               <option value="g">g</option>
               <option value="pieces">pieces</option>
+              <option value="bottle">bottle</option>
+              <option value="cup">cup</option>
               <option value="sheets">sheets</option>
               <option value="liters">liters</option>
             </select>

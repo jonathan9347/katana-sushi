@@ -53,7 +53,7 @@ export default function PosSettings() {
             </label>
           </div>
           <div className="mt-6">
-            <Button type="submit" disabled={isSaving}>Save POS Settings</Button>
+            <Button disabled={isSaving}>Save POS Settings</Button>
           </div>
         </form>
       </CardContent>

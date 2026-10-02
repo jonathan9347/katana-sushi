@@ -54,7 +54,7 @@ export default function InventorySettings() {
             </label>
           </div>
           <div className="mt-6">
-            <Button type="submit" disabled={isSaving}>Save Inventory Settings</Button>
+            <Button disabled={isSaving}>Save Inventory Settings</Button>
           </div>
         </form>
       </CardContent>

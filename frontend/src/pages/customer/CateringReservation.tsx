@@ -1,6 +1,6 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import { Banknote, CheckCircle2, ChevronLeft, ChevronRight, Eye, ImagePlus, Landmark, Send, ShieldCheck, Smartphone, X } from "lucide-react";
+import { Banknote, CheckCircle2, Landmark, Send, ShieldCheck, Smartphone } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { api, resolveImageUrl } from "../../lib/api";
 import { getApiErrorMessage } from "../../lib/errors";
@@ -22,7 +22,7 @@ type CateringPackage = {
     minPrice?: number;
     maxPrice?: number;
     inclusions?: Array<string | { name: string; description?: string }>;
-    galleryImages?: Array<string | null>;
+    galleryImages?: string[];
   } | null;
   imageUrl: string | null;
 };
@@ -92,10 +92,8 @@ function getPackagePriceLabel(item: CateringPackage) {
   return "Custom quote";
 }
 
-function getPackageGalleryImages(item: CateringPackage) {
-  const galleryImages = item.items?.galleryImages?.length ? item.items.galleryImages : [item.imageUrl];
-
-  return Array.from({ length: 3 }, (_, index) => resolveImageUrl(galleryImages[index] ?? null)).filter((imageUrl): imageUrl is string => Boolean(imageUrl));
+function getPackageImage(item: CateringPackage) {
+  return resolveImageUrl(item.items?.galleryImages?.[0] ?? item.imageUrl);
 }
 
 export default function CateringReservation() {
@@ -108,6 +106,7 @@ export default function CateringReservation() {
     customer_name: string;
     customer_phone: string;
     customer_email: string;
+    special_requests: string;
     payment_method: PaymentMethod;
     payment_plan: "initial_only" | "full_payment";
     acknowledged: boolean;
@@ -119,6 +118,7 @@ export default function CateringReservation() {
     customer_name: "",
     customer_phone: "",
     customer_email: "",
+    special_requests: "",
     payment_method: "cash",
     payment_plan: "initial_only",
     acknowledged: false
@@ -127,8 +127,6 @@ export default function CateringReservation() {
   const [paymentNotice, setPaymentNotice] = useState("");
   const [isProcessingPayment, setIsProcessingPayment] = useState(false);
   const [success, setSuccess] = useState<SuccessState | null>(null);
-  const [imageIndexByPackage, setImageIndexByPackage] = useState<Record<string, number>>({});
-  const [previewPackage, setPreviewPackage] = useState<CateringPackage | null>(null);
 
   const packagesQuery = useQuery({
     queryKey: ["catering-packages"],
@@ -194,36 +192,9 @@ export default function CateringReservation() {
   const totalPriceTotal = Number((subtotalTotal + taxTotal).toFixed(2));
   const paymentAmountTotal = Number((isFullPayment ? totalPriceTotal : Number((totalPriceTotal * getDownpaymentRate(systemSettings)).toFixed(2))).toFixed(2));
   const remainingTotal = Number((totalPriceTotal - paymentAmountTotal).toFixed(2));
-  const previewImages = previewPackage ? getPackageGalleryImages(previewPackage) : [];
 
   function setField(field: keyof typeof form, value: any) {
     setForm((current) => ({ ...current, [field]: value }));
-  }
-
-  function getActiveImageIndex(item: CateringPackage, imageCount: number) {
-    if (imageCount === 0) {
-      return 0;
-    }
-
-    return (imageIndexByPackage[item.id] ?? 0) % imageCount;
-  }
-
-  function movePackageImage(item: CateringPackage, imageCount: number, direction: -1 | 1) {
-    if (imageCount < 2) {
-      return;
-    }
-
-    setImageIndexByPackage((current) => {
-      const currentIndex = current[item.id] ?? 0;
-      return {
-        ...current,
-        [item.id]: (currentIndex + direction + imageCount) % imageCount
-      };
-    });
-  }
-
-  function openPreview(item: CateringPackage) {
-    setPreviewPackage(item);
   }
 
   function canProceedToStep2() {
@@ -309,7 +280,8 @@ export default function CateringReservation() {
           payment_method: form.payment_method,
           payment_plan: form.payment_plan,
           payment_transaction_id: verification.transactionId,
-          reservation_id: reservationReference
+          reservation_id: reservationReference,
+          special_requests: form.special_requests || undefined
         }
       );
 
@@ -418,6 +390,10 @@ export default function CateringReservation() {
                 <span className="customer-label">Venue Address *</span>
                 <textarea className="min-h-24 customer-input" placeholder="Complete event venue address" value={form.venue_address} onChange={(event) => setField("venue_address", event.target.value)} required />
               </label>
+              <label className="block sm:col-span-2">
+                <span className="customer-label">Special Requests</span>
+                <textarea className="min-h-24 customer-input" value={form.special_requests} onChange={(event) => setField("special_requests", event.target.value)} />
+              </label>
             </div>
             )}
 
@@ -469,16 +445,13 @@ export default function CateringReservation() {
                                 <summary className="cursor-pointer text-sm font-semibold text-white">Choose an option</summary>
                                 <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
                                   {options.map((item) => {
-                                    const galleryImages = getPackageGalleryImages(item);
+                                    const imageSrc = getPackageImage(item);
                                     const optionSelected = selectedPkg?.id === item.id;
-                                    const activeImageIndex = getActiveImageIndex(item, galleryImages.length);
-                                    const activeImage = galleryImages[activeImageIndex];
 
                                     return (
-                                      <div
+                                      <button
                                         key={item.id}
-                                        role="button"
-                                        tabIndex={0}
+                                        type="button"
                                         onClick={(e) => {
                                           e.stopPropagation();
                                           setForm((curr) => ({ ...curr, package_by_station: { ...curr.package_by_station, [station.id]: item.id } }));
@@ -488,10 +461,10 @@ export default function CateringReservation() {
                                         }`}
                                       >
                                         <div className="relative aspect-[4/3] overflow-hidden bg-katana-elevated">
-                                          {activeImage ? (
+                                          {imageSrc ? (
                                             <img
-                                              src={activeImage}
-                                              alt={`${item.description ?? item.name} photo ${activeImageIndex + 1}`}
+                                              src={imageSrc}
+                                              alt={item.description ?? item.name}
                                               className="h-full w-full object-cover transition duration-300 group-hover:scale-105"
                                               loading="lazy"
                                               decoding="async"
@@ -499,42 +472,6 @@ export default function CateringReservation() {
                                           ) : (
                                             <div className="flex h-full w-full items-center justify-center bg-katana-elevated text-xs font-bold uppercase tracking-[0.18em] text-katana-muted">
                                               No photo
-                                            </div>
-                                          )}
-                                          {galleryImages.length > 1 && (
-                                            <div className="absolute inset-x-2 top-1/2 flex -translate-y-1/2 items-center justify-between">
-                                              <button
-                                                type="button"
-                                                aria-label="Previous photo"
-                                                className="flex h-9 w-9 items-center justify-center rounded-full border border-white/20 bg-slate-950/70 text-white shadow-lg backdrop-blur transition hover:bg-slate-950"
-                                                onClick={(event) => {
-                                                  event.stopPropagation();
-                                                  movePackageImage(item, galleryImages.length, -1);
-                                                }}
-                                              >
-                                                <ChevronLeft className="h-5 w-5" />
-                                              </button>
-                                              <button
-                                                type="button"
-                                                aria-label="Next photo"
-                                                className="flex h-9 w-9 items-center justify-center rounded-full border border-white/20 bg-slate-950/70 text-white shadow-lg backdrop-blur transition hover:bg-slate-950"
-                                                onClick={(event) => {
-                                                  event.stopPropagation();
-                                                  movePackageImage(item, galleryImages.length, 1);
-                                                }}
-                                              >
-                                                <ChevronRight className="h-5 w-5" />
-                                              </button>
-                                            </div>
-                                          )}
-                                          {galleryImages.length > 1 && (
-                                            <div className="absolute bottom-3 left-1/2 flex -translate-x-1/2 gap-1.5">
-                                              {galleryImages.map((imageSrc, index) => (
-                                                <span
-                                                  key={`${imageSrc}-dot-${index}`}
-                                                  className={`h-1.5 rounded-full transition-all ${index === activeImageIndex ? "w-5 bg-white" : "w-1.5 bg-white/55"}`}
-                                                />
-                                              ))}
                                             </div>
                                           )}
                                           {optionSelected && (
@@ -548,22 +485,9 @@ export default function CateringReservation() {
                                             <p className="break-words text-sm font-bold text-white md:text-base">{item.description ?? item.name}</p>
                                             <p className="mt-1 text-xs uppercase tracking-wide text-katana-muted">{item.minPax}-{item.maxPax} pax</p>
                                           </div>
-                                          <div className="flex flex-col gap-3 self-end">
-                                            <p className="text-sm font-bold text-katana-red">{getPackagePriceLabel(item)}</p>
-                                            <button
-                                              type="button"
-                                              className="inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-lg bg-white px-4 py-2 text-sm font-black text-slate-950 shadow-sm transition hover:bg-katana-red hover:text-white"
-                                              onClick={(event) => {
-                                                event.stopPropagation();
-                                                openPreview(item);
-                                              }}
-                                            >
-                                              <Eye className="h-4 w-4" />
-                                              Preview Photos
-                                            </button>
-                                          </div>
+                                          <p className="self-end text-sm font-bold text-katana-red">{getPackagePriceLabel(item)}</p>
                                         </div>
-                                      </div>
+                                      </button>
                                     );
                                   })}
                                   {options.length === 0 && (
@@ -835,54 +759,6 @@ export default function CateringReservation() {
           </div>
         ) : null}
       </section>
-      {previewPackage ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/85 px-3 py-4 backdrop-blur-sm">
-          <div className="flex max-h-[92vh] w-full max-w-6xl flex-col overflow-hidden rounded-2xl border border-white/10 bg-slate-950 shadow-2xl">
-            <div className="flex shrink-0 items-start justify-between gap-4 border-b border-white/10 px-4 py-4 md:px-6">
-              <div className="min-w-0">
-                <p className="text-xs font-bold uppercase tracking-[0.18em] text-katana-red">Photo preview</p>
-                <h2 className="mt-1 break-words text-xl font-black text-white md:text-2xl">
-                  {previewPackage.description ?? previewPackage.name}
-                </h2>
-                <p className="mt-1 text-sm font-semibold text-neutral-300">{getPackagePriceLabel(previewPackage)}</p>
-              </div>
-              <button
-                type="button"
-                aria-label="Close preview"
-                className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-white/10 bg-white/10 text-white transition hover:bg-white/20"
-                onClick={() => setPreviewPackage(null)}
-              >
-                <X className="h-5 w-5" />
-              </button>
-            </div>
-
-            <div className="min-h-0 flex-1 overflow-y-auto p-4 md:p-6">
-              {previewImages.length > 0 ? (
-                <div className="grid gap-4 lg:grid-cols-3">
-                  {previewImages.map((imageUrl, index) => (
-                    <figure key={`${imageUrl}-preview-${index}`} className="overflow-hidden rounded-xl border border-white/10 bg-black shadow-xl">
-                      <div className="flex aspect-[4/5] min-h-[320px] items-center justify-center md:min-h-[460px] lg:min-h-[520px]">
-                        <img
-                          src={imageUrl}
-                          alt={`${previewPackage.description ?? previewPackage.name} photo ${index + 1}`}
-                          className="h-full w-full object-cover"
-                          loading="eager"
-                          decoding="async"
-                        />
-                      </div>
-                    </figure>
-                  ))}
-                </div>
-              ) : (
-                <div className="flex min-h-64 flex-col items-center justify-center gap-2 rounded-xl border border-white/10 bg-white/5 text-neutral-300">
-                  <ImagePlus className="h-9 w-9" />
-                  <span className="text-sm font-semibold">No photos available</span>
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-      ) : null}
     </main>
   );
 }
