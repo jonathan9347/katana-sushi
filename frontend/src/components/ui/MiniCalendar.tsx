@@ -6,6 +6,7 @@ type MiniCalendarProps = {
   month: Date;
   selectedDate: string;
   eventsByDate: Map<string, number>;
+  framed?: boolean;
   onPreviousMonth: () => void;
   onNextMonth: () => void;
   onSelectDate: (dateKey: string) => void;
@@ -13,7 +14,7 @@ type MiniCalendarProps = {
 
 const dayLabels = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
-export function MiniCalendar({ month, selectedDate, eventsByDate, onPreviousMonth, onNextMonth, onSelectDate }: MiniCalendarProps) {
+export function MiniCalendar({ month, selectedDate, eventsByDate, framed = true, onPreviousMonth, onNextMonth, onSelectDate }: MiniCalendarProps) {
   const days = useMemo(() => {
     const first = new Date(month.getFullYear(), month.getMonth(), 1);
     const start = new Date(first);
@@ -32,7 +33,7 @@ export function MiniCalendar({ month, selectedDate, eventsByDate, onPreviousMont
   );
 
   return (
-    <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
+    <div className={framed ? "rounded-3xl border border-slate-200 bg-white p-5 shadow-sm" : "py-2"}>
       <div className="mb-4 flex items-center justify-between gap-3">
         <div>
           <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Date selector</p>

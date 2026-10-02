@@ -2303,6 +2303,92 @@ app.get("/api/staff/reservations/approved", async (req, res, next) => {
   }
 });
 
+app.get("/api/staff/reminders", async (req, res, next) => {
+  try {
+    const user = requireRole(req, res, ["admin", "receptionist", "event_coordinator"]);
+
+    if (!user) {
+      return;
+    }
+
+    const todayKey = manilaDateKey(new Date());
+    const reminderHorizon = new Date(`${todayKey}T00:00:00.000Z`);
+    reminderHorizon.setUTCDate(reminderHorizon.getUTCDate() + 7);
+    const throughDateKey = reminderHorizon.toISOString().slice(0, 10);
+    const dateRange = {
+      gte: startOfDay(manilaDateToUtc(todayKey)),
+      lte: endOfDay(manilaDateToUtc(throughDateKey))
+    };
+    const role = user.role.toLowerCase();
+    const [dineInReservations, cateringReservations] = await Promise.all([
+      ["admin", "receptionist"].includes(role)
+        ? prisma.reservation.findMany({
+            where: { status: "confirmed", date: dateRange },
+            select: {
+              id: true,
+              booking_id: true,
+              customer_name: true,
+              date: true,
+              time: true,
+              party_size: true
+            },
+            orderBy: [{ date: "asc" }, { time: "asc" }]
+          })
+        : Promise.resolve([]),
+      ["admin", "event_coordinator"].includes(role)
+        ? prisma.cateringReservation.findMany({
+            where: {
+              status: { in: ["confirmed", "in_progress"] },
+              confirmed_date: dateRange
+            },
+            select: {
+              id: true,
+              reservation_id: true,
+              customer_name: true,
+              headcount: true,
+              confirmed_date: true,
+              status: true,
+              package: { select: { name: true } }
+            },
+            orderBy: { confirmed_date: "asc" }
+          })
+        : Promise.resolve([])
+    ]);
+
+    const reminders = [
+      ...dineInReservations.map((reservation) => ({
+        id: reservation.id,
+        type: "dine_in" as const,
+        reference: reservation.booking_id,
+        customerName: reservation.customer_name,
+        date: reservation.date,
+        time: reservation.time,
+        status: "confirmed",
+        detail: `${reservation.party_size} guests`
+      })),
+      ...cateringReservations.map((reservation) => ({
+        id: reservation.id,
+        type: "catering" as const,
+        reference: reservation.reservation_id ?? reservation.id,
+        customerName: reservation.customer_name ?? "Customer",
+        date: reservation.confirmed_date ?? new Date(0),
+        time: null,
+        status: reservation.status ?? "confirmed",
+        detail: [reservation.package?.name, reservation.headcount ? `${reservation.headcount} guests` : null]
+          .filter(Boolean)
+          .join(" · ")
+      }))
+    ].sort((left, right) => {
+      const dateOrder = new Date(left.date).getTime() - new Date(right.date).getTime();
+      return dateOrder || (left.time ?? "").localeCompare(right.time ?? "");
+    });
+
+    return res.json({ reminders });
+  } catch (error) {
+    return next(error);
+  }
+});
+
 app.get("/api/staff/notifications", async (req, res, next) => {
   try {
     const user = requireRole(req, res, ["admin", "inventory_manager", "cashier", "receptionist", "event_coordinator", "chef"]);
@@ -4081,33 +4167,97 @@ app.put("/api/inventory/conversion-rules/:materialId", async (req, res, next) =>
   }
 });
 
+type ProductStockSource = {
+  name: string;
+  category: string;
+  recipes: Array<{
+    recipe_ingredients: Array<{
+      quantity_per_yield: unknown;
+      unit: string;
+      raw_material: { id: string; unit: string; current_stock: unknown };
+    }>;
+  }>;
+};
+
+async function getAvailableProductStock(product: ProductStockSource) {
+  const ingredients = product.recipes[0]?.recipe_ingredients ?? [];
+
+  if (product.category.toLowerCase() === "beverage" && ingredients.length === 0) {
+    const beverageMaterial = await prisma.rawMaterial.findFirst({
+      where: { name: product.name, is_deleted: false },
+      select: { current_stock: true }
+    });
+    return Number(beverageMaterial?.current_stock ?? 0);
+  }
+
+  if (ingredients.length === 0) {
+    return 0;
+  }
+
+  const requiredByMaterial = new Map<string, { currentStock: number; requiredPerProduct: number }>();
+  ingredients.forEach((ingredient) => {
+    const material = ingredient.raw_material;
+    const required = convertQuantityToMaterialUnit(
+      Number(ingredient.quantity_per_yield),
+      ingredient.unit,
+      material.unit
+    );
+    const existing = requiredByMaterial.get(material.id);
+    requiredByMaterial.set(material.id, {
+      currentStock: Number(material.current_stock),
+      requiredPerProduct: (existing?.requiredPerProduct ?? 0) + required
+    });
+  });
+
+  return Math.max(
+    0,
+    Math.floor(
+      Math.min(...Array.from(requiredByMaterial.values()).map((entry) => entry.currentStock / entry.requiredPerProduct))
+    )
+  );
+}
+
 app.get("/api/products", async (_req, res, next) => {
   try {
     // Lightweight product list for unauthenticated customer requests
     const requestingUser = getUserFromRequest(_req);
 
     if (!requestingUser) {
+      await ensureBeverageStockMaterials();
       const products = await prisma.sellingProduct.findMany({
         where: { is_deleted: false },
         orderBy: [{ category: "asc" }, { name: "asc" }],
-        select: {
-          id: true,
-          name: true,
-          category: true,
-          price: true,
-          is_available: true,
-          image_url: true,
-          description: true
+        include: {
+          recipes: {
+            select: {
+              recipe_ingredients: {
+                select: {
+                  quantity_per_yield: true,
+                  unit: true,
+                  raw_material: {
+                    select: { id: true, unit: true, current_stock: true }
+                  }
+                }
+              }
+            }
+          }
         }
       });
 
       const productsWithImageUrls = await Promise.all(
         products.map(async (product) => {
           const imageUrl = await normalizeProductImage(product);
+          const availableStock = await getAvailableProductStock(product);
           return {
-            ...product,
+            id: product.id,
+            name: product.name,
+            category: product.category,
+            price: product.price,
+            is_available: product.is_available,
+            description: product.description,
             image_url: imageUrl,
-            imageUrl
+            imageUrl,
+            available_stock: availableStock
           };
         })
       );
@@ -4141,39 +4291,7 @@ app.get("/api/products", async (_req, res, next) => {
     const productsWithImageUrls = await Promise.all(
       products.map(async (product) => {
         const imageUrl = await normalizeProductImage(product);
-        const ingredients = product.recipes[0]?.recipe_ingredients ?? [];
-        let availableStock = 0;
-
-        if (product.category.toLowerCase() === "beverage" && ingredients.length === 0) {
-          const beverageMaterial = await prisma.rawMaterial.findFirst({
-            where: { name: product.name, is_deleted: false },
-            select: { current_stock: true }
-          });
-          availableStock = Number(beverageMaterial?.current_stock ?? 0);
-        } else if (ingredients.length > 0) {
-          const requiredByMaterial = new Map<string, { currentStock: number; requiredPerProduct: number }>();
-
-          ingredients.forEach((ingredient) => {
-            const material = ingredient.raw_material;
-            const required = convertQuantityToMaterialUnit(
-              Number(ingredient.quantity_per_yield),
-              ingredient.unit,
-              material.unit
-            );
-            const existing = requiredByMaterial.get(material.id);
-            requiredByMaterial.set(material.id, {
-              currentStock: Number(material.current_stock),
-              requiredPerProduct: (existing?.requiredPerProduct ?? 0) + required
-            });
-          });
-
-          availableStock = Math.max(
-            0,
-            Math.floor(
-              Math.min(...Array.from(requiredByMaterial.values()).map((entry) => entry.currentStock / entry.requiredPerProduct))
-            )
-          );
-        }
+        const availableStock = await getAvailableProductStock(product);
 
         return {
           ...product,

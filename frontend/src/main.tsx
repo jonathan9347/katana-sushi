@@ -31,6 +31,24 @@ function warmAssetConnections() {
 
 warmAssetConnections();
 
+const scrollIdleTimers = new WeakMap<HTMLElement, number>();
+
+window.addEventListener("scroll", (event) => {
+  const scrollTarget = event.target instanceof HTMLElement ? event.target : document.documentElement;
+  const previousTimer = scrollIdleTimers.get(scrollTarget);
+
+  if (previousTimer) {
+    window.clearTimeout(previousTimer);
+  }
+
+  scrollTarget.dataset.scrollActive = "true";
+  const timer = window.setTimeout(() => {
+    delete scrollTarget.dataset.scrollActive;
+    scrollIdleTimers.delete(scrollTarget);
+  }, 600);
+  scrollIdleTimers.set(scrollTarget, timer);
+}, true);
+
 function ScrollToTop() {
   const { pathname } = useLocation();
 

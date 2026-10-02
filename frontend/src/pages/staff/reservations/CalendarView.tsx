@@ -4,6 +4,8 @@ import SectionNav, { SectionNavTab } from "../../../components/layout/SectionNav
 import { api } from "../../../lib/api";
 import { useMemo, useState } from "react";
 import { formatManilaDate, formatTime12, manilaDateKey, todayManilaDateKey } from "../../../lib/dateTime";
+import { Dialog } from "../../../components/ui/dialog";
+import { Button } from "../../../components/ui/button";
 
 type Reservation = {
   id: string;
@@ -51,6 +53,7 @@ function statusClass(status: string) {
 
 export default function CalendarView() {
   const [selectedDate, setSelectedDate] = useState(today());
+  const [dateSummaryOpen, setDateSummaryOpen] = useState(false);
   const [cursor, setCursor] = useState(() => new Date(`${today()}T00:00:00+08:00`));
   const [actionLoading, setActionLoading] = useState<Record<string, boolean>>({});
   const query = useQuery({
@@ -82,6 +85,11 @@ export default function CalendarView() {
 
   function shiftMonth(delta: number) {
     setCursor((current) => new Date(current.getFullYear(), current.getMonth() + delta, 1));
+  }
+
+  function handleSelectDate(date: string) {
+    setSelectedDate(date);
+    setDateSummaryOpen(true);
   }
 
   async function handleArrive(reservation: Reservation) {
@@ -138,7 +146,7 @@ export default function CalendarView() {
                 return (
                   <button
                     key={key}
-                    onClick={() => setSelectedDate(key)}
+                    onClick={() => handleSelectDate(key)}
                     className={`min-h-24 rounded-md border p-2 text-left ${selected ? "border-red-700 bg-red-50" : "border-slate-200 bg-white"} ${inMonth ? "text-slate-950" : "text-slate-400"}`}
                   >
                     <span className="text-sm font-black">{day.getDate()}</span>
@@ -148,55 +156,48 @@ export default function CalendarView() {
               })}
             </div>
           </div>
-          <aside className="rounded-lg border border-slate-200 bg-slate-50 p-5">
-            <h2 className="text-lg font-black text-slate-950">Selected Date</h2>
-            <p className="mt-1 text-sm font-semibold text-slate-600">{dateText(selectedDate)}</p>
-            <div className="mt-5 space-y-3">
-              {selectedReservations.map((reservation) => (
-                <article key={reservation.id} className="rounded-md border border-slate-200 bg-white p-4">
-                  <div className="flex flex-col gap-4">
-                    <div className="flex items-start justify-between gap-3">
-                      <div>
-                        <p className="font-black text-slate-950">{formatTime12(reservation.time)} | {reservation.customer_name}</p>
-                        <p className="mt-1 text-sm text-slate-600">
-                          {reservation.party_size} guests
-                        </p>
-                      </div>
-                      <span className={`rounded-full px-2 py-1 text-xs font-black uppercase ${statusClass(reservation.status)}`}>{reservation.status}</span>
-                    </div>
-                    <div className="grid gap-3 sm:grid-cols-2">
-                      {reservation.status === "confirmed" ? (
-                        <button
-                          onClick={() => void handleArrive(reservation)}
-                          disabled={actionLoading[reservation.id]}
-                          className="rounded-md bg-emerald-700 px-4 py-2 text-sm font-bold text-white hover:bg-emerald-800 disabled:opacity-50"
-                        >
-                          {actionLoading[reservation.id] ? "Processing..." : "Mark Arrived"}
-                        </button>
-                      ) : null}
-                      {(reservation.status === "seated" || reservation.status === "confirmed") ? (
-                        <button
-                          onClick={() => void handleComplete(reservation)}
-                          disabled={actionLoading[reservation.id]}
-                          className="rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-bold text-slate-800 hover:bg-slate-50 disabled:opacity-50"
-                        >
-                          {actionLoading[reservation.id] ? "Processing..." : "Complete Reservation"}
-                        </button>
-                      ) : null}
-                      {reservation.status === "pending_final_payment" ? (
-                        <div className="rounded-md bg-amber-50 px-3 py-2 text-sm font-semibold text-amber-800">
-                          Final payment pending before completion.
-                        </div>
-                      ) : null}
-                    </div>
-                  </div>
-                </article>
-              ))}
-              {selectedReservations.length === 0 && <p className="rounded-md bg-white p-4 text-sm font-semibold text-slate-600">No reservations on this date.</p>}
-            </div>
-          </aside>
         </div>
       </section>
+
+      <Dialog
+        open={dateSummaryOpen}
+        title={`Bookings on ${dateText(selectedDate)}`}
+        onClose={() => setDateSummaryOpen(false)}
+        panelClassName="max-w-2xl"
+      >
+        <div className="grid gap-3">
+          {selectedReservations.length === 0 ? (
+            <p className="rounded-md border border-dashed border-slate-300 p-6 text-center text-sm text-slate-600">No reservations on this date.</p>
+          ) : selectedReservations.map((reservation) => (
+            <article key={reservation.id} className="rounded-md border border-slate-200 bg-white p-4">
+              <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <p className="font-black text-slate-950">{formatTime12(reservation.time)} · {reservation.customer_name}</p>
+                  <p className="mt-1 text-sm text-slate-600">{reservation.booking_id} · {reservation.party_size} guests</p>
+                  <span className={`mt-2 inline-flex rounded-full px-2 py-1 text-xs font-black uppercase ${statusClass(reservation.status)}`}>
+                    {reservation.status.replace(/_/g, " ")}
+                  </span>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {reservation.status === "confirmed" && (
+                    <Button size="sm" disabled={actionLoading[reservation.id]} onClick={() => void handleArrive(reservation)}>
+                      {actionLoading[reservation.id] ? "Processing..." : "Mark Arrived"}
+                    </Button>
+                  )}
+                  {(reservation.status === "seated" || reservation.status === "confirmed") && (
+                    <Button size="sm" variant="outline" disabled={actionLoading[reservation.id]} onClick={() => void handleComplete(reservation)}>
+                      {actionLoading[reservation.id] ? "Processing..." : "Complete"}
+                    </Button>
+                  )}
+                </div>
+              </div>
+              {reservation.status === "pending_final_payment" && (
+                <p className="mt-3 rounded-md bg-amber-50 px-3 py-2 text-sm font-semibold text-amber-800">Final payment pending before completion.</p>
+              )}
+            </article>
+          ))}
+        </div>
+      </Dialog>
     </main>
   );
 }

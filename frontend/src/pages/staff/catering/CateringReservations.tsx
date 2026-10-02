@@ -334,8 +334,8 @@ export default function CateringReservations() {
     : [];
 
   return (
-    <main className="min-h-screen bg-slate-100 p-6 lg:p-8">
-      <section className="mx-auto max-w-6xl rounded-3xl border border-slate-200 bg-white shadow-sm">
+    <main className="min-h-screen bg-slate-100 p-4 lg:p-6">
+      <section className="w-full overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
         <div className="flex flex-col gap-4 border-b border-slate-200 px-6 py-6 lg:flex-row lg:items-center lg:justify-between">
           <div>
             <p className="text-xs font-semibold uppercase tracking-wide text-red-700">Catering management</p>
@@ -357,8 +357,8 @@ export default function CateringReservations() {
           </div>
         </div>
 
-        <div className="grid gap-6 p-6 lg:grid-cols-[1.45fr_1fr]">
-          <div className="space-y-6">
+        <div className="grid gap-5 p-4 sm:p-5 xl:grid-cols-[minmax(0,1.5fr)_minmax(0,1fr)]">
+          <div className="space-y-6 xl:h-[calc(100vh-15rem)] xl:overflow-y-auto xl:overscroll-contain">
             <MiniCalendar
               month={cursor}
               selectedDate={selectedDate}
@@ -369,7 +369,7 @@ export default function CateringReservations() {
             />
           </div>
 
-          <div className="space-y-6">
+          <div className="space-y-6 xl:h-[calc(100vh-15rem)] xl:overflow-y-auto xl:overscroll-contain">
             <div className="rounded-3xl border border-slate-200 bg-slate-50 p-5">
               <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
                 <div>

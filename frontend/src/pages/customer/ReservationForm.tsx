@@ -20,6 +20,7 @@ type Product = {
   image?: string | null;
   thumbnail?: string | null;
   is_available?: boolean;
+  available_stock?: number | null;
 };
 
 type CartItem = {
@@ -116,7 +117,9 @@ export default function ReservationForm() {
     queryKey: ["customer-menu-products"],
     queryFn: async () => (await api.get<{ products: Product[] }>("/api/products")).data.products,
     retry: 1,
-    ...PRODUCT_IMAGE_QUERY_OPTIONS
+    ...PRODUCT_IMAGE_QUERY_OPTIONS,
+    refetchInterval: 15_000,
+    refetchOnWindowFocus: true
   });
 
   const { data: unlimitedSettingsData } = useQuery({
@@ -153,10 +156,6 @@ export default function ReservationForm() {
   }, [products]);
   const unlimitedProducts = useMemo(() => {
     return products.filter((product) => {
-      if (product.is_available === false) {
-        return false;
-      }
-
       const category = product.category.toLowerCase();
       const name = product.name.toLowerCase();
       const isBeverage = category.includes("beverage") || category.includes("drink");
@@ -199,12 +198,16 @@ export default function ReservationForm() {
   }, [productImageUrls]);
 
   const addProduct = (product: Product) => {
-    if (!product.id || product.is_available === false) {
+    if (!product.id || product.is_available === false || product.available_stock === 0) {
       return;
     }
 
     setCartItems((current) => {
       const existing = current.find((item) => item.product_id === product.id);
+      if (product.available_stock != null && (existing?.quantity ?? 0) >= product.available_stock) {
+        return current;
+      }
+
       if (existing) {
         return current.map((item) =>
           item.product_id === product.id ? { ...item, quantity: item.quantity + 1 } : item
@@ -219,10 +222,15 @@ export default function ReservationForm() {
   };
 
   const updateCartQuantity = (productId: string, quantity: number) => {
+    const product = products.find((item) => item.id === productId);
+    const limitedQuantity = product?.available_stock == null
+      ? Math.max(0, quantity)
+      : Math.min(Math.max(0, quantity), product.available_stock);
+
     setCartItems((current) =>
       current
         .map((item) =>
-          item.product_id === productId ? { ...item, quantity: Math.max(0, quantity) } : item
+          item.product_id === productId ? { ...item, quantity: limitedQuantity } : item
         )
         .filter((item) => item.quantity > 0)
     );
@@ -241,6 +249,11 @@ export default function ReservationForm() {
         return next;
       }
 
+      const product = unlimitedProducts.find((item) => item.id === productId);
+      if (product?.is_available === false || product?.available_stock === 0) {
+        return current;
+      }
+
       return { ...current, [productId]: 1 };
     });
   };
@@ -248,7 +261,11 @@ export default function ReservationForm() {
   const updateUnlimitedQuantity = (productId: string, delta: number) => {
     setSelectedUnlimitedProductQuantities((current) => {
       const currentQty = current[productId] ?? 0;
-      const nextQty = Math.max(0, currentQty + delta);
+      const product = unlimitedProducts.find((item) => item.id === productId);
+      const requestedQty = Math.max(0, currentQty + delta);
+      const nextQty = product?.available_stock == null
+        ? requestedQty
+        : Math.min(requestedQty, product.available_stock);
       if (nextQty === 0) {
         const next = { ...current };
         delete next[productId];
@@ -658,7 +675,13 @@ export default function ReservationForm() {
                               </div>
                               <div className="space-y-3 md:grid md:grid-cols-2 md:gap-4 md:space-y-0 lg:grid-cols-3 xl:grid-cols-4">
                                 {group.products.map((product, index) => {
-                                  const disabled = product.is_available === false;
+                                  const outOfStock = product.available_stock !== null && product.available_stock !== undefined && product.available_stock <= 0;
+                                  const disabled = product.is_available === false || outOfStock;
+                                  const stockLabel = product.available_stock == null
+                                    ? "Stock status unavailable"
+                                    : outOfStock
+                                      ? "Out of stock · 0 available"
+                                      : `${product.available_stock} available`;
                                   const imageSrc = getProductImageUrl(product);
                                   const eagerImage = groupIndex === 0 && index < 6;
 
@@ -677,6 +700,9 @@ export default function ReservationForm() {
                                         <div className="min-w-0">
                                           <h4 className="line-clamp-2 text-sm font-bold leading-snug text-white sm:text-base">{product.name}</h4>
                                           <p className="mt-1 line-clamp-1 text-xs leading-snug text-neutral-400 sm:line-clamp-2 sm:text-sm md:line-clamp-2">{product.description ?? "House specialty"}</p>
+                                          <span className={`mt-2 inline-flex rounded-full px-2 py-1 text-[11px] font-bold ${disabled ? "bg-red-950 text-red-200" : "bg-emerald-950 text-emerald-200"}`}>
+                                            {product.is_available === false ? `Unavailable · ${stockLabel}` : stockLabel}
+                                          </span>
                                           <p className="mt-2 text-sm font-black text-katana-red">{money(Number(product.price))}</p>
                                         </div>
                                         <button
@@ -685,7 +711,7 @@ export default function ReservationForm() {
                                           disabled={disabled}
                                           className={`h-9 w-full shrink-0 rounded-md px-2 text-xs font-bold leading-none ${disabled ? "cursor-not-allowed bg-neutral-800 text-neutral-500" : "bg-red-700 text-white hover:bg-red-800"}`}
                                         >
-                                          {disabled ? "Unavailable" : "Add to cart"}
+                                          {product.is_available === false ? "Unavailable" : outOfStock ? "Out of stock" : "Add to cart"}
                                         </button>
                                       </div>
                                     </article>
@@ -794,6 +820,13 @@ export default function ReservationForm() {
                               <div className="grid grid-cols-2 gap-2 md:grid-cols-3 xl:grid-cols-4">
                                 {group.products.map((product, index) => {
                                   const selected = (selectedUnlimitedProductQuantities[product.id] ?? 0) > 0;
+                                  const outOfStock = product.available_stock !== null && product.available_stock !== undefined && product.available_stock <= 0;
+                                  const disabled = product.is_available === false || outOfStock;
+                                  const stockLabel = product.available_stock == null
+                                    ? "Stock status unavailable"
+                                    : outOfStock
+                                      ? "Out of stock · 0 available"
+                                      : `${product.available_stock} available`;
                                   const imageSrc = getProductImageUrl(product);
                                   const eagerImage = groupIndex === 0 && index < 6;
 
@@ -802,7 +835,8 @@ export default function ReservationForm() {
                                       key={product.id}
                                       type="button"
                                       onClick={() => toggleUnlimitedProduct(product.id)}
-                                      className={`flex min-h-[94px] flex-col justify-between rounded-lg border p-0 text-left transition ${selected ? "border-katana-red bg-katana-red/15" : "border-katana-border bg-katana-elevated hover:border-neutral-500"}`}
+                                      disabled={disabled}
+                                      className={`flex min-h-[94px] flex-col justify-between rounded-lg border p-0 text-left transition disabled:cursor-not-allowed disabled:opacity-60 ${selected ? "border-katana-red bg-katana-red/15" : "border-katana-border bg-katana-elevated hover:border-neutral-500"}`}
                                     >
                                       {imageSrc ? (
                                         <div className="h-28 w-full overflow-hidden rounded-t-lg bg-katana-surface">
@@ -814,6 +848,9 @@ export default function ReservationForm() {
                                         <div className="min-w-0">
                                           <div className="line-clamp-2 text-sm font-bold leading-snug text-white">{product.name}</div>
                                           <div className="mt-1 text-xs text-neutral-400">{product.description ?? "Included in unlimited"}</div>
+                                          <span className={`mt-2 inline-flex rounded-full px-2 py-1 text-[11px] font-bold ${disabled ? "bg-red-950 text-red-200" : "bg-emerald-950 text-emerald-200"}`}>
+                                            {product.is_available === false ? `Unavailable · ${stockLabel}` : stockLabel}
+                                          </span>
                                         </div>
 
                                         <div className="flex items-center gap-2">
@@ -828,7 +865,8 @@ export default function ReservationForm() {
                                           <button
                                             type="button"
                                             onClick={(e) => { e.stopPropagation(); updateUnlimitedQuantity(product.id, 1); }}
-                                            className="h-8 w-8 rounded-md border border-katana-border bg-katana-red text-white"
+                                            disabled={disabled || (product.available_stock != null && (selectedUnlimitedProductQuantities[product.id] ?? 0) >= product.available_stock)}
+                                            className="h-8 w-8 rounded-md border border-katana-border bg-katana-red text-white disabled:cursor-not-allowed disabled:opacity-50"
                                           >
                                             +
                                           </button>

@@ -48,9 +48,9 @@ export default function Dashboard() {
   const notifications = notificationsQuery.data ?? [];
 
   return (
-    <main className="min-h-screen w-full bg-slate-100 p-4 pb-24 md:p-6 lg:p-8">
-      <div className="grid w-full grid-cols-1 items-start gap-6 xl:grid-cols-[minmax(0,1fr)_20rem]">
-        <section className="min-w-0 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:p-8">
+    <main className="min-h-screen w-full bg-slate-100 p-4 pb-24 md:p-6 lg:p-8 xl:h-screen xl:overflow-hidden">
+      <div className="grid w-full grid-cols-1 items-start gap-6 xl:h-full xl:grid-cols-[minmax(0,1fr)_20rem]">
+        <section className="min-w-0 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:p-8 xl:h-full xl:min-h-0 xl:overflow-y-auto xl:overscroll-contain">
           <div className="mb-8 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
             <div>
               <p className="text-sm font-semibold uppercase tracking-[0.3em] text-red-700">Staff Portal</p>
@@ -73,7 +73,7 @@ export default function Dashboard() {
           </section>
         </section>
 
-        <aside aria-labelledby="staff-notifications-title" className="rounded-2xl border border-slate-200 bg-white shadow-sm xl:sticky xl:top-6">
+        <aside aria-labelledby="staff-notifications-title" className="rounded-2xl border border-slate-200 bg-white shadow-sm xl:sticky xl:top-8 xl:h-full xl:min-h-0 xl:self-start xl:overflow-y-auto xl:overscroll-contain">
           <div className="flex items-center justify-between border-b border-slate-200 px-5 py-4">
             <div className="flex items-center gap-3">
               <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-red-50 text-red-700">
