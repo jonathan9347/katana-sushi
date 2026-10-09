@@ -38,6 +38,7 @@ type RawCateringReservation = {
   headcount: number;
   inquiry?: {
     venue_type?: string | null;
+    event_type?: string | null;
     message?: string | null;
   } | null;
   package?: {
@@ -73,6 +74,7 @@ type CateringReservation = {
   payment_status?: string;
   payment_history?: PaymentHistoryItem[];
   special_requests?: string | null;
+  event_type?: string | null;
   package_name?: string | null;
   venue_type?: string | null;
   ingredient_locks: Array<{
@@ -152,6 +154,7 @@ export default function CateringReservations() {
       payment_status: reservation.final_payment_status,
       payment_history: reservation.payment_history ?? [],
       special_requests: reservation.inquiry?.message ?? null,
+      event_type: reservation.inquiry?.event_type ?? null,
       package_name: reservation.package?.name ?? null,
       venue_type: reservation.inquiry?.venue_type ?? null,
       ingredient_locks: reservation.ingredient_locks ?? []
@@ -478,6 +481,7 @@ export default function CateringReservations() {
             payment_status: updatedRaw.final_payment_status,
             payment_history: updatedRaw.payment_history ?? [],
             special_requests: updatedRaw.inquiry?.message ?? null,
+            event_type: updatedRaw.inquiry?.event_type ?? null,
             package_name: updatedRaw.package?.name ?? null,
             venue_type: updatedRaw.inquiry?.venue_type ?? null,
             ingredient_locks: updatedRaw.ingredient_locks ?? []

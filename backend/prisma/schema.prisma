@@ -380,6 +380,7 @@ model CateringInquiry {
   event_date     DateTime
   headcount      Int
   venue_type     String
+  event_type     String?
   package_type   String?
   message        String?
   status         String

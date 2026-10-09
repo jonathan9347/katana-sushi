@@ -106,7 +106,7 @@ export default function CateringReservation() {
     customer_name: string;
     customer_phone: string;
     customer_email: string;
-    special_requests: string;
+    event_type: string;
     payment_method: PaymentMethod;
     payment_plan: "initial_only" | "full_payment";
     acknowledged: boolean;
@@ -118,7 +118,7 @@ export default function CateringReservation() {
     customer_name: "",
     customer_phone: "",
     customer_email: "",
-    special_requests: "",
+    event_type: "",
     payment_method: "cash",
     payment_plan: "initial_only",
     acknowledged: false
@@ -203,7 +203,8 @@ export default function CateringReservation() {
       /^09\d{9}$/.test(form.customer_phone) &&
       form.customer_email.trim().length > 0 &&
       form.event_date >= today() &&
-      form.venue_address.trim().length >= 5
+      form.venue_address.trim().length >= 5 &&
+      form.event_type.length > 0
     );
   }
 
@@ -281,7 +282,7 @@ export default function CateringReservation() {
           payment_plan: form.payment_plan,
           payment_transaction_id: verification.transactionId,
           reservation_id: reservationReference,
-          special_requests: form.special_requests || undefined
+          event_type: form.event_type
         }
       );
 
@@ -391,8 +392,16 @@ export default function CateringReservation() {
                 <textarea className="min-h-24 customer-input" placeholder="Complete event venue address" value={form.venue_address} onChange={(event) => setField("venue_address", event.target.value)} required />
               </label>
               <label className="block sm:col-span-2">
-                <span className="customer-label">Special Requests</span>
-                <textarea className="min-h-24 customer-input" value={form.special_requests} onChange={(event) => setField("special_requests", event.target.value)} />
+                <span className="customer-label">Type of Event *</span>
+                <select className="customer-input" value={form.event_type} onChange={(event) => setField("event_type", event.target.value)} required>
+                  <option value="">Select event type</option>
+                  <option value="Wedding">Wedding</option>
+                  <option value="Birthday">Birthday</option>
+                  <option value="Corporate Event">Corporate Event</option>
+                  <option value="Private Party">Private Party</option>
+                  <option value="Graduation">Graduation</option>
+                  <option value="Other">Other</option>
+                </select>
               </label>
             </div>
             )}

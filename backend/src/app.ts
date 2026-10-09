@@ -540,6 +540,7 @@ const cateringReservationBodySchema = z.object({
   event_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
   headcount: z.coerce.number().int().min(1),
   venue_address: z.string().min(5),
+  event_type: z.enum(["Wedding", "Birthday", "Corporate Event", "Private Party", "Graduation", "Other"]),
   package_id: z.string().min(1),
   payment_plan: z.enum(["initial_only", "full_payment"]).default("initial_only"),
   payment_method: z.enum(["cash", "gcash", "bank_transfer"]),
@@ -1579,6 +1580,7 @@ app.post("/api/catering/reservations", async (req, res, next) => {
           event_date: body.event_date,
           headcount: body.headcount,
           venue_type: body.venue_address,
+          event_type: body.event_type,
           package_type: cateringPackageTypeMap[body.package_id] ?? null,
           status: "pending",
           message: body.special_requests || null

@@ -71,6 +71,7 @@ export type ReservationReceiptData = {
   package_name?: string | null;
   venue_type?: string | null;
   venue_address?: string | null;
+  event_type?: string | null;
   special_requests?: string | null;
   created_at?: string | null;
   confirmed_date?: string | null;
@@ -230,6 +231,7 @@ export function ReservationReceipt({ reservation, actions, paymentControls, show
             <DetailRow label={isCatering ? "Headcount" : "Guests"} value={`${guestCount} ${isCatering ? "pax" : "people"}`} />
             {isCatering && <DetailRow label="Package" value={reservation.package_name} />}
             {isCatering && <DetailRow label="Venue" value={formatVenueType(reservation.venue_address ?? reservation.venue_type)} />}
+            {isCatering && reservation.event_type && <DetailRow label="Event type" value={reservation.event_type} />}
           </dl>
         </Section>
 
