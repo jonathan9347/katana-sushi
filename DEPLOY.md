@@ -15,7 +15,7 @@ Set these values in the Render dashboard. The backend Render blueprint leaves th
 
 - Open your service -> Environment -> Set variables above
 - Trigger a manual deploy or push a commit to `main`
-- Watch build logs: `npm run prisma:generate` should complete successfully
+- Watch build logs: `npm run build` regenerates Prisma Client from `prisma/schema.prisma` before TypeScript compilation.
 
 4) Health check
 

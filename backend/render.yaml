@@ -4,7 +4,7 @@ services:
     env: node
     plan: free
     region: oregon
-    buildCommand: npm --prefix backend install --include=dev && npm --prefix backend run prisma:generate && npm --prefix backend run build
+    buildCommand: npm --prefix backend install --include=dev && npm --prefix backend run build
     preDeployCommand: cd backend && npm run prisma:push && npm run prisma:seed:prod
     startCommand: cd backend && npm run start
     envVars:
