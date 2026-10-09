@@ -6193,13 +6193,16 @@ app.post("/api/pos/unlimited/start", async (req, res, next) => {
       return;
     }
 
-    const body = z.object({ tableId: z.string().min(1), paxCount: z.coerce.number().int().positive() }).parse(req.body);
+    const body = z.object({
+      tableId: z.string().min(1).optional().nullable(),
+      paxCount: z.coerce.number().int().positive()
+    }).parse(req.body);
     const settings = await getUnlimitedSettings();
     const startedAt = new Date();
     const endsAt = new Date(startedAt.getTime() + settings.time_limit_minutes * 60 * 1000);
     const session = await prisma.unlimitedSession.create({
       data: {
-        table_id: body.tableId,
+        table_id: body.tableId ?? null,
         pax_count: body.paxCount,
         price_per_pax: settings.price_per_person,
         total_paid: settings.price_per_person * body.paxCount,
