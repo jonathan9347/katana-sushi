@@ -8,6 +8,7 @@ import { getApiErrorMessage } from "../../lib/errors";
 import { createPaymentIntent, verifyPayment, buildReservationReference, type PaymentMethod } from "../../lib/payment";
 import { formatTime12, timeOptions, todayManilaDateKey } from "../../lib/dateTime";
 import { defaultSystemSettings, downpaymentLabel, fetchSystemSettings, getDownpaymentRate, getTaxRate, taxLabel } from "../../lib/systemSettings";
+import "./ReservationForm.css";
 
 type Product = {
   id: string;
@@ -549,7 +550,7 @@ export default function ReservationForm() {
 
             <form
               onSubmit={handleSubmit}
-              className={`space-y-6 px-3 py-5 md:p-6 ${
+              className={`customer-reservation-form space-y-6 px-3 py-5 md:p-6 ${
                 step === 2 && reservationType === "dine_in" ? "pb-28 md:pb-36" : "pb-5 md:pb-6"
               }`}
             >
@@ -673,7 +674,7 @@ export default function ReservationForm() {
                                 <span className="h-px flex-1 bg-katana-border" />
                                 <span className="text-xs font-semibold text-neutral-500">{group.products.length}</span>
                               </div>
-                              <div className="space-y-3 md:grid md:grid-cols-2 md:gap-4 md:space-y-0 lg:grid-cols-3 xl:grid-cols-4">
+                              <div className="customer-menu-product-grid grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-3 xl:grid-cols-4">
                                 {group.products.map((product, index) => {
                                   const outOfStock = product.available_stock !== null && product.available_stock !== undefined && product.available_stock <= 0;
                                   const disabled = product.is_available === false || outOfStock;
@@ -686,30 +687,26 @@ export default function ReservationForm() {
                                   const eagerImage = groupIndex === 0 && index < 6;
 
                                   return (
-                                    <article key={product.id} className={`grid h-[160px] grid-cols-[104px_minmax(0,1fr)] overflow-hidden rounded-lg border sm:h-[132px] sm:grid-cols-[112px_minmax(0,1fr)] md:flex md:h-[320px] md:flex-col md:rounded-xl ${disabled ? "border-katana-border bg-katana-surface opacity-60" : "border-katana-border bg-katana-elevated"}`}>
-                                      <div className="h-[160px] w-[104px] bg-katana-surface sm:h-[132px] sm:w-[112px] md:h-40 md:w-full">
+                                    <article key={product.id} className={`customer-menu-product-card group ${disabled ? "opacity-75" : ""}`}>
+                                      <div className="customer-menu-product-art">
                                         {imageSrc ? (
-                                          <img src={imageSrc} alt={product.name} loading={eagerImage ? "eager" : "lazy"} fetchPriority={eagerImage ? "high" : "auto"} decoding="async" onError={(event) => fallbackToBackendImage(event.currentTarget, product)} className="h-full w-full object-cover" />
+                                          <img src={imageSrc} alt={product.name} loading={eagerImage ? "eager" : "lazy"} fetchPriority={eagerImage ? "high" : "auto"} decoding="async" onError={(event) => fallbackToBackendImage(event.currentTarget, product)} />
                                         ) : (
-                                          <div className="flex h-full items-center justify-center px-3 text-center text-xs font-bold uppercase tracking-[0.14em] text-katana-red">
-                                            No image
-                                          </div>
+                                          <span className="text-6xl" aria-hidden="true">🍣</span>
                                         )}
                                       </div>
-                                      <div className="flex min-h-0 min-w-0 flex-col justify-between gap-2 p-3 md:flex-1 md:p-4">
-                                        <div className="min-w-0">
-                                          <h4 className="line-clamp-2 text-sm font-bold leading-snug text-white sm:text-base">{product.name}</h4>
-                                          <p className="mt-1 line-clamp-1 text-xs leading-snug text-neutral-400 sm:line-clamp-2 sm:text-sm md:line-clamp-2">{product.description ?? "House specialty"}</p>
-                                          <span className={`mt-2 inline-flex rounded-full px-2 py-1 text-[11px] font-bold ${disabled ? "bg-red-950 text-red-200" : "bg-emerald-950 text-emerald-200"}`}>
-                                            {product.is_available === false ? `Unavailable · ${stockLabel}` : stockLabel}
-                                          </span>
-                                          <p className="mt-2 text-sm font-black text-katana-red">{money(Number(product.price))}</p>
-                                        </div>
+                                      <div className="customer-menu-product-panel">
+                                        <h4 className="line-clamp-2 font-display text-sm font-bold leading-tight text-[#2c120f] sm:text-base">{product.name}</h4>
+                                        <span className="customer-menu-price-badge text-sm text-[#5a2e32]">{money(Number(product.price))}</span>
+                                        <p className="line-clamp-2 min-h-8 text-[11px] leading-relaxed text-[#5b2f30] sm:text-xs">{product.description ?? "House specialty"}</p>
+                                        <span className={`inline-flex max-w-full rounded-full px-2 py-1 text-[10px] font-bold leading-tight ${disabled ? "bg-[#f4d9d6] text-[#6f292f]" : "bg-[#f2e8d8] text-[#5a2e32]"}`}>
+                                          {product.is_available === false ? `Unavailable · ${stockLabel}` : stockLabel}
+                                        </span>
                                         <button
                                           type="button"
                                           onClick={() => addProduct(product)}
                                           disabled={disabled}
-                                          className={`h-9 w-full shrink-0 rounded-md px-2 text-xs font-bold leading-none ${disabled ? "cursor-not-allowed bg-neutral-800 text-neutral-500" : "bg-red-700 text-white hover:bg-red-800"}`}
+                                          className="customer-menu-order-button mt-auto w-full px-3"
                                         >
                                           {product.is_available === false ? "Unavailable" : outOfStock ? "Out of stock" : "Add to cart"}
                                         </button>
