@@ -432,6 +432,17 @@ app.use(morgan("dev"));
 app.use(cookieParser());
 app.use(express.json());
 app.use(
+  "/images",
+  express.static(path.resolve(__dirname, "..", "..", "frontend", "public", "images"), {
+    immutable: true,
+    maxAge: "1y",
+    setHeaders: (res) => {
+      res.setHeader("Cross-Origin-Resource-Policy", "cross-origin");
+      res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
+    }
+  })
+);
+app.use(
   "/uploads",
   express.static(path.join(__dirname, "..", "uploads"), {
     immutable: true,

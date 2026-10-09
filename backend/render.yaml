@@ -2,12 +2,11 @@ services:
   - type: web
     name: katana-sushi-api
     env: node
-    rootDir: backend
     plan: free
     region: oregon
-    buildCommand: npm install --include=dev && npm run prisma:generate && npm run build
-    preDeployCommand: npm run prisma:push && npm run prisma:seed:prod
-    startCommand: npm run start
+    buildCommand: npm --prefix backend install --include=dev && npm --prefix backend run prisma:generate && npm --prefix backend run build
+    preDeployCommand: cd backend && npm run prisma:push && npm run prisma:seed:prod
+    startCommand: cd backend && npm run start
     envVars:
       - key: NODE_ENV
         value: production

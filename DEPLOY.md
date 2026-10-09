@@ -28,3 +28,4 @@ If your Postgres host resolves only to IPv6 and Render cannot reach IPv6 hosts f
 4) Local development
 
 - Copy `backend/.env.example` to `backend/.env` and fill values for local testing.
+- The Render blueprint builds from the repository root so the API can serve the shared images in `frontend/public/images`; keep those assets in the deployment checkout.
