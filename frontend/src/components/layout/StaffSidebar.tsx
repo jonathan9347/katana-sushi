@@ -1,6 +1,7 @@
 import {
   BarChart3,
   CalendarDays,
+  ChefHat,
   CreditCard,
   DatabaseBackup,
   Home,
@@ -9,6 +10,7 @@ import {
   Package,
   PartyPopper,
   Settings,
+  ShoppingBag,
   Shield,
   User,
   Users
@@ -29,7 +31,9 @@ const menuItems: MenuItem[] = [
   { label: "Dashboard", to: "/staff/dashboard", icon: Home, roles: ["admin", "inventory_manager", "cashier", "receptionist", "event_coordinator", "chef"] },
   { label: "Inventory", to: "/staff/inventory", icon: Package, roles: ["admin", "inventory_manager"] },
   { label: "POS", to: "/staff/pos", icon: CreditCard, roles: ["admin", "cashier"] },
-  { label: "Dine-in", to: "/staff/reservations", icon: CalendarDays, roles: ["admin", "receptionist"] },
+  { label: "Kitchen", to: "/staff/kitchen", icon: ChefHat, roles: ["admin", "cashier", "chef"] },
+  { label: "Pickup", to: "/staff/takeout", icon: ShoppingBag, roles: ["admin", "cashier", "receptionist", "chef"] },
+  { label: "Dine-in", to: "/staff/reservations", icon: CalendarDays, roles: ["admin"] },
   { label: "Catering", to: "/staff/catering", icon: PartyPopper, roles: ["admin", "event_coordinator"] },
   { label: "Analytics", to: "/staff/analytics", icon: BarChart3, roles: ["admin", "inventory_manager"] },
   { label: "Settings", to: "/staff/settings", icon: Settings, roles: ["admin", "inventory_manager", "cashier", "receptionist", "event_coordinator", "chef"] }

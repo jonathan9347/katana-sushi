@@ -4,6 +4,27 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Katana Sushi</title>
+    <script>
+      (() => {
+        if (window.location.pathname.startsWith("/staff/") || window.location.pathname.startsWith("/admin/")) {
+          return;
+        }
+
+        let storedTheme = null;
+        try {
+          storedTheme = window.localStorage.getItem("customer-theme");
+        } catch (error) {
+          if (!(error instanceof DOMException)) throw error;
+        }
+
+        const theme = storedTheme === "light" || storedTheme === "dark"
+          ? storedTheme
+          : window.matchMedia("(prefers-color-scheme: light)").matches
+            ? "light"
+            : "dark";
+        document.documentElement.setAttribute("data-theme", theme);
+      })();
+    </script>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Syne:wght@500;600;700;800&family=Zen+Kaku+Gothic+New:wght@400;500;700&display=swap" rel="stylesheet" />

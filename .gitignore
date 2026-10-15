@@ -4,3 +4,12 @@ dist/
 .env.local
 .DS_Store
 *.log
+frontend/test-results/
+frontend/playwright-report/
+
+# Backups — never commit
+backend/backups/
+*.dump
+*.sql.gz
+*.bak
+*.tar.gz

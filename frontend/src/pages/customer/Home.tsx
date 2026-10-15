@@ -124,6 +124,9 @@ export default function Home() {
               <Link className="customer-btn-secondary bg-[var(--customer-surface)]/90 text-[var(--customer-text)] shadow-lg shadow-black/20 backdrop-blur hover:bg-[var(--customer-surface-2)]" to="/menu">
                 Explore Menu
               </Link>
+              <Link className="customer-btn-secondary bg-[var(--customer-surface)]/90 text-[var(--customer-text)] shadow-lg shadow-black/20 backdrop-blur hover:bg-[var(--customer-surface-2)]" to="/takeout">
+                Order Pickup
+              </Link>
             </div>
           </div>
 

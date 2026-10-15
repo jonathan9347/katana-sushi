@@ -1,8 +1,4 @@
 export const timeOptions = [
-  "10:00",
-  "10:30",
-  "11:00",
-  "11:30",
   "12:00",
   "12:30",
   "13:00",
@@ -19,11 +15,17 @@ export const timeOptions = [
   "18:30",
   "19:00",
   "19:30",
-  "20:00",
-  "20:30",
-  "21:00",
-  "21:30"
+  "20:00"
 ];
+
+export function isFutureManilaReservationTime(date: string, time: string, now = new Date()) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !/^([01]\d|2[0-3]):[0-5]\d$/.test(time)) {
+    return false;
+  }
+
+  const bookingTime = new Date(`${date}T${time}:00+08:00`);
+  return Number.isFinite(bookingTime.getTime()) && bookingTime.getTime() > now.getTime();
+}
 
 export function formatManilaDate(date: string | Date, options?: Intl.DateTimeFormatOptions) {
   return new Date(date).toLocaleDateString("en-PH", {

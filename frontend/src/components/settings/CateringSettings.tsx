@@ -6,14 +6,12 @@ import { Card, CardContent, CardHeader, CardTitle } from "../ui/card";
 export default function CateringSettings() {
   const { settings, saveSettings, isSaving } = useSystemSettings();
   const [form, setForm] = useState({
-    default_downpayment_percent: String(settings.default_downpayment_percent),
     auto_lock_catering_ingredients: settings.auto_lock_catering_ingredients,
     release_catering_locks_on_completion: settings.release_catering_locks_on_completion
   });
 
   useEffect(() => {
     setForm({
-      default_downpayment_percent: String(settings.default_downpayment_percent),
       auto_lock_catering_ingredients: settings.auto_lock_catering_ingredients,
       release_catering_locks_on_completion: settings.release_catering_locks_on_completion
     });
@@ -21,7 +19,7 @@ export default function CateringSettings() {
 
   function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    saveSettings({ ...settings, ...form, default_downpayment_percent: Number(form.default_downpayment_percent) });
+    saveSettings({ ...settings, ...form });
   }
 
   return (
@@ -34,11 +32,7 @@ export default function CateringSettings() {
       </CardHeader>
       <CardContent>
         <form onSubmit={submit}>
-          <div className="grid gap-4 lg:grid-cols-3">
-            <label className="space-y-2 text-sm text-slate-700">
-              <span>Default Deposit Percentage</span>
-              <input className="w-full rounded-2xl border border-slate-300 bg-slate-50 px-4 py-3" min="0" max="100" step="0.01" type="number" value={form.default_downpayment_percent} onChange={(event) => setForm((current) => ({ ...current, default_downpayment_percent: event.target.value }))} />
-            </label>
+          <div className="grid gap-4 lg:grid-cols-2">
             <Toggle label="Auto-Lock Ingredients" checked={form.auto_lock_catering_ingredients} onChange={(checked) => setForm((current) => ({ ...current, auto_lock_catering_ingredients: checked }))} />
             <Toggle label="Release Locks After Event" checked={form.release_catering_locks_on_completion} onChange={(checked) => setForm((current) => ({ ...current, release_catering_locks_on_completion: checked }))} />
           </div>

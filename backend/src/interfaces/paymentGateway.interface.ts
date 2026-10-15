@@ -10,7 +10,9 @@ export interface CreatePaymentIntentParams {
   amount: number;
   paymentMethod: "cash" | "gcash" | "bank_transfer";
   bookingId: string;
-  reservationType: "dine_in" | "catering";
+  reservationType: "dine_in" | "catering" | "takeout";
+  purpose?: "downpayment" | "full_payment" | "balance";
+  idempotencyKey?: string;
   description?: string;
   successUrl?: string;
   failureUrl?: string;

@@ -1,10 +1,11 @@
 import { CalendarDays, Clock, UtensilsCrossed } from "lucide-react";
 import { Link } from "react-router-dom";
+import BackToHome from "../../components/layout/BackToHome";
 
 const squareFeatures = [
   {
     title: "Simple booking",
-    description: "Choose your date, guest count, and reserve your table in one flow.",
+    description: "Choose your date, guest count, and menu on one page.",
     icon: CalendarDays
   },
   {
@@ -14,21 +15,24 @@ const squareFeatures = [
   },
   {
     title: "Secure your spot",
-    description: "Confirm with a small downpayment and avoid waiting.",
+    description: "Staff review every request. Pay in full now or at the restaurant after approval.",
     icon: Clock
   }
 ];
 
 export default function DineInReservationIntro() {
   return (
-    <main className="px-0 py-6 md:px-3 md:py-10">
+    <main className="px-0 pt-3 pb-6 md:px-3 md:pb-10">
+      <div className="customer-shell mb-4">
+        <BackToHome />
+      </div>
       <section className="mx-auto flex min-h-[calc(100vh-4rem)] w-full items-start justify-center px-4 md:max-w-6xl md:items-center md:px-6">
         <div className="w-full space-y-8 md:max-w-3xl">
           <div className="border-0 bg-transparent p-0 shadow-none md:rounded-2xl md:border md:border-katana-border md:bg-katana-surface/90 md:p-8 md:shadow-card md:backdrop-blur">
             <p className="customer-kicker">Dine-in reservation</p>
             <h1 className="mt-3 font-display text-4xl font-bold tracking-tight text-white">Reserve a table at Katana Sushi</h1>
             <p className="mt-4 text-sm leading-relaxed text-katana-muted">
-              Experience our minimal Japanese dining concept with curated sushi, nigiri, and seasonal favorites. Start with booking your preferred date and time, then complete the reservation form to order ahead.
+              Experience our minimal Japanese dining concept with curated sushi, nigiri, and seasonal favorites. Choose a future date and time, select your menu, and submit a reservation request for staff approval.
             </p>
             <div className="mt-8 grid gap-4 sm:grid-cols-3">
               {squareFeatures.map((feature) => {
@@ -48,7 +52,7 @@ export default function DineInReservationIntro() {
             <div className="mt-8 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
               <div>
                 <p className="text-sm text-katana-muted">Ready to book?</p>
-                <p className="text-2xl font-bold text-white">3 easy steps to complete your reservation</p>
+                <p className="text-2xl font-bold text-white">One simple page to complete your reservation</p>
               </div>
               <Link className="customer-btn-primary" to="/reserve/book">
                 Proceed to booking

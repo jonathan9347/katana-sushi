@@ -15,6 +15,8 @@ type WasteForm = {
   quantity: string;
   reason: "spoilage" | "expired" | "prep_waste" | "damaged" | "other";
   notes: string;
+  booking_type: "" | "catering";
+  booking_reference: string;
 };
 
 const emptyWasteForm: WasteForm = {
@@ -22,7 +24,9 @@ const emptyWasteForm: WasteForm = {
   batch_id: "",
   quantity: "",
   reason: "spoilage",
-  notes: ""
+  notes: "",
+  booking_type: "",
+  booking_reference: ""
 };
 
 const reasonLabels: Record<WasteForm["reason"], string> = {
@@ -41,7 +45,9 @@ export default function WasteDisposal() {
   const materialsQuery = useQuery({
     queryKey: ["inventory", "materials"],
     queryFn: async () => {
-      const response = await api.get<{ materials: RawMaterial[] }>("/api/inventory/materials");
+      const response = await api.get<{
+        materials: Array<RawMaterial & { available_quantity: string | number }>;
+      }>("/api/inventory/materials");
       return response.data.materials;
     }
   });
@@ -73,8 +79,10 @@ export default function WasteDisposal() {
         raw_material_id: wasteForm.raw_material_id,
         quantity: Number(wasteForm.quantity),
         reason: wasteForm.reason,
-        notes: wasteForm.notes || undefined,
-        batch_id: wasteForm.batch_id || undefined
+        notes: wasteForm.notes,
+        batch_id: wasteForm.batch_id || undefined,
+        booking_type: wasteForm.booking_reference ? wasteForm.booking_type || undefined : undefined,
+        booking_reference: wasteForm.booking_reference || undefined
       }),
     onSuccess: () => {
       setWasteForm(emptyWasteForm);
@@ -125,7 +133,7 @@ export default function WasteDisposal() {
                 <option value="">Select material</option>
                 {materialsQuery.data?.map((material) => (
                   <option key={material.id} value={material.id}>
-                    {material.name} — {Number(material.current_stock).toLocaleString()} {material.unit} in stock
+                    {material.name} — {Number(material.available_quantity).toLocaleString()} {material.unit} available
                   </option>
                 ))}
               </Select>
@@ -147,6 +155,35 @@ export default function WasteDisposal() {
             )}
 
             <label className="grid gap-1 text-sm">
+              Link to booking (optional)
+              <Select
+                value={wasteForm.booking_type}
+                onChange={(event) =>
+                  setWasteForm((current) => ({
+                    ...current,
+                    booking_type: event.target.value as WasteForm["booking_type"],
+                    booking_reference: ""
+                  }))
+                }
+              >
+                <option value="">No booking — use batch/FEFO</option>
+                <option value="catering">Catering booking</option>
+              </Select>
+            </label>
+            {wasteForm.booking_type && (
+              <label className="grid gap-1 text-sm">
+                Catering booking number
+                <input
+                  required
+                  className="h-10 rounded-md border border-slate-300 px-3"
+                  placeholder="Enter reservation number"
+                  value={wasteForm.booking_reference}
+                  onChange={(event) => setWasteForm((current) => ({ ...current, booking_reference: event.target.value }))}
+                />
+              </label>
+            )}
+
+            <label className="grid gap-1 text-sm">
               Quantity to dispose
               <input
                 required
@@ -159,7 +196,7 @@ export default function WasteDisposal() {
               />
               {selectedMaterial && (
                 <span className="text-xs text-slate-500">
-                  Available: {Number(selectedMaterial.current_stock).toLocaleString()} {selectedMaterial.unit}
+                  Available: {Number(selectedMaterial.available_quantity).toLocaleString()} {selectedMaterial.unit}
                 </span>
               )}
             </label>
@@ -182,6 +219,7 @@ export default function WasteDisposal() {
             <label className="grid gap-1 text-sm">
               Notes
               <input
+                required
                 className="h-10 rounded-md border border-slate-300 px-3"
                 placeholder="Additional details..."
                 value={wasteForm.notes}
@@ -215,6 +253,7 @@ export default function WasteDisposal() {
                     <TableHead>Qty</TableHead>
                     <TableHead>Reason</TableHead>
                     <TableHead>Batch</TableHead>
+                    <TableHead>Notes / booking</TableHead>
                     <TableHead>By</TableHead>
                   </TableRow>
                 </TableHeader>
@@ -228,6 +267,7 @@ export default function WasteDisposal() {
                       </TableCell>
                       <TableCell>{transaction.reason ? reasonLabels[transaction.reason as WasteForm["reason"]] ?? transaction.reason : "—"}</TableCell>
                       <TableCell>{transaction.batch?.batch_number ?? "Auto FEFO"}</TableCell>
+                      <TableCell>{transaction.reference ?? "—"}</TableCell>
                       <TableCell>{transaction.user?.name ?? "System"}</TableCell>
                     </TableRow>
                   ))}

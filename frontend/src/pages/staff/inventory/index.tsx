@@ -1,30 +1,29 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
-import { Boxes, Calculator, CalendarClock, ClipboardList, Images, PackageSearch, ReceiptText, Scale, Trash2 } from "lucide-react";
+import { Boxes, ClipboardList, Package, PackageSearch, ReceiptText, Settings2 } from "lucide-react";
 import SectionNav, { SectionNavTab } from "../../../components/layout/SectionNav";
 import BatchManagement from "./BatchManagement";
-import CateringOptionPhotos from "./CateringOptionPhotos";
 import ConversionRulesEditor from "./ConversionRulesEditor";
-import LowStockAlert from "./LowStockAlert";
+import InventoryMovements from "./InventoryMovements";
+import InventoryOverview from "./InventoryOverview";
+import InventoryReservations from "./InventoryReservations";
 import MaterialsList from "./MaterialsList";
 import SellingProductsList from "./SellingProductsList";
-import TransactionHistory from "./TransactionHistory";
 import WasteDisposal from "./WasteDisposal";
 import YieldEstimator from "./YieldEstimator";
 import { StaffRole } from "./types";
 
-type InventoryTab = "materials" | "menu-products" | "catering-photos" | "yield" | "low-stock" | "batches" | "waste" | "transactions" | "conversion-rules";
+type InventoryTab = "overview" | "stock" | "reservations" | "movements" | "setup";
+type StockView = "materials" | "batches" | "waste";
+type MaterialsStockFilter = "all" | "issues" | "low" | "negative" | "expiring";
+type SetupView = "menu-products" | "conversion-rules" | "yield";
 
-const tabs: Array<SectionNavTab<InventoryTab> & { adminOnly?: boolean }> = [
-  { id: "materials", label: "Materials", icon: <Boxes className="h-4 w-4" /> },
-  { id: "menu-products", label: "Menu Products", icon: <PackageSearch className="h-4 w-4" /> },
-  { id: "catering-photos", label: "Catering Photos", icon: <Images className="h-4 w-4" />, adminOnly: true },
-  { id: "yield", label: "Yield Estimator", icon: <Calculator className="h-4 w-4" /> },
-  { id: "low-stock", label: "Low Stock Alerts", icon: <ClipboardList className="h-4 w-4" /> },
-  { id: "batches", label: "Batches & Expiry", icon: <CalendarClock className="h-4 w-4" /> },
-  { id: "waste", label: "Waste Disposal", icon: <Trash2 className="h-4 w-4" /> },
-  { id: "transactions", label: "Transactions", icon: <ReceiptText className="h-4 w-4" /> },
-  { id: "conversion-rules", label: "Conversion Rules", icon: <Scale className="h-4 w-4" />, adminOnly: true }
+const tabs: Array<SectionNavTab<InventoryTab>> = [
+  { id: "overview", label: "Overview", icon: <Boxes className="h-4 w-4" /> },
+  { id: "stock", label: "Stock", icon: <Package className="h-4 w-4" /> },
+  { id: "reservations", label: "Reservations", icon: <ClipboardList className="h-4 w-4" /> },
+  { id: "movements", label: "Movements", icon: <ReceiptText className="h-4 w-4" /> },
+  { id: "setup", label: "Setup & Tools", icon: <Settings2 className="h-4 w-4" /> }
 ];
 
 function getStoredRole(): StaffRole {
@@ -36,12 +35,14 @@ function getStoredRole(): StaffRole {
 }
 
 export default function InventoryPage({ readOnly = false }: { readOnly?: boolean }) {
-  const [activeTab, setActiveTab] = useState<InventoryTab>("materials");
+  const [activeTab, setActiveTab] = useState<InventoryTab>(readOnly ? "stock" : "overview");
+  const [stockView, setStockView] = useState<StockView>("materials");
+  const [materialsStockFilter, setMaterialsStockFilter] = useState<MaterialsStockFilter>("all");
+  const [batchesExpiringOnly, setBatchesExpiringOnly] = useState(false);
+  const [setupView, setSetupView] = useState<SetupView>("menu-products");
   const role = getStoredRole();
   const allowed = role === "admin" || role === "inventory_manager" || (readOnly && role === "chef");
-  const visibleTabs = readOnly
-    ? tabs.filter((tab) => tab.id === "materials")
-    : tabs.filter((tab) => !tab.adminOnly || role === "admin");
+  const visibleTabs = readOnly ? tabs.filter((tab) => tab.id === "stock") : tabs;
 
   if (!allowed) {
     return (
@@ -72,15 +73,76 @@ export default function InventoryPage({ readOnly = false }: { readOnly?: boolean
           </aside>
 
           <section className="min-w-0">
-            {activeTab === "materials" && <MaterialsList role={role} />}
-            {activeTab === "menu-products" && <SellingProductsList role={role} />}
-            {activeTab === "catering-photos" && role === "admin" && <CateringOptionPhotos />}
-            {activeTab === "yield" && <YieldEstimator />}
-            {activeTab === "low-stock" && <LowStockAlert />}
-            {activeTab === "batches" && <BatchManagement />}
-            {activeTab === "waste" && <WasteDisposal />}
-            {activeTab === "transactions" && <TransactionHistory />}
-            {activeTab === "conversion-rules" && role === "admin" && <ConversionRulesEditor />}
+            {activeTab === "overview" && !readOnly && (
+              <InventoryOverview
+                onNavigate={(target) => {
+                  setActiveTab(target.section);
+                  if (target.stockView) setStockView(target.stockView);
+                  if (target.stockFilter) setMaterialsStockFilter(target.stockFilter);
+                  if (target.batchExpiringOnly !== undefined) setBatchesExpiringOnly(target.batchExpiringOnly);
+                }}
+              />
+            )}
+            {activeTab === "stock" && (
+              <div className="grid gap-4">
+                {!readOnly && (
+                  <div className="flex flex-wrap gap-2">
+                    {([
+                      ["materials", "Materials"],
+                      ["batches", "Batches & Expiry"],
+                      ["waste", "Waste Disposal"]
+                    ] as const).map(([view, label]) => (
+                      <button
+                        key={view}
+                        type="button"
+                        onClick={() => setStockView(view)}
+                        className={`rounded-md px-3 py-2 text-sm font-semibold ${stockView === view ? "bg-red-700 text-white" : "border border-slate-300 bg-white text-slate-700"}`}
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                )}
+                {stockView === "materials" && (
+                  <MaterialsList
+                    role={role}
+                    onNavigateStockView={setStockView}
+                    onOpenReservations={() => setActiveTab("reservations")}
+                    initialStockFilter={materialsStockFilter}
+                  />
+                )}
+                {stockView === "batches" &&                                 <BatchManagement
+                  initialExpiringOnly={batchesExpiringOnly}
+                  onExpiringOnlyChange={setBatchesExpiringOnly}
+                />}
+                {stockView === "waste" && <WasteDisposal />}
+              </div>
+            )}
+            {activeTab === "reservations" && !readOnly && <InventoryReservations />}
+            {activeTab === "movements" && !readOnly && <InventoryMovements />}
+            {activeTab === "setup" && !readOnly && (
+              <div className="grid gap-4">
+                <div className="flex flex-wrap gap-2">
+                  {([
+                    ["menu-products", "Menu Products"],
+                    ["conversion-rules", "Conversion Rules"],
+                    ["yield", "Yield Estimator"]
+                  ] as const).map(([view, label]) => (
+                    <button
+                      key={view}
+                      type="button"
+                      onClick={() => setSetupView(view)}
+                      className={`rounded-md px-3 py-2 text-sm font-semibold ${setupView === view ? "bg-red-700 text-white" : "border border-slate-300 bg-white text-slate-700"}`}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+                {setupView === "menu-products" && <SellingProductsList role={role} />}
+                {setupView === "conversion-rules" && role === "admin" && <ConversionRulesEditor />}
+                {setupView === "yield" && <YieldEstimator />}
+              </div>
+            )}
           </section>
         </div>
       </div>

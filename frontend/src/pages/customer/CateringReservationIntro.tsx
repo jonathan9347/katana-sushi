@@ -1,5 +1,6 @@
 import { ArrowRight, PartyPopper, ShieldCheck, Sparkles } from "lucide-react";
 import { Link } from "react-router-dom";
+import BackToHome from "../../components/layout/BackToHome";
 
 const introPoints = [
   {
@@ -21,7 +22,10 @@ const introPoints = [
 
 export default function CateringReservationIntro() {
   return (
-    <main className="px-0 py-6 md:px-3 md:py-10">
+    <main className="px-0 pt-3 pb-6 md:px-3 md:pb-10">
+      <div className="customer-shell mb-4">
+        <BackToHome />
+      </div>
       <section className="mx-auto flex min-h-[calc(100vh-4rem)] w-full items-start justify-center px-4 md:max-w-6xl md:items-center md:px-6">
         <div className="w-full space-y-8 md:max-w-3xl">
           <div className="border-0 bg-transparent p-0 shadow-none md:rounded-2xl md:border md:border-katana-border md:bg-katana-surface/90 md:p-8 md:shadow-card md:backdrop-blur">

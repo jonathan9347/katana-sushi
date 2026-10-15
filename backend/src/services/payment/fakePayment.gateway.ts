@@ -13,8 +13,17 @@ export class FakePaymentGateway implements PaymentGateway {
   readonly gatewayName = "fake_gateway";
   private readonly fakePaymentService = new FakePaymentService();
 
+  private get configuredDelayMs() {
+    const value = Number(process.env.FAKE_PAYMENT_DELAY_MS ?? 500);
+    return Number.isFinite(value) && value >= 0 ? value : 500;
+  }
+
+  private shouldFail() {
+    return process.env.FAKE_PAYMENT_MODE?.toLowerCase() === "fail";
+  }
+
   async createPaymentIntent(params: CreatePaymentIntentParams): Promise<PaymentIntentResult> {
-    await this.delay(500);
+    await this.delay(this.configuredDelayMs);
 
     console.log("[FAKE GATEWAY] Creating payment intent:", {
       amount: params.amount,
@@ -62,15 +71,27 @@ export class FakePaymentGateway implements PaymentGateway {
   }
 
   async verifyPayment(params: VerifyPaymentParams): Promise<VerifyPaymentResult> {
+    await this.delay(this.configuredDelayMs);
     console.log("[FAKE GATEWAY] Verifying payment:", {
       referenceId: params.referenceId,
       bookingId: params.bookingId
     });
 
+    if (this.shouldFail()) {
+      return {
+        success: false,
+        status: "failed",
+        amount: params.gatewayData?.amount ?? 0,
+        transactionId: "",
+        message: "TEST MODE: Fake payment failed."
+      };
+    }
+
     const paymentResult = await this.fakePaymentService.processPayment({
       amount: params.gatewayData?.amount ?? 0,
       paymentMethod: params.gatewayData?.paymentMethod ?? "cash",
       bookingId: params.bookingId,
+      referenceId: params.referenceId,
       reservationType: params.gatewayData?.reservationType ?? "dine_in",
       paymentPlan: params.gatewayData?.paymentPlan ?? "initial_only"
     });

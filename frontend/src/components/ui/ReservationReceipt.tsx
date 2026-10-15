@@ -1,9 +1,8 @@
 import { Printer } from "lucide-react";
 import type React from "react";
-import { useQuery } from "@tanstack/react-query";
 import { formatManilaDate, formatTime12 } from "../../lib/dateTime";
-import { formatCurrencyPHP, formatPaymentPlan, formatStatus, formatVenueType } from "../../lib/reservationDetails";
-import { defaultSystemSettings, fetchSystemSettings, getTaxRate, taxLabel } from "../../lib/systemSettings";
+import { formatCateringEventType, formatCurrencyPHP, formatStatus, formatVenueType } from "../../lib/reservationDetails";
+import { formatCateringPackageSnapshots } from "../../lib/cateringPackageSnapshot";
 import { Button } from "./button";
 
 export type ReservationProduct = {
@@ -60,20 +59,37 @@ export type ReservationReceiptData = {
   selected_products?: ReservationProduct[];
   subtotal?: number | null;
   tax?: number | null;
+  package_total?: number | null;
+  mobilization_fee?: number | null;
   total_price?: number | null;
   payment_plan?: string | null;
   downpayment_amount?: number | null;
+  net_paid?: number | null;
   remaining_balance?: number | null;
   payment_status?: string | null;
   final_payment_status?: string | null;
   downpayment_status?: string | null;
   payment_history?: PaymentHistoryItem[];
   package_name?: string | null;
+  package_snapshot?: unknown;
   venue_type?: string | null;
   venue_address?: string | null;
+  event_time?: string | null;
   event_type?: string | null;
+  event_type_other?: string | null;
   special_requests?: string | null;
   created_at?: string | null;
+  created_by?: string | null;
+  activity?: Array<{
+    id: string;
+    event_type: string;
+    from_status?: string | null;
+    to_status?: string | null;
+    actor_type: string;
+    actor_name?: string | null;
+    reason?: string | null;
+    created_at: string | Date;
+  }>;
   confirmed_date?: string | null;
   package_items?: unknown;
   ingredient_locks?: IngredientLock[];
@@ -126,7 +142,24 @@ function getGuestCount(reservation: ReservationReceiptData) {
 }
 
 function getPaymentStatus(reservation: ReservationReceiptData) {
+  if (reservation.status === "cancelled" || reservation.status === "canceled") return "Cancelled";
   return reservation.payment_status ?? reservation.final_payment_status ?? reservation.downpayment_status ?? "N/A";
+}
+
+function formatReceiptPaymentPlan(plan?: string | null, isCatering = false) {
+  if (isCatering && plan === "full_payment") return "100% of package total";
+  if (isCatering && plan === "downpayment") return "50% of package total";
+  if (plan === "full_payment") return "Pay in full";
+  if (plan === "pay_at_venue") return "Pay at the restaurant";
+  if (plan === "initial_only") return "Previous payment arrangement";
+  return plan ?? "N/A";
+}
+
+function formatReceiptPaymentStage(stage: string) {
+  if (stage === "downpayment") return "Previous payment";
+  if (stage === "full_payment") return "Paid in full";
+  if (stage === "remaining_balance" || stage === "balance") return "Payment";
+  return formatStatus(stage);
 }
 
 function formatPaymentMethod(method?: string | null) {
@@ -144,17 +177,15 @@ function getPackageItems(packageItems: unknown): string[] {
     .filter(Boolean);
 }
 
-function getTotals(reservation: ReservationReceiptData, taxRate: number) {
+function getTotals(reservation: ReservationReceiptData) {
   const products = reservation.selected_products ?? [];
   const productSubtotal = products.reduce((sum, item) => sum + numberValue(item.price) * numberValue(item.quantity), 0);
   const total = numberValue(reservation.total_price);
-  const subtotal = numberValue(reservation.subtotal) || productSubtotal || (total ? Number((total / (1 + taxRate)).toFixed(2)) : 0);
-  const tax = reservation.tax !== undefined && reservation.tax !== null ? numberValue(reservation.tax) : Number((subtotal * taxRate).toFixed(2));
+  const subtotal = numberValue(reservation.subtotal) || productSubtotal || total;
 
   return {
     subtotal,
-    tax,
-    total: total || Number((subtotal + tax).toFixed(2))
+    total: total || subtotal
   };
 }
 
@@ -177,24 +208,26 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 }
 
 export function ReservationReceipt({ reservation, actions, paymentControls, showPrintButton = true, onClose }: ReservationReceiptProps) {
-  const { data: systemSettingsData } = useQuery({
-    queryKey: ["system-settings"],
-    queryFn: fetchSystemSettings,
-    retry: 1
-  });
-  const systemSettings = systemSettingsData ?? defaultSystemSettings;
   const products = reservation.selected_products ?? [];
   const packageItems = getPackageItems(reservation.package_items);
+  const cateringPackageSnapshots = formatCateringPackageSnapshots(reservation.package_snapshot);
   const locks = reservation.ingredient_locks ?? [];
-  const totals = getTotals(reservation, getTaxRate(systemSettings));
+  const totals = getTotals(reservation);
   const isCatering = reservation.type === "catering";
   const isUnlimited = reservation.reservation_type === "unlimited";
   const eventDate = reservation.event_date ?? reservation.date;
   const guestCount = getGuestCount(reservation);
   const paymentStatus = getPaymentStatus(reservation);
-  const paymentHistory = reservation.payment_history ?? [];
-  const totalPaid = paymentHistory.length > 0
-    ? paymentHistory.reduce((sum, payment) => sum + numberValue(payment.amount), 0)
+  const paymentHistory = (reservation.payment_history ?? []).filter((payment) =>
+    !["refund", "refund_downpayment", "cancellation"].includes(payment.payment_stage)
+  );
+  const totalPaid = reservation.net_paid !== undefined && reservation.net_paid !== null
+    ? numberValue(reservation.net_paid)
+    : paymentHistory.length > 0
+    ? Math.max(paymentHistory.reduce((sum, payment) => {
+        if (["forfeited_fee"].includes(payment.payment_stage)) return sum;
+        return sum + numberValue(payment.amount);
+      }, 0), 0)
     : numberValue(reservation.downpayment_amount);
 
   return (
@@ -213,6 +246,7 @@ export function ReservationReceipt({ reservation, actions, paymentControls, show
             <DetailRow label="Type" value={getReservationLabel(reservation)} />
             <DetailRow label="Status" value={formatStatus(getStatus(reservation)).toUpperCase()} />
             <DetailRow label="Created" value={formatDateTime(reservation.created_at)} />
+            <DetailRow label="Created by" value={reservation.created_by ?? "N/A"} />
           </dl>
         </Section>
 
@@ -227,11 +261,14 @@ export function ReservationReceipt({ reservation, actions, paymentControls, show
         <Section title={isCatering ? "Event Details" : "Reservation Details"}>
           <dl>
             <DetailRow label={isCatering ? "Event Date" : "Date"} value={eventDate ? formatManilaDate(eventDate) : "N/A"} />
+            {isCatering && <DetailRow label="Event time" value={reservation.event_time ? formatTime12(reservation.event_time) : "N/A"} />}
             {!isCatering && <DetailRow label="Time" value={reservation.time ? formatTime12(reservation.time) : "N/A"} />}
             <DetailRow label={isCatering ? "Headcount" : "Guests"} value={`${guestCount} ${isCatering ? "pax" : "people"}`} />
             {isCatering && <DetailRow label="Package" value={reservation.package_name} />}
             {isCatering && <DetailRow label="Venue" value={formatVenueType(reservation.venue_address ?? reservation.venue_type)} />}
-            {isCatering && reservation.event_type && <DetailRow label="Event type" value={reservation.event_type} />}
+            {isCatering && (reservation.event_type || reservation.event_type_other) && (
+              <DetailRow label="Event type" value={formatCateringEventType(reservation.event_type, reservation.event_type_other)} />
+            )}
           </dl>
         </Section>
 
@@ -239,6 +276,16 @@ export function ReservationReceipt({ reservation, actions, paymentControls, show
           {isCatering ? (
             <div className="space-y-3 text-sm">
               <DetailRow label="Package" value={reservation.package_name} />
+              {cateringPackageSnapshots.length > 0 && (
+                <div>
+                  <p className="font-semibold uppercase tracking-wide text-slate-500">Selected stations</p>
+                  <ul className="mt-2 grid gap-1">
+                    {cateringPackageSnapshots.map((line) => (
+                      <li key={line} className="rounded border border-slate-200 px-2 py-1">{line}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
               <div>
                 <p className="font-semibold uppercase tracking-wide text-slate-500">Included Items</p>
                 {packageItems.length > 0 ? (
@@ -280,18 +327,29 @@ export function ReservationReceipt({ reservation, actions, paymentControls, show
           )}
 
           <div className="mt-4 space-y-1 border-t border-dashed border-slate-300 pt-3 text-sm">
-            <div className="flex justify-between gap-4"><span>Subtotal</span><span>{money(totals.subtotal)}</span></div>
-            <div className="flex justify-between gap-4"><span>{taxLabel(systemSettings)}</span><span>{money(totals.tax)}</span></div>
-            <div className="flex justify-between gap-4 text-base font-black"><span>Total</span><span>{money(totals.total)}</span></div>
+            {isCatering ? (
+              <>
+                <div className="flex justify-between gap-4"><span>Package total</span><span>{money(numberValue(reservation.package_total ?? totals.subtotal))}</span></div>
+                {numberValue(reservation.mobilization_fee) > 0 && (
+                  <div className="flex justify-between gap-4"><span>Mobilization fee</span><span>{money(numberValue(reservation.mobilization_fee))}</span></div>
+                )}
+                <div className="flex justify-between gap-4 text-base font-black"><span>Approved total</span><span>{money(totals.total)}</span></div>
+              </>
+            ) : (
+              <>
+                <div className="flex justify-between gap-4"><span>Subtotal</span><span>{money(totals.subtotal)}</span></div>
+                <div className="flex justify-between gap-4 text-base font-black"><span>Total</span><span>{money(totals.total)}</span></div>
+              </>
+            )}
           </div>
         </Section>
 
         <Section title="Payment Summary">
           <dl>
-            <DetailRow label="Plan" value={formatPaymentPlan(reservation.payment_plan)} />
+            <DetailRow label="Payment choice" value={formatReceiptPaymentPlan(reservation.payment_plan, isCatering)} />
             <DetailRow label="Amount Paid" value={money(totalPaid)} />
-            <DetailRow label="Remaining" value={money(reservation.remaining_balance)} />
-            <DetailRow label="Status" value={numberValue(reservation.remaining_balance) <= 0 || paymentStatus === "paid" ? "FULLY PAID" : "PENDING"} />
+            <DetailRow label="Amount due" value={money(reservation.remaining_balance)} />
+            <DetailRow label="Status" value={paymentStatus.toUpperCase()} />
           </dl>
           {paymentControls ? <div className="mt-4">{paymentControls}</div> : null}
           <div className="mt-4">
@@ -310,7 +368,7 @@ export function ReservationReceipt({ reservation, actions, paymentControls, show
                   <tbody>
                     {paymentHistory.map((payment) => (
                       <tr key={payment.id} className="border-b border-dashed border-slate-200">
-                        <td className="py-2 pr-3 font-semibold">{formatStatus(payment.payment_stage)}</td>
+                        <td className="py-2 pr-3 font-semibold">{formatReceiptPaymentStage(payment.payment_stage)}</td>
                         <td className="py-2 pr-3">{formatPaymentMethod(payment.method)}</td>
                         <td className="py-2 pr-3">{payment.reference_number ?? (payment.change_due ? `Change: ${money(payment.change_due)}` : "-")}</td>
                         <td className="py-2 text-right font-semibold">{money(payment.amount)}</td>
@@ -325,7 +383,7 @@ export function ReservationReceipt({ reservation, actions, paymentControls, show
           </div>
         </Section>
 
-        {isCatering && (
+        {locks.length > 0 && (
           <Section title="Ingredient Locks">
             <DetailRow label="Status" value={locks.some((lock) => !lock.is_released) ? "LOCKED" : locks.length > 0 ? "RELEASED" : "NOT LOCKED"} />
             {locks.length > 0 ? (
@@ -350,6 +408,19 @@ export function ReservationReceipt({ reservation, actions, paymentControls, show
             <li>Current status: {formatStatus(getStatus(reservation))}</li>
             {reservation.confirmed_date && <li>Confirmed: {formatDateTime(reservation.confirmed_date)}</li>}
           </ul>
+          {reservation.activity && reservation.activity.length > 0 ? (
+            <ol className="mt-3 grid gap-2">
+              {reservation.activity.map((event) => (
+                <li key={event.id} className="rounded border border-slate-200 px-3 py-2 text-sm">
+                  <p className="font-semibold">{formatStatus(event.event_type)}{event.from_status || event.to_status ? ` · ${formatStatus(event.from_status ?? "new")} → ${formatStatus(event.to_status ?? "")}` : ""}</p>
+                  <p className="mt-1 text-xs text-slate-500">{formatDateTime(String(event.created_at))} · {event.actor_name ?? event.actor_type}</p>
+                  {event.reason ? <p className="mt-1 text-slate-600">{event.reason}</p> : null}
+                </li>
+              ))}
+            </ol>
+          ) : (
+            <p className="mt-3 text-sm text-slate-600">No activity history recorded yet.</p>
+          )}
         </Section>
 
         {reservation.special_requests ? (

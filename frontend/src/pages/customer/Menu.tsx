@@ -1,7 +1,8 @@
 import { useQuery } from "@tanstack/react-query";
-import { Search } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { api, resolveBackendImageUrl, resolveImageUrl } from "../../lib/api";
+import BackToHome from "../../components/layout/BackToHome";
 
 type Product = {
   id: string;
@@ -44,10 +45,9 @@ function fallbackToBackendImage(element: HTMLImageElement, imageUrl?: string | n
 }
 
 export default function Menu() {
-  const [category, setCategory] = useState("All");
-  const [search, setSearch] = useState("");
-  const [scrollActiveCategory, setScrollActiveCategory] = useState("All");
-  const groupRefs = useRef<Record<string, HTMLElement | null>>({});
+  const [searchParams] = useSearchParams();
+  const searchProductId = searchParams.get("productId");
+  const [highlightedProductId, setHighlightedProductId] = useState<string | null>(null);
   const productsQuery = useQuery({
     queryKey: ["customer-menu-products"],
     queryFn: async () => (await api.get<{ products: Product[] }>("/api/products")).data.products,
@@ -64,22 +64,32 @@ export default function Menu() {
     const availableProducts = products.filter((product) => product.is_available !== false);
     return availableProducts.slice(0, 4);
   }, [products]);
-  const categories = useMemo(() => ["All", ...Array.from(new Set(products.map((product) => product.category)))], [products]);
-  const filtered = products.filter((product) => {
-    const matchesCategory = category === "All" || product.category === category;
-    const haystack = `${product.name} ${product.category} ${product.description ?? ""}`.toLowerCase();
+  const grouped = useMemo(() => {
+    const categories = Array.from(new Set(products.map((product) => product.category)));
 
-    return matchesCategory && haystack.includes(search.toLowerCase());
-  });
-  const grouped = categories
-    .filter((item) => item !== "All")
-    .map((item) => ({
-      category: item,
-      products: filtered.filter((product) => product.category === item)
-    }))
-    .filter((group) => group.products.length > 0);
+    return categories.map((category) => ({
+      category,
+      products: products.filter((product) => product.category === category)
+    }));
+  }, [products]);
 
-  const activeCategory = category === "All" ? scrollActiveCategory : category;
+  useEffect(() => {
+    if (!searchProductId || !products.some((product) => product.id === searchProductId)) return;
+
+    const element = document.getElementById(`menu-product-${searchProductId}`);
+    if (!element) return;
+
+    setHighlightedProductId(searchProductId);
+    const animationFrame = window.requestAnimationFrame(() => {
+      element.scrollIntoView({ behavior: "smooth", block: "center" });
+    });
+    const timeout = window.setTimeout(() => setHighlightedProductId(null), 3000);
+
+    return () => {
+      window.cancelAnimationFrame(animationFrame);
+      window.clearTimeout(timeout);
+    };
+  }, [products, searchProductId]);
 
   useEffect(() => {
     productImageUrls.forEach((url) => {
@@ -89,37 +99,11 @@ export default function Menu() {
     });
   }, [productImageUrls]);
 
-  useEffect(() => {
-    if (category !== "All") {
-      return;
-    }
-
-    const observer = new IntersectionObserver(
-      (entries) => {
-        const visibleEntries = entries
-          .filter((entry) => entry.isIntersecting)
-          .sort((a, b) => b.intersectionRatio - a.intersectionRatio);
-
-        if (visibleEntries.length > 0) {
-          const categoryKey = visibleEntries[0].target.getAttribute("data-category") ?? "All";
-          setScrollActiveCategory(categoryKey);
-        }
-      },
-      { rootMargin: "-50% 0px -40% 0px", threshold: [0.1, 0.25, 0.5] }
-    );
-
-    grouped.forEach((group) => {
-      const section = groupRefs.current[group.category];
-      if (section) {
-        observer.observe(section);
-      }
-    });
-
-    return () => observer.disconnect();
-  }, [grouped, category]);
-
   return (
-    <main className="px-1 py-6 sm:px-4 sm:py-8 md:py-10">
+    <main className="px-1 pt-3 pb-6 sm:px-4 sm:pb-8 md:pb-10">
+      <div className="customer-shell mb-4">
+        <BackToHome />
+      </div>
       <section className="customer-shell">
         <div className="overflow-hidden rounded-[2rem] bg-transparent">
           <div className="grid items-center gap-4 lg:grid-cols-[1.05fr_0.95fr] lg:gap-6">
@@ -157,22 +141,18 @@ export default function Menu() {
               const imageSrc = resolveImageUrl(product.image_url);
 
               return (
-                <article key={product.id} className="customer-card overflow-hidden">
-                  {imageSrc ? (
-                    <div className="aspect-[4/3] overflow-hidden bg-slate-900">
-                      <img src={imageSrc} alt={product.name} loading="eager" fetchPriority="high" decoding="async" onError={(event) => fallbackToBackendImage(event.currentTarget, product.image_url)} className="h-full w-full object-cover" />
-                    </div>
-                  ) : (
-                    <div className="flex aspect-[4/3] items-center justify-center bg-katana-elevated text-5xl">
-                      🍣
-                    </div>
-                  )}
-                  <div className="p-3 sm:p-4">
-                    <div className="flex items-start justify-between gap-3">
-                      <h3 className="font-display text-base font-bold text-white sm:text-lg">{product.name}</h3>
-                      <p className="text-sm font-bold text-katana-red">{money(product.price)}</p>
-                    </div>
-                    <p className="mt-2 text-xs leading-relaxed text-katana-muted sm:text-sm">{product.description ?? "House specialty"}</p>
+                <article key={product.id} className="customer-menu-product-card group">
+                  <div className="customer-menu-product-art">
+                    {imageSrc ? (
+                      <img src={imageSrc} alt={product.name} loading="eager" fetchPriority="high" decoding="async" onError={(event) => fallbackToBackendImage(event.currentTarget, product.image_url)} />
+                    ) : (
+                      <span className="text-6xl" aria-hidden="true">🍣</span>
+                    )}
+                  </div>
+                  <div className="customer-menu-product-panel">
+                    <h3 className="line-clamp-2 font-display text-base font-bold leading-tight text-[#2c120f] sm:text-lg">{product.name}</h3>
+                    <span className="customer-menu-price-badge text-sm text-[#5a2e32]">{money(product.price)}</span>
+                    <p className="line-clamp-2 text-xs leading-relaxed text-[#5b2f30] sm:text-sm">{product.description ?? "House specialty"}</p>
                   </div>
                 </article>
               );
@@ -180,27 +160,9 @@ export default function Menu() {
           </div>
         </section>
 
-        <section className="mt-8">
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <div>
-              <p className="customer-kicker">Browse</p>
-              <h2 className="customer-section-title mt-2">Menu</h2>
-            </div>
-            <label className="relative block w-full sm:max-w-xs">
-              <Search className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-katana-muted" />
-              <input
-                className="customer-input pl-11"
-                value={search}
-                onChange={(event) => setSearch(event.target.value)}
-                placeholder="Search menu"
-              />
-            </label>
-          </div>
-        </section>
-
-        <div className="mt-8 space-y-6 sm:space-y-10">
+        <div className="mt-8 space-y-6 sm:mt-10 sm:space-y-10">
           {grouped.map((group) => (
-            <section key={group.category} data-category={group.category} ref={(el) => (groupRefs.current[group.category] = el)}>
+            <section key={group.category}>
               <h2 className="font-display text-2xl font-bold text-white">{group.category}</h2>
               <div className="mt-4 grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
                 {group.products.map((product, index) => {
@@ -208,24 +170,24 @@ export default function Menu() {
                   const eagerImage = group.category === grouped[0]?.category && index < 4;
 
                   return (
-                    <article key={product.id} className="customer-card overflow-hidden">
-                      {imageSrc ? (
-                        <div className="aspect-[4/3] overflow-hidden bg-slate-900">
-                          <img src={imageSrc} alt={product.name} loading={eagerImage ? "eager" : "lazy"} fetchPriority={eagerImage ? "high" : "auto"} decoding="async" onError={(event) => fallbackToBackendImage(event.currentTarget, product.image_url)} className="h-full w-full object-cover" />
-                        </div>
-                      ) : (
-                        <div className="flex aspect-[4/3] items-center justify-center bg-katana-elevated text-5xl">
-                          🍣
-                        </div>
-                      )}
-                      <div className="p-3 sm:p-4">
-                        <div className="flex items-start justify-between gap-3">
-                          <h3 className="font-display text-base font-bold text-white sm:text-lg">{product.name}</h3>
-                          <p className="text-sm font-bold text-katana-red">{money(product.price)}</p>
-                        </div>
-                        <p className="mt-2 text-xs leading-relaxed text-katana-muted sm:text-sm">{product.description ?? "House specialty"}</p>
+                    <article
+                      key={product.id}
+                      id={`menu-product-${product.id}`}
+                      className={`customer-menu-product-card group ${highlightedProductId === product.id ? "ring-4 ring-katana-red ring-offset-4 ring-offset-[var(--customer-bg)]" : ""}`}
+                    >
+                      <div className="customer-menu-product-art">
+                        {imageSrc ? (
+                          <img src={imageSrc} alt={product.name} loading={eagerImage ? "eager" : "lazy"} fetchPriority={eagerImage ? "high" : "auto"} decoding="async" onError={(event) => fallbackToBackendImage(event.currentTarget, product.image_url)} />
+                        ) : (
+                          <span className="text-6xl" aria-hidden="true">🍣</span>
+                        )}
+                      </div>
+                      <div className="customer-menu-product-panel">
+                        <h3 className="line-clamp-2 font-display text-base font-bold leading-tight text-[#2c120f] sm:text-lg">{product.name}</h3>
+                        <span className="customer-menu-price-badge text-sm text-[#5a2e32]">{money(product.price)}</span>
+                        <p className="line-clamp-2 text-xs leading-relaxed text-[#5b2f30] sm:text-sm">{product.description ?? "House specialty"}</p>
                         {product.is_available === false && (
-                          <p className="mt-3 text-xs font-bold uppercase tracking-[0.14em] text-katana-muted">Unavailable</p>
+                          <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-[#7a2d2f]">Unavailable</p>
                         )}
                       </div>
                     </article>

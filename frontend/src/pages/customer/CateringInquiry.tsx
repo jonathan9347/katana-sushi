@@ -1,39 +1,43 @@
-import { FormEvent, useState } from "react";
-import { Link } from "react-router-dom";
-import { ArrowLeft, PartyPopper, Send } from "lucide-react";
+import { FormEvent, useMemo, useState } from "react";
+import { PartyPopper, Send } from "lucide-react";
+import { useQuery } from "@tanstack/react-query";
 import { api } from "../../lib/api";
 import { todayManilaDateKey } from "../../lib/dateTime";
+import BackToHome from "../../components/layout/BackToHome";
 
-const sushiInclusions = [
-  "California Maki",
-  "Mango Roll",
-  "Volcano Roll",
-  "Tori Teriyaki Roll",
-  "Salmon Cheese Maki",
-  "Futo California",
-  "Tamago Sushi",
-  "Kani Sushi",
-  "Salmon Nigiri"
-];
+type CateringPackage = {
+  id: string;
+  stationType: string | null;
+  name: string;
+  description: string | null;
+  minPax: number;
+  maxPax: number;
+  items: {
+    pricingType?: "flat" | "range" | "quote";
+    pricingModel?: "tier" | "per_unit" | "fixed" | "quote";
+    flatPrice?: number;
+    fixedPrice?: number;
+    minPrice?: number;
+    pricePerUnit?: number;
+    pricePerKg?: number;
+    unit?: string;
+    minimum?: number;
+    minKg?: number;
+    step?: number;
+    stepKg?: number;
+    maximum?: number;
+    maxKg?: number;
+    fixedPax?: number;
+    inclusions?: string[];
+    galleryImages?: string[];
+  } | null;
+};
 
-const sushiOptions = [
-  { id: "sushi_50_60", label: "50-60 pax", minCount: 50, price: 6000 },
-  { id: "sushi_75_85", label: "75-85 pax", minCount: 75, price: 9000 },
-  { id: "sushi_100_120", label: "100-120 pax", minCount: 100, price: 12000 },
-  { id: "sushi_150_170", label: "150-170 pax", minCount: 150, price: 17500 },
-  { id: "sushi_200_220", label: "200-220 pax", minCount: 200, price: 23000 }
-];
-
-const sashimiOptions = [
-  { id: "sashimi_20_29", label: "20-29kg whole tuna", minCount: 20, priceLabel: "PHP 15,000-PHP 21,750", minPrice: 15000 },
-  { id: "sashimi_30_40", label: "30-40kg whole tuna", minCount: 30, priceLabel: "PHP 22,500-PHP 30,000", minPrice: 22500 }
-];
-
-const stations = [
-  { id: "sushi_station", name: "Sushi Station", summary: "Maki, sushi, and nigiri" },
-  { id: "sashimi_bar", name: "Sashimi Bar", summary: "Whole tuna service" },
-  { id: "tempura_live", name: "Tempura Live", summary: "Live station quote" }
-];
+const stationLabels: Record<string, string> = {
+  sushi_station: "Sushi Station",
+  sashimi_bar: "Sashimi Bar",
+  tempura_live: "Tempura Live"
+};
 
 function today() {
   return todayManilaDateKey();
@@ -43,18 +47,27 @@ function money(value: number) {
   return `PHP ${value.toLocaleString()}`;
 }
 
+function getOptionPrice(option: CateringPackage | undefined, quantityKg: number) {
+  if (!option?.items || option.items.pricingType === "quote" || option.items.pricingModel === "quote") {
+    return 0;
+  }
+  if (option.items.pricingModel === "per_unit" || option.items.pricingType === "range") {
+    return (option.items.pricePerUnit ?? option.items.pricePerKg ?? 0) * quantityKg;
+  }
+  return option.items.fixedPrice ?? option.items.flatPrice ?? option.items.minPrice ?? 0;
+}
+
 export default function CateringInquiry() {
   const [form, setForm] = useState({
     event_date: today(),
     venue_address: "",
     package_type: "sushi_station",
-    sushi_option: sushiOptions[0].id,
-    sashimi_option: sashimiOptions[0].id,
+    selected_package_id: "",
+    sashimi_quantity_kg: "2",
     customer_name: "",
     customer_phone: "",
     customer_email: "",
-    message: "",
-    downpayment_acknowledged: false
+    message: ""
   });
   const [notice, setNotice] = useState("");
   const [inquiryId, setInquiryId] = useState("");
@@ -63,28 +76,63 @@ export default function CateringInquiry() {
     setForm((current) => ({ ...current, [field]: value }));
   }
 
-  const selectedStation = stations.find((item) => item.id === form.package_type) ?? stations[0];
-  const selectedSushiOption = sushiOptions.find((item) => item.id === form.sushi_option) ?? sushiOptions[0];
-  const selectedSashimiOption = sashimiOptions.find((item) => item.id === form.sashimi_option) ?? sashimiOptions[0];
-  const selectedOptionText =
-    form.package_type === "sushi_station"
-      ? `${selectedSushiOption.label} - ${money(selectedSushiOption.price)}`
-      : form.package_type === "sashimi_bar"
-        ? `${selectedSashimiOption.label} - ${selectedSashimiOption.priceLabel}`
-        : "Live tempura station - custom quote";
-  const estimatedPrice =
-    form.package_type === "sushi_station"
-      ? selectedSushiOption.price
-      : form.package_type === "sashimi_bar"
-        ? selectedSashimiOption.minPrice
-        : 0;
-  const downpayment = estimatedPrice * 0.5;
-  const derivedHeadcount =
-    form.package_type === "sushi_station"
-      ? selectedSushiOption.minCount
-      : form.package_type === "sashimi_bar"
-        ? selectedSashimiOption.minCount
-        : 10;
+  const packagesQuery = useQuery({
+    queryKey: ["catering-packages"],
+    queryFn: async () => (await api.get<{ packages: CateringPackage[] }>("/api/catering/packages")).data.packages,
+    retry: 1
+  });
+  const packages = packagesQuery.data ?? [];
+  const stationTypes = useMemo(
+    () => Array.from(new Set(packages.map((item) => item.stationType).filter((type): type is string => Boolean(type)))),
+    [packages]
+  );
+  const stationOptions = packages.filter((item) => item.stationType === form.package_type);
+  const selectedPackage =
+    stationOptions.find((item) => item.id === form.selected_package_id) ?? stationOptions[0];
+  const selectedStationName = stationLabels[form.package_type] ?? form.package_type;
+  const quantityKg = Number(form.sashimi_quantity_kg) || 0;
+  const estimatedPrice = getOptionPrice(selectedPackage, quantityKg);
+  const selectedOptionText = selectedPackage
+    ? form.package_type === "sashimi_bar"
+      ? `${selectedPackage.name} - ${form.sashimi_quantity_kg} kg - ${money(estimatedPrice)}`
+      : selectedPackage.items?.pricingModel === "fixed"
+        ? `${selectedPackage.description ?? selectedPackage.name} - ${selectedPackage.items.fixedPax ?? selectedPackage.minPax} pax - ${money(estimatedPrice)}`
+        : `${selectedPackage.description ?? selectedPackage.name} - ${money(estimatedPrice)}`
+    : "No option selected";
+  const minimumKg = selectedPackage?.items?.minimum ?? selectedPackage?.items?.minKg ?? 1;
+  const stepKg = selectedPackage?.items?.step ?? selectedPackage?.items?.stepKg ?? 1;
+  const maximumKg = selectedPackage?.items?.maximum ?? selectedPackage?.items?.maxKg;
+  const derivedHeadcount = form.package_type === "sushi_station"
+    ? selectedPackage?.minPax ?? null
+    : form.package_type === "tempura_live"
+      ? selectedPackage?.items?.fixedPax ?? selectedPackage?.minPax ?? null
+      : null;
+
+  function selectStation(stationType: string) {
+    const options = packages.filter((item) => item.stationType === stationType);
+    const nextPackage = options.length === 1
+      ? options[0]
+      : options.find((item) => item.id === form.selected_package_id) ?? options[0];
+    setForm((current) => ({
+      ...current,
+      package_type: stationType,
+      selected_package_id: nextPackage?.id ?? "",
+      sashimi_quantity_kg: stationType === "sashimi_bar"
+        ? String(nextPackage?.items?.minimum ?? nextPackage?.items?.minKg ?? 1)
+        : current.sashimi_quantity_kg
+    }));
+  }
+
+  function selectPackage(packageId: string) {
+    const option = stationOptions.find((item) => item.id === packageId);
+    setForm((current) => ({
+      ...current,
+      selected_package_id: packageId,
+      sashimi_quantity_kg: form.package_type === "sashimi_bar"
+        ? String(option?.items?.minimum ?? option?.items?.minKg ?? 1)
+        : current.sashimi_quantity_kg
+    }));
+  }
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -95,19 +143,17 @@ export default function CateringInquiry() {
       return;
     }
 
-    if (!form.downpayment_acknowledged) {
-      setNotice("Please acknowledge the 50% downpayment requirement.");
-      return;
-    }
-
     try {
-      const stationMessage = `Selected station: ${selectedStation.name}. Option: ${selectedOptionText}.`;
+      const stationMessage = `Selected station: ${selectedStationName}. Option: ${selectedOptionText}.`;
       const response = await api.post<{ inquiry_id: string }>("/api/catering/inquiry", {
-        ...form,
+        customer_name: form.customer_name,
+        customer_phone: form.customer_phone,
+        customer_email: form.customer_email,
+        event_date: form.event_date,
+        venue_address: form.venue_address,
         headcount: derivedHeadcount,
         package_type: form.package_type || null,
-        message: form.message ? `${stationMessage}\n\n${form.message}` : stationMessage,
-        downpayment_acknowledged: form.downpayment_acknowledged
+        message: form.message ? `${stationMessage}\n\n${form.message}` : stationMessage
       });
       setInquiryId(response.data.inquiry_id);
     } catch {
@@ -117,34 +163,34 @@ export default function CateringInquiry() {
 
   if (inquiryId) {
     return (
-      <main className="px-4 py-8 md:py-10">
+      <main className="px-4 pt-3 pb-8 md:pb-10">
+        <div className="customer-shell mb-4">
+          <BackToHome />
+        </div>
         <section className="mx-auto w-full max-w-md customer-card p-5 shadow-sm">
           <h1 className="text-xl font-bold text-slate-950">Inquiry Sent</h1>
           <p className="mt-3 rounded-md bg-emerald-50 px-3 py-2 text-sm font-semibold text-emerald-800">Inquiry ID: {inquiryId}</p>
-          <p className="mt-4 text-sm text-slate-700">Our event team will contact you soon with the final quote and 50% downpayment instructions.</p>
-          <Link className="mt-5 block rounded-md bg-red-700 px-4 py-3 text-center font-semibold text-white" to="/">
-            Back to Home
-          </Link>
+          <p className="mt-4 text-sm text-slate-700">Our event team will contact you soon with the final quote and payment options.</p>
         </section>
       </main>
     );
   }
 
   return (
-    <main className="px-3 py-4 md:px-4 md:py-10">
+    <main className="px-3 pt-3 pb-4 md:px-4 md:pb-10">
+      <div className="customer-shell mb-4">
+        <BackToHome />
+      </div>
       <section className="mx-auto grid max-w-6xl gap-4 lg:grid-cols-[0.75fr_1.25fr]">
         <div
           className="min-h-44 rounded-lg bg-cover bg-center p-4 text-white shadow-sm lg:min-h-full lg:p-6"
           style={{ backgroundImage: "linear-gradient(rgba(15,23,42,0.25), rgba(15,23,42,0.76)), url('/images/catering-banner.jpg')" }}
         >
-          <Link to="/" className="inline-flex items-center gap-2 rounded-md bg-white/15 px-3 py-2 text-sm font-bold backdrop-blur">
-            <ArrowLeft className="h-4 w-4" /> Back
-          </Link>
           <div className="mt-10 lg:mt-72">
             <PartyPopper className="h-7 w-7 lg:h-9 lg:w-9" />
             <h1 className="mt-2 text-2xl font-black lg:text-3xl">Catering Inquiry</h1>
             <p className="mt-2 max-w-md text-sm font-medium text-slate-100">
-              Plan your special event with sushi station, sashimi bar, or tempura live.
+              Plan your special event with sushi station, sashimi bar, or live tempura.
             </p>
           </div>
         </div>
@@ -167,15 +213,24 @@ export default function CateringInquiry() {
           <div>
             <p className="mb-2 text-xs font-bold uppercase tracking-wide text-slate-500">Station Interest</p>
             <div className="grid grid-cols-3 gap-2">
-              {stations.map((item) => (
+              {packagesQuery.isPending && <p className="col-span-3 text-sm text-slate-500" role="status">Loading stations...</p>}
+              {packagesQuery.isError && (
+                <div className="col-span-3 text-sm text-red-700" role="alert">
+                  <p>Stations could not be loaded.</p>
+                  <button type="button" className="mt-1 underline" onClick={() => void packagesQuery.refetch()}>Retry</button>
+                </div>
+              )}
+              {stationTypes.map((stationType) => (
                 <button
-                  key={item.id}
+                  key={stationType}
                   type="button"
-                  onClick={() => setField("package_type", item.id)}
-                  className={`min-h-20 rounded-md border p-2 text-left transition ${form.package_type === item.id ? "border-red-700 bg-red-50" : "border-slate-200 bg-white"}`}
+                  onClick={() => selectStation(stationType)}
+                  className={`min-h-20 rounded-md border p-2 text-left transition ${form.package_type === stationType ? "border-red-700 bg-red-50" : "border-slate-200 bg-white"}`}
                 >
-                  <span className="block text-sm font-black text-slate-950">{item.name}</span>
-                  <span className="mt-1 block text-xs font-medium text-slate-500">{item.summary}</span>
+                  <span className="block text-sm font-black text-slate-950">{stationLabels[stationType] ?? stationType}</span>
+                  <span className="mt-1 block text-xs font-medium text-slate-500">
+                    {packages.filter((item) => item.stationType === stationType).length} option(s) available
+                  </span>
                 </button>
               ))}
             </div>
@@ -183,24 +238,26 @@ export default function CateringInquiry() {
 
           <div className="rounded-md border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700">
             <div className="flex items-center justify-between gap-3">
-              <p className="font-bold text-slate-950">{selectedStation.name}</p>
-              {estimatedPrice > 0 && <p className="font-black text-red-700">{money(estimatedPrice)}{form.package_type === "sashimi_bar" ? "+" : ""}</p>}
+              <p className="font-bold text-slate-950">{selectedStationName}</p>
+              {estimatedPrice > 0 && <p className="font-black text-red-700">{money(estimatedPrice)}</p>}
             </div>
 
-            {form.package_type === "sushi_station" && (
+            {stationOptions.length > 1 && form.package_type !== "sashimi_bar" && (
               <div className="mt-3 space-y-3">
                 <label className="block">
                   <span className="mb-1 block text-xs font-bold uppercase tracking-wide text-slate-500">Pax option</span>
-                  <select className="customer-input" value={form.sushi_option} onChange={(event) => setField("sushi_option", event.target.value)}>
-                    {sushiOptions.map((option) => (
-                      <option key={option.id} value={option.id}>{money(option.price)} - {option.label}</option>
+                  <select className="customer-input" value={selectedPackage?.id ?? ""} onChange={(event) => selectPackage(event.target.value)}>
+                    {stationOptions.map((option) => (
+                      <option key={option.id} value={option.id}>
+                        {option.description ?? option.name} - {money(getOptionPrice(option, 0))}
+                      </option>
                     ))}
                   </select>
                 </label>
                 <details className="rounded-md border border-slate-200 bg-white">
                   <summary className="cursor-pointer px-3 py-2 text-sm font-bold text-slate-950">Sushi station products</summary>
                   <ul className="grid gap-2 border-t border-slate-200 p-3 sm:grid-cols-2">
-                    {sushiInclusions.map((item) => (
+                    {(selectedPackage?.items?.inclusions ?? []).map((item) => (
                       <li key={item}>
                         <p className="font-bold text-slate-950">{item}</p>
                       </li>
@@ -211,24 +268,54 @@ export default function CateringInquiry() {
             )}
 
             {form.package_type === "sashimi_bar" && (
-              <label className="mt-3 block">
-                <span className="mb-1 block text-xs font-bold uppercase tracking-wide text-slate-500">Whole tuna option</span>
-                <select className="customer-input" value={form.sashimi_option} onChange={(event) => setField("sashimi_option", event.target.value)}>
-                  {sashimiOptions.map((option) => (
-                    <option key={option.id} value={option.id}>{option.priceLabel} - {option.label}</option>
-                  ))}
-                </select>
-              </label>
+              <div className="mt-3 grid gap-3">
+                <label className="block">
+                  <span className="mb-1 block text-xs font-bold uppercase tracking-wide text-slate-500">Sashimi option</span>
+                  <select className="customer-input" value={selectedPackage?.id ?? ""} onChange={(event) => selectPackage(event.target.value)}>
+                    {stationOptions.map((option) => (
+                      <option key={option.id} value={option.id}>{option.name} - {money(option.items?.pricePerUnit ?? option.items?.pricePerKg ?? 0)}/{option.items?.unit ?? "kg"}</option>
+                    ))}
+                  </select>
+                </label>
+                <label className="block">
+                  <span className="mb-1 block text-xs font-bold uppercase tracking-wide text-slate-500">Quantity (kg)</span>
+                  <input
+                    className="customer-input"
+                    type="number"
+                    min={minimumKg}
+                    max={maximumKg}
+                    step={stepKg}
+                    inputMode="numeric"
+                    value={form.sashimi_quantity_kg}
+                    onChange={(event) => {
+                      const value = event.target.value;
+                      const quantity = Number(value);
+                      setField(
+                        "sashimi_quantity_kg",
+                        value && maximumKg !== undefined && Number.isFinite(quantity)
+                          ? String(Math.min(quantity, maximumKg))
+                          : value
+                      );
+                    }}
+                    required
+                  />
+                </label>
+              </div>
             )}
 
-            {form.package_type === "tempura_live" && (
-              <p className="mt-2">Live tempura station pricing will be quoted by the event team.</p>
+            {stationOptions.length === 1 && selectedPackage && form.package_type !== "sashimi_bar" && (
+              <div className="mt-3 rounded-md border border-slate-200 bg-white p-3">
+                <p className="font-bold text-slate-950">{selectedPackage.description ?? selectedPackage.name}</p>
+                <p className="mt-1 text-sm">{getOptionPrice(selectedPackage, 0) > 0
+                  ? `Fixed package - ${selectedPackage.items?.fixedPax ?? selectedPackage.minPax} pax - ${money(estimatedPrice)}`
+                  : "Package selected automatically"}
+                </p>
+              </div>
             )}
 
-            {estimatedPrice > 0 && (
+            {selectedPackage && estimatedPrice > 0 && (
               <div className="mt-3 grid gap-1">
                 <p>{selectedOptionText}</p>
-                <p className="font-semibold text-red-700">50% downpayment: {money(downpayment)}{form.package_type === "sashimi_bar" ? " minimum" : ""}</p>
               </div>
             )}
           </div>
@@ -252,7 +339,7 @@ export default function CateringInquiry() {
             <h3 className="font-bold uppercase text-slate-950 dark:text-slate-50">Catering Reservation Rules</h3>
 
             <ul className="mt-3 list-disc space-y-2 pl-5">
-              <li>50% downpayment is required to confirm your reservation.</li>
+              <li>Reservations are subject to confirmation by our event team.</li>
               <li>Minimum reservation is for 10 pax.</li>
               <li>Reserved guests are charged based on the reserved headcount.</li>
               <li>Dining time is limited to 1 hour and 30 minutes upon serving of food.</li>
@@ -260,16 +347,10 @@ export default function CateringInquiry() {
               <li>Reservations delayed by more than 15 minutes may be released to the next guest.</li>
             </ul>
           </section>
-          <label className="flex items-start gap-3 rounded-md border border-amber-200 bg-amber-50 p-3 text-sm font-semibold text-amber-900">
-            <input
-              checked={form.downpayment_acknowledged}
-              className="mt-1 h-4 w-4 accent-red-700"
-              type="checkbox"
-              onChange={(event) => setForm((current) => ({ ...current, downpayment_acknowledged: event.target.checked }))}
-            />
-            I understand that 50% downpayment is required to confirm this reservation.
-          </label>
-          <button className="flex w-full items-center justify-center gap-2 customer-btn-primary">
+          <button
+            className="flex w-full items-center justify-center gap-2 customer-btn-primary"
+            disabled={packagesQuery.isPending || packagesQuery.isError || !selectedPackage}
+          >
             <Send className="h-4 w-4" /> Submit Inquiry
           </button>
           {notice && <p className="rounded-md bg-red-50 px-3 py-2 text-sm font-medium text-red-700">{notice}</p>}

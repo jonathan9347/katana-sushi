@@ -1,14 +1,17 @@
 import { useMemo, useState } from "react";
+import { Link } from "react-router-dom";
 import { Sparkles } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../../../lib/api";
-import { formatManilaDate, manilaDateKey, todayManilaDateKey } from "../../../lib/dateTime";
+import { formatManilaDate, formatTime12, manilaDateKey, todayManilaDateKey } from "../../../lib/dateTime";
 import { MiniCalendar } from "../../../components/ui/MiniCalendar";
 import { ReservationDetailsModal } from "../../../components/ui/ReservationDetailsModal";
 import { Button } from "../../../components/ui/button";
 import { Dialog } from "../../../components/ui/dialog";
 import { useToast } from "../../../hooks/useToast";
 import { getApiErrorMessage } from "../../../lib/errors";
+import { formatCateringEventType } from "../../../lib/reservationDetails";
+import { formatCateringPackageSnapshots } from "../../../lib/cateringPackageSnapshot";
 
 type PaymentHistoryItem = {
   id: string;
@@ -28,32 +31,28 @@ type RawCateringReservation = {
   customer_phone?: string;
   customer_email?: string;
   confirmed_date: string;
+  event_time?: string | null;
+  package_total?: number;
+  mobilization_fee?: number;
   total_price: number;
   payment_plan?: string;
   downpayment_amount?: number;
   remaining_balance?: number;
   final_payment_status?: string;
+  payment_status?: string;
   payment_history?: PaymentHistoryItem[];
   status: string;
   headcount: number;
   inquiry?: {
     venue_type?: string | null;
     event_type?: string | null;
+    event_type_other?: string | null;
     message?: string | null;
   } | null;
   package?: {
     name?: string | null;
   } | null;
-  ingredient_locks?: Array<{
-    id: string;
-    reserved_quantity: number;
-    unit: string;
-    is_released: boolean;
-    raw_material: {
-      id: string;
-      name: string;
-    };
-  }>;
+  package_snapshot?: unknown;
 };
 
 type CateringReservation = {
@@ -65,7 +64,10 @@ type CateringReservation = {
   email?: string;
   date: string;
   time?: string;
+  event_time?: string | null;
   guests: number;
+  package_total?: number;
+  mobilization_fee?: number;
   total_price: number;
   status: string;
   payment_plan?: string;
@@ -75,18 +77,10 @@ type CateringReservation = {
   payment_history?: PaymentHistoryItem[];
   special_requests?: string | null;
   event_type?: string | null;
+  event_type_other?: string | null;
   package_name?: string | null;
+  package_snapshot?: unknown;
   venue_type?: string | null;
-  ingredient_locks: Array<{
-    id: string;
-    reserved_quantity: number;
-    unit: string;
-    is_released: boolean;
-    raw_material: {
-      id: string;
-      name: string;
-    };
-  }>;
 };
 
 function badgeClass(status: string) {
@@ -116,16 +110,22 @@ function today() {
   return todayManilaDateKey();
 }
 
+function isActive(status: string) {
+  return ["pending", "pending_approval", "confirmed", "approved", "in_progress", "preparing", "pending_final_payment"].includes(status);
+}
+
 export default function CateringReservations() {
   const [selectedDate, setSelectedDate] = useState(today());
   const [cursor, setCursor] = useState(() => new Date(`${today()}T00:00:00+08:00`));
   const [activeReservation, setActiveReservation] = useState<CateringReservation | null>(null);
+  const [approvalTarget, setApprovalTarget] = useState<CateringReservation | null>(null);
+  const [mobilizationFeeInput, setMobilizationFeeInput] = useState("0");
   const [cancelTarget, setCancelTarget] = useState<CateringReservation | null>(null);
   const [cancelReason, setCancelReason] = useState("");
-  const [cancelCashAmount, setCancelCashAmount] = useState("0");
   const [completionTarget, setCompletionTarget] = useState<CateringReservation | null>(null);
   const [actionLoading, setActionLoading] = useState<Record<string, boolean>>({});
   const { toast } = useToast();
+  const canEditPhotos = localStorage.getItem("katana_role")?.toLowerCase() === "admin";
 
   const query = useQuery<RawCateringReservation[]>({
     queryKey: ["staff-catering-reservations"],
@@ -144,46 +144,53 @@ export default function CateringReservations() {
       phone: reservation.customer_phone,
       email: reservation.customer_email,
       date: reservation.confirmed_date,
-      time: undefined,
+      time: reservation.event_time ?? undefined,
+      event_time: reservation.event_time,
       guests: reservation.headcount,
+      package_total: reservation.package_total,
+      mobilization_fee: reservation.mobilization_fee,
       total_price: reservation.total_price,
       status: reservation.status,
       payment_plan: reservation.payment_plan,
       downpayment_amount: reservation.downpayment_amount,
       remaining_balance: reservation.remaining_balance,
-      payment_status: reservation.final_payment_status,
+      payment_status: reservation.payment_status ?? reservation.final_payment_status,
       payment_history: reservation.payment_history ?? [],
       special_requests: reservation.inquiry?.message ?? null,
       event_type: reservation.inquiry?.event_type ?? null,
+      event_type_other: reservation.inquiry?.event_type_other ?? null,
       package_name: reservation.package?.name ?? null,
-      venue_type: reservation.inquiry?.venue_type ?? null,
-      ingredient_locks: reservation.ingredient_locks ?? []
+      package_snapshot: reservation.package_snapshot,
+      venue_type: reservation.inquiry?.venue_type ?? null
     }));
   }, [query.data]);
 
+  const activeReservations = useMemo(
+    () => reservations.filter((reservation) => isActive(reservation.status)),
+    [reservations]
+  );
 
   const eventsByDate = useMemo(() => {
     const map = new Map<string, number>();
-    reservations.forEach((reservation) => {
+    activeReservations.forEach((reservation) => {
       const key = manilaDateKey(reservation.date);
       map.set(key, (map.get(key) ?? 0) + 1);
     });
     return map;
-  }, [reservations]);
+  }, [activeReservations]);
 
   const selectedReservations = useMemo(
-    () => (eventsByDate.get(selectedDate) ? reservations.filter((reservation) => manilaDateKey(reservation.date) === selectedDate) : []).sort((a, b) => a.reference.localeCompare(b.reference)),
-    [eventsByDate, reservations, selectedDate]
+    () => (eventsByDate.get(selectedDate) ? activeReservations.filter((reservation) => manilaDateKey(reservation.date) === selectedDate) : []).sort((a, b) => a.reference.localeCompare(b.reference)),
+    [activeReservations, eventsByDate, selectedDate]
   );
 
   const pendingCount = reservations.filter((reservation) => reservation.status === "pending_approval").length;
-  const activeCount = reservations.filter((reservation) => reservation.status !== "cancelled" && reservation.status !== "rejected").length;
-
+  const activeCount = activeReservations.length;
+  const balanceWatch = activeReservations.filter((reservation) =>
+    ["Balance due", "Balance overdue", "Partial"].includes(reservation.payment_status ?? "") &&
+    Number(reservation.remaining_balance ?? 0) > 0
+  );
   function hasOpenPayment(reservation: CateringReservation) {
-    return (reservation.remaining_balance ?? 0) > 0 || reservation.payment_status !== "paid";
-  }
-
-  function hasPayableBalance(reservation: CateringReservation) {
     return (reservation.remaining_balance ?? 0) > 0;
   }
 
@@ -191,10 +198,45 @@ export default function CateringReservations() {
     setCursor((current) => new Date(current.getFullYear(), current.getMonth() + delta, 1));
   }
 
-  async function handleApprove(reservation: CateringReservation) {
+  async function handleApprove() {
+    if (!approvalTarget) return;
+    const mobilizationFee = Number(mobilizationFeeInput.trim());
+    if (!mobilizationFeeInput.trim() || !Number.isFinite(mobilizationFee) || mobilizationFee < 0 || mobilizationFee > 1_000_000) {
+      toast("Enter a fee between ₱0 and ₱1,000,000.");
+      return;
+    }
+    setActionLoading((current) => ({ ...current, [approvalTarget.id]: true }));
+    try {
+      await api.put(`/api/staff/catering/reservations/${approvalTarget.id}/approve`, {
+        mobilization_fee: mobilizationFee
+      });
+      await query.refetch();
+      setApprovalTarget(null);
+    } catch (error) {
+      toast(getApiErrorMessage(error, "Unable to approve the catering reservation."));
+    } finally {
+      setActionLoading((current) => ({ ...current, [approvalTarget.id]: false }));
+    }
+  }
+
+  async function handleDecline(reservation: CateringReservation) {
+    const reason = window.prompt("Why is this catering request being declined?");
+    if (!reason?.trim()) return;
     setActionLoading((current) => ({ ...current, [reservation.id]: true }));
     try {
-      await api.put(`/api/staff/catering/reservations/${reservation.id}/approve`);
+      await api.put(`/api/staff/catering/reservations/${reservation.id}/decline`, { reason: reason.trim() });
+      await query.refetch();
+    } finally {
+      setActionLoading((current) => ({ ...current, [reservation.id]: false }));
+    }
+  }
+
+  async function handleNoShow(reservation: CateringReservation) {
+    const reason = window.prompt("Enter the reason for marking this catering booking as a no-show.");
+    if (!reason?.trim()) return;
+    setActionLoading((current) => ({ ...current, [reservation.id]: true }));
+    try {
+      await api.put(`/api/staff/catering/reservations/${reservation.id}/no-show`, { reason: reason.trim() });
       await query.refetch();
     } finally {
       setActionLoading((current) => ({ ...current, [reservation.id]: false }));
@@ -211,33 +253,16 @@ export default function CateringReservations() {
     }
   }
 
-  async function handleRecordCash(reservation: CateringReservation) {
-    setActionLoading((current) => ({ ...current, [reservation.id]: true }));
-    try {
-      await api.post(`/api/staff/catering/reservations/${reservation.id}/record-cash-payment`, {
-        amount: reservation.remaining_balance ?? 0,
-        received_by: "Staff"
-      });
-      await query.refetch();
-    } finally {
-      setActionLoading((current) => ({ ...current, [reservation.id]: false }));
-    }
-  }
-
   async function handleCancel(reservation: CateringReservation) {
     setActionLoading((current) => ({ ...current, [reservation.id]: true }));
     try {
       await api.put(`/api/staff/catering/reservations/${reservation.id}/cancel`, {
-        reason: cancelReason || "Customer cancelled the catering reservation.",
-        amount: Number(cancelCashAmount || 0),
-        payment_method: "cash",
-        cash_received: Number(cancelCashAmount || 0)
+        reason: cancelReason || "Staff cancelled the catering reservation."
       });
       setCancelTarget(null);
       setCancelReason("");
-      setCancelCashAmount("0");
       await query.refetch();
-      toast("Catering reservation cancelled and inventory locks released.");
+      toast("Catering reservation cancelled.");
     } finally {
       setActionLoading((current) => ({ ...current, [reservation.id]: false }));
     }
@@ -285,10 +310,17 @@ export default function CateringReservations() {
               {
                 label: "Approve event",
                 onClick: () => {
-                  void handleApprove(activeReservation);
+                  setMobilizationFeeInput("0");
+                  setApprovalTarget(activeReservation);
                   setActiveReservation(null);
                 },
                 variant: "default" as const,
+                disabled: actionLoading[activeReservation.id]
+              },
+              {
+                label: "Decline request",
+                onClick: () => void handleDecline(activeReservation),
+                variant: "outline" as const,
                 disabled: actionLoading[activeReservation.id]
               }
             ]
@@ -302,6 +334,12 @@ export default function CateringReservations() {
                   setActiveReservation(null);
                 },
                 variant: "outline" as const,
+                disabled: actionLoading[activeReservation.id]
+              },
+              {
+                label: "Mark no-show",
+                onClick: () => void handleNoShow(activeReservation),
+                variant: "danger" as const,
                 disabled: actionLoading[activeReservation.id]
               }
             ]
@@ -325,8 +363,7 @@ export default function CateringReservations() {
                 label: "Cancel event",
                 onClick: () => {
                   setCancelTarget(activeReservation);
-                  setCancelReason("Customer cancelled the catering reservation.");
-                  setCancelCashAmount(String(Number(activeReservation.remaining_balance ?? activeReservation.total_price ?? 0).toFixed(2)));
+                  setCancelReason("Staff cancelled the catering reservation.");
                 },
                 variant: "danger" as const,
                 disabled: actionLoading[activeReservation.id]
@@ -358,6 +395,14 @@ export default function CateringReservations() {
               <p className="mt-2 text-3xl font-black text-slate-950">{formatManilaDate(selectedDate)}</p>
             </div>
           </div>
+          {canEditPhotos && (
+            <Link
+              className="inline-flex min-h-10 items-center justify-center rounded-md border border-slate-300 bg-white px-4 text-sm font-semibold text-slate-800 hover:bg-slate-50"
+              to="/staff/catering/photos"
+            >
+              Catering menu photos
+            </Link>
+          )}
         </div>
 
         <div className="grid gap-5 p-4 sm:p-5 xl:grid-cols-[minmax(0,1.5fr)_minmax(0,1fr)]">
@@ -401,7 +446,21 @@ export default function CateringReservations() {
                           </div>
                           <p className="text-base font-black text-slate-950">{reservation.customer_name}</p>
                           <p className="text-sm text-slate-600">{reservation.package_name ?? "Catering"} · {reservation.venue_type ?? "Venue address TBD"}</p>
-                          <p className="text-sm text-slate-600">Remaining: ₱{reservation.remaining_balance?.toFixed(2) ?? "0.00"}</p>
+                          {formatCateringPackageSnapshots(reservation.package_snapshot).map((line) => (
+                            <p key={line} className="text-sm font-semibold text-slate-700">{line}</p>
+                          ))}
+                          <p className="text-sm text-slate-600">
+                            {reservation.event_time ? `Event time: ${formatTime12(reservation.event_time)}` : "Event time: N/A"}
+                            {reservation.event_type
+                              ? ` · ${formatCateringEventType(reservation.event_type, reservation.event_type_other)}`
+                              : ""}
+                          </p>
+                          <p className="text-sm text-slate-600">Package total: ₱{reservation.package_total?.toFixed(2) ?? reservation.total_price.toFixed(2)}</p>
+                          {Number(reservation.mobilization_fee ?? 0) > 0 && (
+                            <p className="text-sm text-slate-600">Mobilization fee: ₱{reservation.mobilization_fee?.toFixed(2)}</p>
+                          )}
+                          <p className="text-sm text-slate-600">Approved total: ₱{reservation.total_price.toFixed(2)}</p>
+                          <p className="text-sm text-slate-600">Amount due: ₱{reservation.remaining_balance?.toFixed(2) ?? "0.00"}</p>
                         </div>
 
                         <div className="flex flex-col gap-2 text-right sm:text-left">
@@ -409,18 +468,20 @@ export default function CateringReservations() {
                             View details
                           </Button>
                           {reservation.status === "pending_approval" ? (
-                            <Button size="sm" onClick={() => void handleApprove(reservation)} disabled={actionLoading[reservation.id]}>
+                            <Button
+                              size="sm"
+                              onClick={() => {
+                                setMobilizationFeeInput("0");
+                                setApprovalTarget(reservation);
+                              }}
+                              disabled={actionLoading[reservation.id]}
+                            >
                               {actionLoading[reservation.id] ? "Processing..." : "Approve"}
                             </Button>
                           ) : null}
                           {reservation.status === "confirmed" ? (
                             <Button variant="outline" size="sm" onClick={() => void handleStart(reservation)} disabled={actionLoading[reservation.id]}>
                               {actionLoading[reservation.id] ? "Processing..." : "Start"}
-                            </Button>
-                          ) : null}
-                          {(["confirmed", "in_progress", "pending_final_payment"].includes(reservation.status) && hasPayableBalance(reservation)) ? (
-                            <Button variant="danger" size="sm" onClick={() => void handleRecordCash(reservation)} disabled={actionLoading[reservation.id]}>
-                              {actionLoading[reservation.id] ? "Processing..." : reservation.status === "pending_final_payment" ? "Settle balance" : "Record cash"}
                             </Button>
                           ) : null}
                           {(reservation.status === "in_progress" || reservation.status === "pending_final_payment") ? (
@@ -439,7 +500,25 @@ export default function CateringReservations() {
             <div className="grid gap-4">
               <div className="rounded-3xl border border-slate-200 bg-white p-5">
                 <p className="text-xs uppercase tracking-wide text-slate-500">Balance watch</p>
-                <p className="mt-2 text-sm text-slate-700">{reservations.filter((reservation) => reservation.remaining_balance && reservation.remaining_balance > 0).length} events still have unpaid balance.</p>
+                <p className="mt-2 text-sm text-slate-700">{balanceWatch.filter((reservation) => reservation.payment_status === "Balance overdue").length} overdue · {balanceWatch.filter((reservation) => reservation.payment_status !== "Balance overdue").length} due.</p>
+                {balanceWatch.length > 0 ? (
+                  <ul className="mt-3 grid gap-2">
+                    {balanceWatch.slice(0, 5).map((reservation) => (
+                      <li key={reservation.id}>
+                        <button
+                          type="button"
+                          className="flex w-full items-center justify-between gap-3 rounded-lg border border-slate-200 px-3 py-2 text-left text-sm hover:bg-slate-50"
+                          onClick={() => setActiveReservation(reservation)}
+                        >
+                          <span className="min-w-0 truncate font-semibold text-slate-800">{reservation.reference} · {reservation.customer_name}</span>
+                          <span className={`shrink-0 font-bold ${reservation.payment_status === "Balance overdue" ? "text-red-700" : "text-amber-700"}`}>
+                            {reservation.payment_status}
+                          </span>
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                ) : null}
               </div>
               <div className="rounded-3xl border border-slate-200 bg-white p-5">
                 <p className="text-xs uppercase tracking-wide text-slate-500">Workflow tip</p>
@@ -471,7 +550,8 @@ export default function CateringReservations() {
             phone: updatedRaw.customer_phone,
             email: updatedRaw.customer_email,
             date: updatedRaw.confirmed_date,
-            time: undefined,
+            time: updatedRaw.event_time ?? undefined,
+            event_time: updatedRaw.event_time,
             guests: updatedRaw.headcount,
             total_price: updatedRaw.total_price,
             status: updatedRaw.status,
@@ -482,9 +562,10 @@ export default function CateringReservations() {
             payment_history: updatedRaw.payment_history ?? [],
             special_requests: updatedRaw.inquiry?.message ?? null,
             event_type: updatedRaw.inquiry?.event_type ?? null,
+            event_type_other: updatedRaw.inquiry?.event_type_other ?? null,
             package_name: updatedRaw.package?.name ?? null,
-            venue_type: updatedRaw.inquiry?.venue_type ?? null,
-            ingredient_locks: updatedRaw.ingredient_locks ?? []
+            package_snapshot: updatedRaw.package_snapshot,
+            venue_type: updatedRaw.inquiry?.venue_type ?? null
           });
         }}
       />
@@ -492,22 +573,15 @@ export default function CateringReservations() {
       <Dialog open={Boolean(cancelTarget)} title="Cancel catering reservation" onClose={() => setCancelTarget(null)} panelClassName="max-w-xl">
         {cancelTarget ? (
           <div className="grid gap-4">
-            <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-800">
-              <p className="font-semibold">This will cancel the event, release reserved ingredient locks, and record the cancellation cash amount.</p>
-            </div>
             <label className="grid gap-1 text-sm font-semibold text-slate-700">
               Cancellation reason
-              <textarea className="min-h-24 rounded-md border border-slate-300 px-3 py-2 text-sm" value={cancelReason} onChange={(event) => setCancelReason(event.target.value)} />
-            </label>
-            <label className="grid gap-1 text-sm font-semibold text-slate-700">
-              Recorded cash amount
-              <input className="h-10 rounded-md border border-slate-300 px-3 text-sm" type="number" min="0" step="0.01" value={cancelCashAmount} onChange={(event) => setCancelCashAmount(event.target.value)} />
+              <textarea required className="min-h-24 rounded-md border border-slate-300 px-3 py-2 text-sm" value={cancelReason} onChange={(event) => setCancelReason(event.target.value)} />
             </label>
             <div className="flex justify-end gap-2">
               <Button variant="outline" onClick={() => setCancelTarget(null)}>
                 Close
               </Button>
-              <Button variant="danger" onClick={() => void handleCancel(cancelTarget)} disabled={actionLoading[cancelTarget.id]}>
+              <Button variant="danger" onClick={() => void handleCancel(cancelTarget)} disabled={actionLoading[cancelTarget.id] || !cancelReason.trim()}>
                 {actionLoading[cancelTarget.id] ? "Cancelling..." : "Confirm cancellation"}
               </Button>
             </div>
@@ -519,24 +593,68 @@ export default function CateringReservations() {
         {completionTarget && (
           <div className="grid gap-4 text-sm text-slate-700">
             <div className="rounded-md bg-slate-50 p-4">
-              <p className="font-semibold text-slate-950">This event will be marked complete and release reserved ingredients from inventory.</p>
-              <p className="mt-2">Only events with 100% payment settled can be completed. Ingredient locks are released only when the event is complete, and the reserved stock is permanently deducted.</p>
+              <p className="font-semibold text-slate-950">This event will be marked complete after payment is fully settled.</p>
             </div>
             <div className="rounded-md border border-slate-200 bg-white p-4">
               <p className="text-sm font-semibold uppercase tracking-wide text-slate-500">Event summary</p>
               <p className="mt-3 text-sm text-slate-800">Reference: {completionTarget.reference}</p>
               <p className="text-sm text-slate-800">Customer: {completionTarget.customer_name}</p>
               <p className="text-sm text-slate-800">Date: {formatManilaDate(completionTarget.date)}</p>
-              <p className="text-sm text-slate-800">Remaining balance: ₱{completionTarget.remaining_balance?.toFixed(2) ?? "0.00"}</p>
+              <p className="text-sm text-slate-800">Amount due: ₱{completionTarget.remaining_balance?.toFixed(2) ?? "0.00"}</p>
               <p className="text-sm text-slate-800">Payment status: {completionTarget.payment_status ?? "pending"}</p>
-              <p className="text-sm text-slate-800">Active ingredient locks: {completionTarget.ingredient_locks.filter((lock) => !lock.is_released).length}</p>
             </div>
             <div className="flex justify-end gap-2">
               <Button variant="outline" onClick={() => setCompletionTarget(null)}>
                 Cancel
               </Button>
               <Button variant="danger" onClick={() => void confirmComplete()} disabled={actionLoading[completionTarget.id] || hasOpenPayment(completionTarget)}>
-                {actionLoading[completionTarget.id] ? "Processing..." : "Confirm & Release"}
+                {actionLoading[completionTarget.id] ? "Processing..." : "Confirm completion"}
+              </Button>
+            </div>
+          </div>
+        )}
+      </Dialog>
+
+      <Dialog
+        open={Boolean(approvalTarget)}
+        title={`Approve catering request${approvalTarget ? `: ${approvalTarget.reference}` : ""}`}
+        onClose={() => {
+          if (!approvalTarget || !actionLoading[approvalTarget.id]) setApprovalTarget(null);
+        }}
+      >
+        {approvalTarget && (
+          <div className="grid gap-4 text-sm text-slate-700">
+            <div className="rounded-md bg-slate-50 p-4">
+              <p className="font-semibold text-slate-950">{approvalTarget.customer_name}</p>
+              <p>Package total: ₱{(approvalTarget.package_total ?? approvalTarget.total_price).toFixed(2)}</p>
+              <p>Initial payment received: ₱{(approvalTarget.downpayment_amount ?? 0).toFixed(2)}</p>
+            </div>
+            <label className="grid gap-2 font-medium text-slate-800">
+              Mobilization fee (PHP)
+              <input
+                type="number"
+                min="0"
+                max="1000000"
+                step="0.01"
+                value={mobilizationFeeInput}
+                onChange={(event) => setMobilizationFeeInput(event.target.value)}
+                className="h-10 rounded-md border border-slate-300 px-3"
+                aria-label="Mobilization fee in PHP"
+              />
+            </label>
+            <p className="text-xs text-slate-500">
+              The fee will be added to the remaining balance. Enter 0 if no fee applies.
+            </p>
+            <div className="flex justify-end gap-2">
+              <Button
+                variant="outline"
+                onClick={() => setApprovalTarget(null)}
+                disabled={actionLoading[approvalTarget.id]}
+              >
+                Cancel
+              </Button>
+              <Button onClick={() => void handleApprove()} disabled={actionLoading[approvalTarget.id]}>
+                {actionLoading[approvalTarget.id] ? "Approving..." : "Confirm approval"}
               </Button>
             </div>
           </div>

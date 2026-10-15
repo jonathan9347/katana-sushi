@@ -14,6 +14,9 @@ export type PosHistoryTransaction = {
   subtotal: number;
   tax: number;
   total: number;
+  discount_amount?: number;
+  guest_count?: number;
+  discount_guest_count?: number;
   payment_method: string;
   cash_received?: number | null;
   change_due?: number | null;
@@ -106,6 +109,12 @@ export default function TransactionDetailsModal({
           <div className="ml-auto grid w-full max-w-xs gap-1 text-sm">
             <Line label="Subtotal" value={transaction.subtotal} />
             <Line label="Tax" value={transaction.tax} />
+            {transaction.discount_amount ? (
+              <Line
+                label={`${transaction.discount_guest_count ?? 0} discounted guest(s) × ${money(transaction.guest_count ? transaction.subtotal / transaction.guest_count : 0)} per-guest share`}
+                value={-transaction.discount_amount}
+              />
+            ) : null}
             <Line label="Total" value={transaction.total} strong />
           </div>
 

@@ -1,13 +1,12 @@
 import { Request, Response, NextFunction } from "express";
 import jwt from "jsonwebtoken";
+import { getJwtSecret } from "../lib/jwt";
 
 type TokenPayload = {
   sub: string;
   email: string;
   role: string;
 };
-
-const jwtSecret = process.env.JWT_SECRET ?? "katana-super-secret-key-change-in-production";
 
 function getUserFromRequest(req: Request): TokenPayload | null {
   const bearerToken = req.headers.authorization?.startsWith("Bearer ")
@@ -16,6 +15,11 @@ function getUserFromRequest(req: Request): TokenPayload | null {
   const token = req.cookies?.token ?? bearerToken;
 
   if (!token) {
+    return null;
+  }
+
+  const jwtSecret = getJwtSecret();
+  if (!jwtSecret) {
     return null;
   }
 

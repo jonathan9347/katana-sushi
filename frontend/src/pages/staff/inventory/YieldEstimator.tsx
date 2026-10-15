@@ -1,7 +1,6 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { RefreshCw, Settings } from "lucide-react";
-import MaterialsSummary from "../../../components/inventory/MaterialsSummary";
 import RecipeModal from "../../../components/inventory/RecipeModal";
 import YieldSettingsModal from "../../../components/inventory/YieldSettingsModal";
 import { api } from "../../../lib/api";
@@ -17,11 +16,6 @@ type YieldResponse = {
     affectedProducts: string[];
     suggestion: string;
   };
-  stockSummary: Array<{
-    name: string;
-    current: number;
-    unit: string;
-  }>;
 };
 
 function isAdmin() {
@@ -29,7 +23,6 @@ function isAdmin() {
 }
 
 export default function YieldEstimator() {
-  const [showMaterialsSummary, setShowMaterialsSummary] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [selectedProductId, setSelectedProductId] = useState<string | null>(null);
   const admin = isAdmin();
@@ -67,11 +60,6 @@ export default function YieldEstimator() {
           {yieldQuery.isError && <p className="text-sm text-red-700">Unable to calculate yield.</p>}
           {yieldQuery.data && (
             <div className="grid gap-4">
-              <MaterialsSummary
-                expanded={showMaterialsSummary}
-                onToggle={() => setShowMaterialsSummary((current) => !current)}
-              />
-
               <div className="overflow-x-auto">
                 <Table>
                   <TableHeader>
@@ -95,7 +83,14 @@ export default function YieldEstimator() {
                           </button>
                         </TableCell>
                         <TableCell>{product.maxPortions.toLocaleString()}</TableCell>
-                        <TableCell>{product.limitingIngredient}</TableCell>
+                        <TableCell>
+                          <div>{product.limitingIngredient}</div>
+                          {product.recipeWarnings?.map((warning) => (
+                            <p key={warning} className="mt-1 max-w-sm text-xs font-medium text-amber-800">
+                              {warning}
+                            </p>
+                          ))}
+                        </TableCell>
                         <TableCell>PHP {product.potentialRevenue.toLocaleString()}</TableCell>
                       </TableRow>
                     ))}

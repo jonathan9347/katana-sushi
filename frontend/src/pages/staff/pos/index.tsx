@@ -1,14 +1,12 @@
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
-import { Minus, Plus, Printer, Settings, ShoppingCart, Trash2 } from "lucide-react";
+import { Minus, Plus, Printer, Settings, ShoppingCart, Table2, Trash2 } from "lucide-react";
 import SectionNav, { SectionNavTab } from "../../../components/layout/SectionNav";
 import PaymentModal from "./PaymentModal";
-import StartUnlimitedModal from "./StartUnlimitedModal";
-import UnlimitedSession from "./UnlimitedSession";
 import { PosProduct, usePosCart } from "./store";
 import { api } from "../../../lib/api";
-import { defaultSystemSettings, fetchSystemSettings, getTaxRate, taxLabel, type SystemSettings } from "../../../lib/systemSettings";
+import { defaultSystemSettings, fetchSystemSettings, type SystemSettings } from "../../../lib/systemSettings";
 import { useToast } from "../../../hooks/useToast";
 import { Button } from "../../../components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "../../../components/ui/card";
@@ -37,7 +35,8 @@ type PosTransaction = {
 };
 
 const posTabs: Array<SectionNavTab> = [
-  { id: "new-sale", label: "New Sale", icon: <ShoppingCart className="h-4 w-4" />, to: "/staff/pos", end: true },
+  { id: "new-sale", label: "Takeout Sale", icon: <ShoppingCart className="h-4 w-4" />, to: "/staff/pos", end: true },
+  { id: "dining", label: "Table Service", icon: <Table2 className="h-4 w-4" />, to: "/staff/pos/dining" },
   { id: "history", label: "Transaction History", icon: <Printer className="h-4 w-4" />, to: "/staff/pos/history" },
   { id: "settings", label: "Unlimited Settings", icon: <Settings className="h-4 w-4" />, to: "/staff/pos/unlimited-settings" }
 ];
@@ -65,11 +64,8 @@ function getApiErrorMessage(error: unknown, fallback: string) {
 
 export default function PosPage() {
   const [customerName, setCustomerName] = useState("");
-  const [transactionType, setTransactionType] = useState<"dine_in" | "takeout">("dine_in");
   const [category, setCategory] = useState("All");
   const [paymentOpen, setPaymentOpen] = useState(false);
-  const [startUnlimitedOpen, setStartUnlimitedOpen] = useState(false);
-  const [unlimitedSessionId, setUnlimitedSessionId] = useState<string | null>(null);
   const role = getStoredRole();
   const allowed = role === "admin" || role === "cashier";
   const { addItem, clearCart, decrementItem, items, removeItem } = usePosCart();
@@ -86,15 +82,6 @@ export default function PosPage() {
     enabled: allowed
   });
 
-  const unlimitedSettingsQuery = useQuery({
-    queryKey: ["admin", "unlimited", "settings"],
-    queryFn: async () => {
-      const response = await api.get<{ settings: { price_per_person: number } }>("/api/admin/unlimited/settings");
-      return response.data.settings;
-    },
-    enabled: allowed
-  });
-
   const systemSettingsQuery = useQuery({
     queryKey: ["system-settings"],
     queryFn: fetchSystemSettings,
@@ -106,14 +93,12 @@ export default function PosPage() {
 
   const totals = useMemo(() => {
     const subtotal = items.reduce((sum, item) => sum + Number(item.product.price) * item.quantity, 0);
-    const tax = Number((subtotal * getTaxRate(systemSettings)).toFixed(2));
 
     return {
       subtotal,
-      tax,
-      total: Number((subtotal + tax).toFixed(2))
+      total: Number(subtotal.toFixed(2))
     };
-  }, [items, systemSettings]);
+  }, [items]);
 
   const categories = useMemo(() => {
     const productCategories = new Set((productsQuery.data ?? []).map((product) => product.category));
@@ -128,12 +113,11 @@ export default function PosPage() {
     mutationFn: async (payment: { paymentMethod: "cash" | "gcash" | "bank_transfer"; cashReceived?: number }) => {
       console.debug("Checkout submit", {
         itemCount: items.length,
-        hasToken: Boolean(localStorage.getItem("katana_token")),
-        transactionType
+        hasToken: Boolean(localStorage.getItem("katana_token"))
       });
       const response = await api.post<{ transaction: PosTransaction }>("/api/pos/transaction", {
         customerName,
-        transactionType,
+        transactionType: "takeout",
         paymentMethod: payment.paymentMethod,
         cashReceived: payment.cashReceived,
         items: items.map((item) => ({
@@ -158,26 +142,6 @@ export default function PosPage() {
     onError: (error) => {
       console.error("Checkout failed", error);
       toast(getApiErrorMessage(error, "Unable to complete payment."));
-    }
-  });
-
-  const startUnlimitedMutation = useMutation({
-    mutationFn: async (payload: { paxCount: number }) => {
-      console.debug("Start unlimited submit", {
-        hasToken: Boolean(localStorage.getItem("katana_token")),
-        paxCount: payload.paxCount
-      });
-      const response = await api.post<{ session: { id: string } }>("/api/pos/unlimited/start", payload);
-      return response.data.session;
-    },
-    onSuccess: (session) => {
-      setStartUnlimitedOpen(false);
-      setUnlimitedSessionId(session.id);
-      toast("Unlimited session started.");
-    },
-    onError: (error) => {
-      console.error("Start unlimited failed", error);
-      toast(getApiErrorMessage(error, "Unable to start unlimited session."));
     }
   });
 
@@ -208,7 +172,7 @@ export default function PosPage() {
         <div className="flex items-center justify-between">
           <div>
             <p className="text-sm font-medium uppercase text-red-700">Point of Sale</p>
-            <h1 className="text-3xl font-semibold text-slate-950">New Sale</h1>
+            <h1 className="text-3xl font-semibold text-slate-950">Takeout Sale</h1>
           </div>
           <p className="text-sm text-slate-500">Signed in as {role}</p>
         </div>
@@ -220,11 +184,6 @@ export default function PosPage() {
 
           <section className="min-w-0">
             <div className="grid min-h-[calc(100vh-112px)] gap-4 xl:grid-cols-[7fr_3fr]">
-              {unlimitedSessionId ? (
-                <div className="xl:col-span-2">
-                  <UnlimitedSession sessionId={unlimitedSessionId} onExit={() => setUnlimitedSessionId(null)} />
-                </div>
-              ) : (
               <>
           <Card className="min-w-0">
             <CardHeader className="gap-3">
@@ -295,16 +254,6 @@ export default function PosPage() {
                     onChange={(event) => setCustomerName(event.target.value)}
                   />
                 </label>
-                <label className="grid gap-1 text-sm font-medium text-slate-700">
-                  <span>Order Type</span>
-                  <Select className="h-11" value={transactionType} onChange={(event) => setTransactionType(event.target.value as "dine_in" | "takeout")}>
-                    <option value="dine_in">Dine-in</option>
-                    <option value="takeout">Takeout</option>
-                  </Select>
-                </label>
-                <Button type="button" variant="outline" onClick={() => setStartUnlimitedOpen(true)}>
-                  Start Unlimited
-                </Button>
               </div>
 
               <div className="grid max-h-[38vh] gap-2 overflow-y-auto pr-1">
@@ -354,7 +303,6 @@ export default function PosPage() {
 
               <div className="mt-auto grid gap-2 border-t border-slate-200 pt-4 text-sm">
                 <TotalLine label="Subtotal" value={totals.subtotal} />
-                <TotalLine label={taxLabel(systemSettings)} value={totals.tax} />
                 <TotalLine label="Total" value={totals.total} strong />
                 <Button
                   className="mt-2 min-h-12"
@@ -367,7 +315,6 @@ export default function PosPage() {
             </CardContent>
           </Card>
           </>
-          )}
             </div>
           </section>
         </div>
@@ -379,13 +326,6 @@ export default function PosPage() {
         total={totals.total}
         onClose={() => setPaymentOpen(false)}
         onConfirm={(payment) => checkoutMutation.mutate(payment)}
-      />
-      <StartUnlimitedModal
-        open={startUnlimitedOpen}
-        pending={startUnlimitedMutation.isPending}
-        pricePerPerson={unlimitedSettingsQuery.data?.price_per_person ?? 599}
-        onClose={() => setStartUnlimitedOpen(false)}
-        onStart={(payload) => startUnlimitedMutation.mutate(payload)}
       />
     </main>
   );
@@ -445,7 +385,7 @@ function printReceipt(transaction: PosTransaction, settings: SystemSettings) {
         </table>
         <div class="line"></div>
         <p class="right">Subtotal: ${money(transaction.subtotal)}</p>
-        <p class="right">Tax: ${money(transaction.tax)}</p>
+        ${transaction.tax > 0 ? `<p class="right">Tax: ${money(transaction.tax)}</p>` : ""}
         <p class="right total">Total: ${money(transaction.total)}</p>
         ${
           transaction.payment_method === "cash"

@@ -9,7 +9,9 @@ export default function LowStockAlert() {
   const lowStockQuery = useQuery({
     queryKey: ["inventory", "low-stock"],
     queryFn: async () => {
-      const response = await api.get<{ materials: RawMaterial[] }>("/api/inventory/materials/low-stock");
+      const response = await api.get<{
+        materials: Array<RawMaterial & { available_quantity: string | number }>;
+      }>("/api/inventory/materials/low-stock");
       return response.data.materials;
     }
   });
@@ -31,7 +33,7 @@ export default function LowStockAlert() {
                 <div className="min-w-0 flex-1">
                   <h3 className="font-semibold text-red-950">{material.name}</h3>
                   <p className="mt-1 text-sm text-red-800">
-                    {Number(material.current_stock).toLocaleString()} {material.unit} available. Reorder at{" "}
+                    {Number(material.available_quantity).toLocaleString()} {material.unit} available. Reorder at{" "}
                     {Number(material.reorder_level).toLocaleString()} {material.unit}.
                   </p>
                 </div>

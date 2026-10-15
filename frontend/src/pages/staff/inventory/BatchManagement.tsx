@@ -1,4 +1,4 @@
-import { FormEvent, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AlertTriangle, CalendarClock, PackagePlus } from "lucide-react";
 import { api } from "../../../lib/api";
@@ -58,13 +58,29 @@ function expiryLabel(status: MaterialBatch["expiryStatus"]) {
   }
 }
 
-export default function BatchManagement() {
+export default function BatchManagement({
+  initialExpiringOnly = false,
+  onExpiringOnlyChange
+}: {
+  initialExpiringOnly?: boolean;
+  onExpiringOnlyChange?: (value: boolean) => void;
+}) {
   const [addOpen, setAddOpen] = useState(false);
   const [materialFilter, setMaterialFilter] = useState("");
-  const [showExpiringOnly, setShowExpiringOnly] = useState(false);
+  const [showExpiringOnly, setShowExpiringOnly] = useState(initialExpiringOnly);
   const [batchForm, setBatchForm] = useState<BatchForm>(emptyBatchForm);
   const queryClient = useQueryClient();
   const { toast } = useToast();
+
+  useEffect(() => {
+    setShowExpiringOnly(initialExpiringOnly);
+  }, [initialExpiringOnly]);
+
+  const toggleExpiringOnly = () => {
+    const nextValue = !showExpiringOnly;
+    setShowExpiringOnly(nextValue);
+    onExpiringOnlyChange?.(nextValue);
+  };
 
   const materialsQuery = useQuery({
     queryKey: ["inventory", "materials"],
@@ -99,26 +115,27 @@ export default function BatchManagement() {
 
   const createBatchMutation = useMutation({
     mutationFn: async () =>
-      api.post("/api/inventory/batches", {
+      api.post<{ warning?: string }>("/api/inventory/batches", {
         raw_material_id: batchForm.raw_material_id,
         batch_number: batchForm.batch_number,
         quantity: Number(batchForm.quantity),
-        expiration_date: batchForm.expiration_date || undefined,
-        cost_per_unit: batchForm.cost_per_unit ? Number(batchForm.cost_per_unit) : undefined,
+        expiration_date: batchForm.expiration_date,
+        cost_per_unit: Number(batchForm.cost_per_unit),
         notes: batchForm.notes || undefined
       }),
-    onSuccess: () => {
+    onSuccess: (response) => {
       setAddOpen(false);
       setBatchForm(emptyBatchForm);
       queryClient.invalidateQueries({ queryKey: ["inventory"] });
-      toast("Batch received and stock updated.");
+      toast(response.data.warning ?? "Batch received and stock updated.");
     },
-    onError: (error: unknown) => {
+    onError: async (error: unknown) => {
       const message =
         error && typeof error === "object" && "response" in error
           ? (error as { response?: { data?: { message?: string } } }).response?.data?.message
           : undefined;
-      toast(message ?? "Unable to receive batch.");
+      await queryClient.invalidateQueries({ queryKey: ["inventory"] });
+      toast(message ?? "Could not confirm receipt. Check the batch list before retrying; stock may already have been updated.");
     }
   });
 
@@ -192,7 +209,7 @@ export default function BatchManagement() {
                 </option>
               ))}
             </Select>
-            <Button variant={showExpiringOnly ? "default" : "outline"} onClick={() => setShowExpiringOnly((current) => !current)}>
+            <Button variant={showExpiringOnly ? "default" : "outline"} onClick={toggleExpiringOnly}>
               Expiring within 7 days
             </Button>
             <Button onClick={() => setAddOpen(true)}>
@@ -282,6 +299,7 @@ export default function BatchManagement() {
           <label className="grid gap-1 text-sm">
             Expiration date
             <input
+              required
               type="date"
               className="h-10 rounded-md border border-slate-300 px-3"
               value={batchForm.expiration_date}
@@ -289,8 +307,9 @@ export default function BatchManagement() {
             />
           </label>
           <label className="grid gap-1 text-sm">
-            Cost per unit (optional)
+            Cost per unit
             <input
+              required
               min="0"
               step="0.01"
               type="number"

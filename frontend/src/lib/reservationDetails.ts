@@ -6,6 +6,14 @@ export function formatVenueType(venueType?: string | null) {
   return venueType ?? "N/A";
 }
 
+export function formatCateringEventType(eventType?: string | null, eventTypeOther?: string | null) {
+  if (eventType === "Others") {
+    return eventTypeOther?.trim() ? `Other — ${eventTypeOther.trim()}` : "Other";
+  }
+
+  return eventType ?? "N/A";
+}
+
 export function formatPaymentPlan(paymentPlan?: string | null) {
   return paymentPlan?.replace(/_/g, " ") ?? "N/A";
 }

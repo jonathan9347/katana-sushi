@@ -8,22 +8,20 @@ export default function AdminSettings() {
   const [form, setForm] = useState({
     restaurant_name: settings.restaurant_name,
     timezone: settings.timezone,
-    currency: settings.currency,
-    tax_rate_percent: String(settings.tax_rate_percent)
+    currency: settings.currency
   });
 
   useEffect(() => {
     setForm({
       restaurant_name: settings.restaurant_name,
       timezone: settings.timezone,
-      currency: settings.currency,
-      tax_rate_percent: String(settings.tax_rate_percent)
+      currency: settings.currency
     });
   }, [settings]);
 
   function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    saveSettings({ ...settings, ...form, tax_rate_percent: Number(form.tax_rate_percent) });
+    saveSettings({ ...settings, ...form });
   }
 
   return (
@@ -55,10 +53,6 @@ export default function AdminSettings() {
                 <label className="space-y-2 text-sm text-slate-700">
                   <span>Timezone</span>
                   <input className="w-full rounded-2xl border border-slate-300 bg-slate-50 px-4 py-3" value={form.timezone} onChange={(event) => setForm((current) => ({ ...current, timezone: event.target.value }))} />
-                </label>
-                <label className="space-y-2 text-sm text-slate-700">
-                  <span>Tax Rate</span>
-                  <input className="w-full rounded-2xl border border-slate-300 bg-slate-50 px-4 py-3" min="0" max="100" step="0.01" type="number" value={form.tax_rate_percent} onChange={(event) => setForm((current) => ({ ...current, tax_rate_percent: event.target.value }))} />
                 </label>
                 <label className="space-y-2 text-sm text-slate-700">
                   <span>Currency</span>

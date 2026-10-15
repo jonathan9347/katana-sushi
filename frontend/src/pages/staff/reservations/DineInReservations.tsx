@@ -8,7 +8,11 @@ import { ReservationDetailsModal } from "../../../components/ui/ReservationDetai
 import { QuickStatsWidget } from "../../../components/dinein/QuickStatsWidget";
 import { Button } from "../../../components/ui/button";
 import { Dialog } from "../../../components/ui/dialog";
+import { getApiErrorMessage } from "../../../lib/errors";
+import { fetchReservationRules } from "../../../lib/reservationRules";
+import { useToast } from "../../../hooks/useToast";
 import DineInPayRemainingModal from "./DineInPayRemainingModal";
+import TableSlotAvailabilityEditor from "./TableSlotAvailabilityEditor";
 
 
 type StaffReservation = {
@@ -23,6 +27,8 @@ type StaffReservation = {
   guests: number;
   total_price: number;
   status: string;
+  late_alert?: boolean;
+  late_acknowledged?: boolean;
   payment_plan?: string;
   downpayment_amount?: number;
   remaining_balance?: number;
@@ -37,6 +43,13 @@ type StaffReservation = {
     change_due?: number | null;
     received_at?: string | null;
   }>;
+  ingredient_locks?: Array<{
+    id: string;
+    reserved_quantity: number;
+    unit: string;
+    is_released: boolean;
+    raw_material: { id: string; name: string };
+  }>;
   special_requests?: string | null;
   package_name?: string | null;
   venue_type?: string | null;
@@ -46,8 +59,16 @@ function today() {
   return todayManilaDateKey();
 }
 
+function formatMoneyPHP(value: number) {
+  return `PHP ${value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
+
 function isPending(status: string) {
   return status === "pending" || status === "pending_approval";
+}
+
+function isActive(status: string) {
+  return ["pending", "pending_approval", "confirmed", "approved", "seated", "preparing", "in_progress", "pending_final_payment"].includes(status);
 }
 
 export default function DineInReservations() {
@@ -60,47 +81,67 @@ export default function DineInReservations() {
   const [activeReservation, setActiveReservation] = useState<StaffReservation | null>(null);
   const [cancelTarget, setCancelTarget] = useState<StaffReservation | null>(null);
   const [cancelReason, setCancelReason] = useState("");
-  const [cancelCashAmount, setCancelCashAmount] = useState("0");
-  const [payOpen, setPayOpen] = useState(false);
+  const [preparedQuantities, setPreparedQuantities] = useState<Record<string, string>>({});
+  const [payTarget, setPayTarget] = useState<StaffReservation | null>(null);
   const [actionLoading, setActionLoading] = useState<Record<string, boolean>>({});
-
+  const [approvalError, setApprovalError] = useState("");
+  const { toast } = useToast();
 
   const query = useQuery<StaffReservation[]>({
     queryKey: ["staff-reservations-all"],
     queryFn: async () => {
       const response = await api.get<{ reservations: StaffReservation[] }>("/api/staff/reservations/all");
       return response.data.reservations;
-    }
+    },
+    refetchInterval: 60_000
+  });
+  const reservationRulesQuery = useQuery({
+    queryKey: ["reservation-rules"],
+    queryFn: fetchReservationRules,
+    retry: 1,
+    refetchInterval: 60_000
   });
 
   const dineInReservations = useMemo(
     () => (query.data ?? []).filter((reservation) => reservation.type === "dine_in"),
     [query.data]
   );
+  const activeReservations = useMemo(
+    () => dineInReservations.filter((reservation) => isActive(reservation.status)),
+    [dineInReservations]
+  );
 
   const eventsByDate = useMemo(() => {
     const map = new Map<string, number>();
-    dineInReservations.forEach((reservation) => {
+    activeReservations.forEach((reservation) => {
       const key = manilaDateKey(reservation.date);
       map.set(key, (map.get(key) ?? 0) + 1);
     });
     return map;
-  }, [dineInReservations]);
+  }, [activeReservations]);
+  const lateEventsByDate = useMemo(() => {
+    const map = new Map<string, number>();
+    activeReservations.filter((reservation) => reservation.late_alert).forEach((reservation) => {
+      const key = manilaDateKey(reservation.date);
+      map.set(key, (map.get(key) ?? 0) + 1);
+    });
+    return map;
+  }, [activeReservations]);
 
   const selectedReservations = useMemo(
     () =>
       (eventsByDate.get(selectedDate)
-        ? dineInReservations.filter((reservation) => manilaDateKey(reservation.date) === selectedDate)
+        ? activeReservations.filter((reservation) => manilaDateKey(reservation.date) === selectedDate)
         : []
       ).sort((a, b) => a.time.localeCompare(b.time)),
-    [dineInReservations, eventsByDate, selectedDate]
+    [activeReservations, eventsByDate, selectedDate]
   );
 
   const chronologicalReservations = useMemo(
-    () => [...dineInReservations].sort((a, b) =>
+    () => [...activeReservations].sort((a, b) =>
       manilaDateKey(a.date).localeCompare(manilaDateKey(b.date)) || a.time.localeCompare(b.time)
     ),
-    [dineInReservations]
+    [activeReservations]
   );
 
   const reservationsByMonth = useMemo(() => {
@@ -123,6 +164,12 @@ export default function DineInReservations() {
   );
 
   const pendingCount = dineInReservations.filter((reservation) => isPending(reservation.status)).length;
+  const balanceWatch = activeReservations.filter((reservation) =>
+    ["Balance due", "Balance overdue", "Partial"].includes(reservation.payment_status ?? "") &&
+    Number(reservation.remaining_balance ?? 0) > 0
+  );
+  const lateReservations = activeReservations.filter((reservation) => reservation.late_alert);
+  const lateAlertMinutes = reservationRulesQuery.data?.settings.LATE_ALERT_MINUTES;
 
   function shiftMonth(delta: number) {
     setCursor((current) => new Date(current.getFullYear(), current.getMonth() + delta, 1));
@@ -135,10 +182,66 @@ export default function DineInReservations() {
   }
 
   async function handleApprove(reservation: StaffReservation) {
+    setApprovalError("");
     setActionLoading((current) => ({ ...current, [reservation.id]: true }));
     try {
       await api.put(`/api/staff/reservations/${reservation.id}/approve`, { admin_notes: "Approved by staff" });
       await query.refetch();
+      setActiveReservation(null);
+      toast("Reservation approved and ingredients reserved.");
+    } catch (error) {
+      const message = getApiErrorMessage(error, "Unable to approve this reservation. Please try again.");
+      setApprovalError(message);
+      toast(message);
+    } finally {
+      setActionLoading((current) => ({ ...current, [reservation.id]: false }));
+    }
+  }
+
+  async function handleDecline(reservation: StaffReservation) {
+    const reason = window.prompt("Why is this request being declined?");
+    if (!reason?.trim()) return;
+    setActionLoading((current) => ({ ...current, [reservation.id]: true }));
+    try {
+      await api.put(`/api/staff/reservations/${reservation.id}/reject`, { rejected_reason: reason.trim() });
+      await query.refetch();
+    } finally {
+      setActionLoading((current) => ({ ...current, [reservation.id]: false }));
+    }
+  }
+
+  async function handleNoShow(reservation: StaffReservation) {
+    const reason = window.prompt("Enter the reason for marking this booking as a no-show.");
+    if (!reason?.trim()) return;
+    setActionLoading((current) => ({ ...current, [reservation.id]: true }));
+    try {
+      await api.put(`/api/staff/reservations/${reservation.id}/no-show`, { reason: reason.trim() });
+      await query.refetch();
+    } finally {
+      setActionLoading((current) => ({ ...current, [reservation.id]: false }));
+    }
+  }
+
+  async function handleStillComing(reservation: StaffReservation) {
+    const expectedTime = window.prompt("Expected arrival time (24-hour HH:MM, optional). Leave blank if unknown.", "");
+    if (expectedTime === null) return;
+    const note = window.prompt("Optional note from the customer.", "");
+    if (note === null) return;
+    if (expectedTime.trim() && !/^([01]\d|2[0-3]):[0-5]\d$/.test(expectedTime.trim())) {
+      toast("Enter the expected arrival time as HH:MM, or leave it blank.");
+      return;
+    }
+
+    setActionLoading((current) => ({ ...current, [reservation.id]: true }));
+    try {
+      await api.put(`/api/staff/reservations/${reservation.id}/still-coming`, {
+        ...(expectedTime.trim() ? { expected_time: expectedTime.trim() } : {}),
+        ...(note.trim() ? { note: note.trim() } : {})
+      });
+      await query.refetch();
+      toast("Late alert cleared and decision recorded.");
+    } catch (error) {
+      toast(getApiErrorMessage(error, "Unable to record the late-arrival decision."));
     } finally {
       setActionLoading((current) => ({ ...current, [reservation.id]: false }));
     }
@@ -159,23 +262,39 @@ export default function DineInReservations() {
     try {
       await api.put(`/api/staff/reservations/${reservation.id}/complete`);
       await query.refetch();
+      toast("Reservation completed.");
+    } catch (error) {
+      toast(getApiErrorMessage(error, "Unable to complete this reservation."));
     } finally {
       setActionLoading((current) => ({ ...current, [reservation.id]: false }));
     }
+  }
+
+  function openBalancePayment(reservation: StaffReservation) {
+    setPayTarget(reservation);
+    setActiveReservation(null);
   }
 
   async function handleCancel(reservation: StaffReservation) {
     setActionLoading((current) => ({ ...current, [reservation.id]: true }));
     try {
       await api.put(`/api/staff/reservations/${reservation.id}/cancel`, {
-        reason: cancelReason || "Customer cancelled reservation.",
-        amount: Number(cancelCashAmount || 0),
-        payment_method: "cash",
-        cash_received: Number(cancelCashAmount || 0)
+        reason: cancelReason || "Staff cancelled reservation.",
+        ...( ["seated", "preparing", "in_progress", "pending_final_payment"].includes(reservation.status)
+          ? {
+              prepared_ingredients: (reservation.ingredient_locks ?? [])
+                .filter((lock) => !lock.is_released)
+                .map((lock) => ({
+                  raw_material_id: lock.raw_material.id,
+                  quantity: Number(preparedQuantities[lock.raw_material.id] ?? 0)
+                }))
+                .filter((item) => item.quantity > 0)
+            }
+          : {})
       });
       setCancelTarget(null);
       setCancelReason("");
-      setCancelCashAmount("0");
+      setPreparedQuantities({});
       await query.refetch();
     } finally {
       setActionLoading((current) => ({ ...current, [reservation.id]: false }));
@@ -192,12 +311,15 @@ export default function DineInReservations() {
         ...(isPending(activeReservation.status)
           ? [
               {
-                label: "Approve reservation",
-                onClick: () => {
-                  void handleApprove(activeReservation);
-                  setActiveReservation(null);
-                },
+                label: actionLoading[activeReservation.id] ? "Approving..." : "Approve reservation",
+                onClick: () => void handleApprove(activeReservation),
                 variant: "default" as const,
+                disabled: actionLoading[activeReservation.id]
+              },
+              {
+                label: "Decline request",
+                onClick: () => void handleDecline(activeReservation),
+                variant: "outline" as const,
                 disabled: actionLoading[activeReservation.id]
               }
             ]
@@ -212,31 +334,64 @@ export default function DineInReservations() {
                 },
                 variant: "outline" as const,
                 disabled: actionLoading[activeReservation.id]
-              }
+              },
+              ...(activeReservation.late_alert
+                ? [
+                    {
+                      label: "Customer still coming",
+                      onClick: () => void handleStillComing(activeReservation),
+                      variant: "outline" as const,
+                      disabled: actionLoading[activeReservation.id]
+                    },
+                    {
+                      label: "No-show, release",
+                      onClick: () => void handleNoShow(activeReservation),
+                      variant: "danger" as const,
+                      disabled: actionLoading[activeReservation.id]
+                    }
+                  ]
+                : [])
             ]
           : []),
-        ...(activeReservation.status === "seated"
+        ...(["seated", "preparing", "in_progress"].includes(activeReservation.status)
           ? [
+              ...(Number(activeReservation.remaining_balance ?? 0) > 0
+                ? [{
+                    label: "Collect payment",
+                    onClick: () => openBalancePayment(activeReservation),
+                    variant: "outline" as const,
+                    disabled: actionLoading[activeReservation.id]
+                  }]
+                : []),
               {
-                label: Number(activeReservation.remaining_balance ?? 0) > 0 ? "Complete reservation" : "Complete reservation",
+                label: Number(activeReservation.remaining_balance ?? 0) > 0
+                  ? `Complete — PHP ${Number(activeReservation.remaining_balance).toFixed(2)} remaining. Collect payment first.`
+                  : "Complete reservation",
                 onClick: () => {
                   void handleComplete(activeReservation);
                   setActiveReservation(null);
                 },
                 variant: "danger" as const,
-                disabled: actionLoading[activeReservation.id] || Number(activeReservation.remaining_balance ?? 0) > 0 || activeReservation.payment_status !== "paid"
+                disabled: actionLoading[activeReservation.id] || Number(activeReservation.remaining_balance ?? 0) > 0
               }
             ]
           : []),
         ...(activeReservation.status === "pending_final_payment"
           ? [
               {
-                label: "Pay remaining & complete",
-                onClick: () => {
-                  setPayOpen(true);
-                },
+                label: "Collect payment",
+                onClick: () => openBalancePayment(activeReservation),
                 variant: "danger" as const,
-                disabled: actionLoading[activeReservation.id]
+                disabled: actionLoading[activeReservation.id] || Number(activeReservation.remaining_balance ?? 0) <= 0
+              },
+              {
+                label: "Complete reservation",
+                onClick: () => {
+                  void handleComplete(activeReservation);
+                  setActiveReservation(null);
+                },
+                variant: "outline" as const,
+                disabled: actionLoading[activeReservation.id] || Number(activeReservation.remaining_balance ?? 0) > 0
               }
             ]
           : []),
@@ -246,8 +401,8 @@ export default function DineInReservations() {
                 label: "Cancel reservation",
                 onClick: () => {
                   setCancelTarget(activeReservation);
-                  setCancelReason("Customer cancelled the reservation.");
-                  setCancelCashAmount(String(Number(activeReservation.remaining_balance ?? activeReservation.total_price ?? 0).toFixed(2)));
+                  setCancelReason("Staff cancelled the reservation.");
+                  setPreparedQuantities({});
                 },
                 variant: "danger" as const,
                 disabled: actionLoading[activeReservation.id]
@@ -307,12 +462,75 @@ export default function DineInReservations() {
           </div>
         </div>
 
+        <TableSlotAvailabilityEditor />
+
+        {balanceWatch.length > 0 ? (
+          <section className="mx-4 rounded-xl border border-amber-200 bg-amber-50 p-4 sm:mx-5" aria-label="Bookings with balance due">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <h2 className="font-black text-amber-950">Balance due / overdue</h2>
+              <span className="text-sm font-semibold text-amber-900">
+                {balanceWatch.filter((reservation) => reservation.payment_status === "Balance overdue").length} overdue · {balanceWatch.filter((reservation) => reservation.payment_status !== "Balance overdue").length} due
+              </span>
+            </div>
+            <ul className="mt-3 grid gap-2 md:grid-cols-2">
+              {balanceWatch.slice(0, 6).map((reservation) => (
+                <li key={reservation.id}>
+                  <button
+                    type="button"
+                    className="flex w-full items-center justify-between gap-3 rounded-lg border border-amber-200 bg-white px-3 py-2 text-left text-sm hover:bg-amber-50"
+                    onClick={() => setActiveReservation(reservation)}
+                  >
+                    <span className="min-w-0 truncate font-semibold text-slate-800">{reservation.reference} · {reservation.customer_name}</span>
+                    <span className={`shrink-0 font-bold ${reservation.payment_status === "Balance overdue" ? "text-red-700" : "text-amber-700"}`}>
+                      {reservation.payment_status}
+                    </span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </section>
+        ) : null}
+
+        {lateReservations.length > 0 ? (
+          <section className="mx-4 mt-3 rounded-xl border border-red-300 bg-red-50 p-4 sm:mx-5" aria-label="Late arrival alerts" role="alert">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <h2 className="font-black text-red-950">Late arrival alert</h2>
+              <span className="text-sm font-semibold text-red-900">
+                {lateAlertMinutes === undefined
+                  ? `${lateReservations.length} booking${lateReservations.length === 1 ? "" : "s"} need a late-arrival decision`
+                  : `${lateReservations.length} confirmed booking${lateReservations.length === 1 ? "" : "s"} at least ${lateAlertMinutes} minutes late`}
+              </span>
+            </div>
+            <p className="mt-1 text-sm text-red-900">Contact the customer. This calendar displays alerts but does not change booking status.</p>
+            <ul className="mt-3 grid gap-2 md:grid-cols-2">
+              {lateReservations.map((reservation) => (
+                <li key={reservation.id}>
+                  <button
+                    type="button"
+                    className="flex w-full items-center justify-between gap-3 rounded-lg border border-red-200 bg-white px-3 py-2 text-left text-sm hover:bg-red-50"
+                    onClick={() => setActiveReservation(reservation)}
+                  >
+                    <span className="min-w-0 truncate font-semibold text-slate-800">{reservation.reference} · {reservation.customer_name}</span>
+                    <span className="shrink-0 font-bold text-red-700">{formatTime12(reservation.time)}</span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </section>
+        ) : null}
+
         <div className="grid gap-5 p-4 sm:p-5 xl:grid-cols-[minmax(0,2fr)_minmax(18rem,0.85fr)]">
+          {approvalError ? (
+            <p className="col-span-full rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm font-semibold text-red-800" role="alert">
+              {approvalError}
+            </p>
+          ) : null}
           <aside className="min-w-0 xl:h-[calc(100vh-10rem)] xl:overflow-y-auto xl:overscroll-contain">
             <MiniCalendar
               month={cursor}
               selectedDate={selectedDate}
               eventsByDate={eventsByDate}
+              lateEventsByDate={lateEventsByDate}
               framed
               onPreviousMonth={() => shiftMonth(-1)}
               onNextMonth={() => shiftMonth(1)}
@@ -392,8 +610,15 @@ export default function DineInReservations() {
                                 <span className="block truncate font-semibold text-slate-950">{reservation.customer_name}</span>
                                 <span className="mt-1 block text-sm text-slate-500">{reservation.reference} · {reservation.guests} guests</span>
                               </span>
-                              <span className={`w-fit rounded-full px-2.5 py-1 text-xs font-bold uppercase ${statusSummaryClass(reservation.status)}`}>
-                                {reservation.status.replace(/_/g, " ")}
+                              <span className="flex flex-wrap items-center gap-2">
+                                {reservation.late_alert && (
+                                  <span className="w-fit rounded-full bg-red-100 px-2.5 py-1 text-xs font-bold uppercase text-red-800">
+                                    Late: contact customer
+                                  </span>
+                                )}
+                                <span className={`w-fit rounded-full px-2.5 py-1 text-xs font-bold uppercase ${statusSummaryClass(reservation.status)}`}>
+                                  {reservation.status.replace(/_/g, " ")}
+                                </span>
                               </span>
                             </button>
                           </li>
@@ -412,7 +637,7 @@ export default function DineInReservations() {
       <Dialog open={quickStatsOpen} title="Dine-in quick stats" onClose={() => setQuickStatsOpen(false)} panelClassName="max-w-2xl">
         <QuickStatsWidget
           selectedDate={selectedDate}
-          reservations={dineInReservations}
+          reservations={activeReservations}
           isLoading={query.isLoading}
           onViewPending={() => {
             setQuickStatsOpen(false);
@@ -485,7 +710,8 @@ export default function DineInReservations() {
         title={activeReservation ? `${activeReservation.reference} details` : "Reservation details"}
         reservation={activeReservation}
         onClose={() => setActiveReservation(null)}
-        actions={modalActions}
+        actions={[]}
+        readOnly
         onPaymentRecorded={async () => {
           const result = await query.refetch();
           const updated = result.data?.find((reservation) => reservation.id === activeReservation?.id) ?? null;
@@ -494,19 +720,17 @@ export default function DineInReservations() {
       />
 
       <DineInPayRemainingModal
-        open={payOpen}
-        bookingId={activeReservation?.reference ?? ""}
-        remainingBalance={Number(activeReservation?.remaining_balance ?? 0)}
-        onClose={() => setPayOpen(false)}
+        open={Boolean(payTarget)}
+        reservationId={payTarget?.id ?? ""}
+        bookingDate={payTarget?.date ?? ""}
+        remainingBalance={Number(payTarget?.remaining_balance ?? 0)}
+        onClose={() => setPayTarget(null)}
         onPaid={async () => {
-          setPayOpen(false);
-          if (activeReservation) {
-            await query.refetch();
-            // After paying remaining, mark as completed (backend complete sets status based on payment_plan/balance).
-            await api.put(`/api/staff/reservations/${activeReservation.id}/complete`);
-            await query.refetch();
-          }
-          setActiveReservation(null);
+          const paidReservationId = payTarget?.id;
+          setPayTarget(null);
+          const result = await query.refetch();
+          const updated = result.data?.find((reservation) => reservation.id === paidReservationId) ?? null;
+          setActiveReservation(updated);
         }}
       />
 
@@ -514,16 +738,35 @@ export default function DineInReservations() {
         {cancelTarget ? (
           <div className="grid gap-4">
             <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-800">
-              <p className="font-semibold">This action will cancel the reservation, clear its remaining balance, and record the cancellation cash amount.</p>
+              <p className="font-semibold">This action releases unused ingredient holds and leaves recorded payment entries unchanged. If preparation has started, enter the prepared quantities first.</p>
             </div>
             <label className="grid gap-1 text-sm font-semibold text-slate-700">
               Cancellation reason
               <textarea className="min-h-24 rounded-md border border-slate-300 px-3 py-2 text-sm" value={cancelReason} onChange={(event) => setCancelReason(event.target.value)} />
             </label>
-            <label className="grid gap-1 text-sm font-semibold text-slate-700">
-              Recorded cash amount
-              <input className="h-10 rounded-md border border-slate-300 px-3 text-sm" type="number" min="0" step="0.01" value={cancelCashAmount} onChange={(event) => setCancelCashAmount(event.target.value)} />
-            </label>
+            {["seated", "preparing", "in_progress", "pending_final_payment"].includes(cancelTarget.status) ? (
+              <section className="grid gap-3 rounded-lg border border-amber-200 bg-amber-50 p-4">
+                <h3 className="text-sm font-bold text-amber-900">What was already prepared?</h3>
+                {(cancelTarget.ingredient_locks ?? []).filter((lock) => !lock.is_released).map((lock) => (
+                  <label key={lock.id} className="grid grid-cols-[minmax(0,1fr)_8rem] items-center gap-3 text-sm">
+                    <span className="font-medium text-slate-700">{lock.raw_material.name} (up to {Number(lock.reserved_quantity)} {lock.unit})</span>
+                    <input
+                      className="h-10 rounded-md border border-slate-300 px-3"
+                      type="number"
+                      min="0"
+                      max={Number(lock.reserved_quantity)}
+                      step={["piece", "pieces", "pc", "pcs", "sheet", "sheets"].includes(lock.unit.toLowerCase()) ? "1" : "0.001"}
+                      value={preparedQuantities[lock.raw_material.id] ?? "0"}
+                      onChange={(event) => setPreparedQuantities((current) => ({
+                        ...current,
+                        [lock.raw_material.id]: event.target.value
+                      }))}
+                    />
+                  </label>
+                ))}
+                <p className="text-xs text-amber-800">Prepared quantities will be recorded as wasted; untouched quantities will be released.</p>
+              </section>
+            ) : null}
             <div className="flex justify-end gap-2">
               <Button variant="outline" onClick={() => setCancelTarget(null)}>
                 Close

@@ -1,17 +1,20 @@
-import { FormEvent, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useState } from "react";
 import { Banknote, CheckCircle2, Landmark, Smartphone } from "lucide-react";
 import { Button } from "../../../components/ui/button";
 import { Dialog } from "../../../components/ui/dialog";
 import { api } from "../../../lib/api";
+import { getApiErrorMessage } from "../../../lib/errors";
+import { manilaDateKey, todayManilaDateKey } from "../../../lib/dateTime";
 
 type PaymentMethod = "cash" | "gcash" | "bank_transfer";
 
 type DineInPayRemainingModalProps = {
   open: boolean;
-  bookingId: string;
+  reservationId: string;
+  bookingDate: string;
   remainingBalance: number;
   onClose: () => void;
-  onPaid: () => void;
+  onPaid: () => Promise<void> | void;
 };
 
 function formatMoneyPHP(value: number) {
@@ -40,15 +43,27 @@ function methodLabel(method: PaymentMethod) {
     .join(" ");
 }
 
-export default function DineInPayRemainingModal({ open, bookingId, remainingBalance, onClose, onPaid }: DineInPayRemainingModalProps) {
+export default function DineInPayRemainingModal({ open, reservationId, bookingDate, remainingBalance, onClose, onPaid }: DineInPayRemainingModalProps) {
   const [method, setMethod] = useState<PaymentMethod>("cash");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string>("");
+  const [overrideReason, setOverrideReason] = useState("");
+  const offBookingDate = Boolean(bookingDate) && manilaDateKey(bookingDate) !== todayManilaDateKey();
+  const isAdmin = localStorage.getItem("katana_role")?.toLowerCase() === "admin";
 
-  const canSubmit = remainingBalance > 0 && bookingId.trim().length > 0 && !isSubmitting;
+  const canSubmit = remainingBalance > 0 && reservationId.trim().length > 0 && !isSubmitting &&
+    (!offBookingDate || (isAdmin && overrideReason.trim().length > 0));
+
+  useEffect(() => {
+    if (!open) return;
+    setMethod("cash");
+    setError("");
+    setOverrideReason("");
+    setIsSubmitting(false);
+  }, [open, reservationId]);
 
   const formTitle = useMemo(() => {
-    return `Pay remaining • ${formatMoneyPHP(remainingBalance)}`;
+    return `Collect payment • ${formatMoneyPHP(remainingBalance)}`;
   }, [remainingBalance]);
 
   async function submit(event: FormEvent<HTMLFormElement>) {
@@ -59,25 +74,46 @@ export default function DineInPayRemainingModal({ open, bookingId, remainingBala
     setIsSubmitting(true);
 
     try {
-      await api.post(`/api/reservations/${bookingId}/pay-remaining`, {
-        payment_method: method
+      await api.post(`/api/staff/reservations/${reservationId}/record-payment`, {
+        amount: remainingBalance,
+        payment_method: method,
+        cash_received: remainingBalance,
+        override_reason: offBookingDate ? overrideReason.trim() : undefined
       });
-      onPaid();
-      onClose();
-    } catch (e: any) {
-      setError(e?.response?.data?.message ?? "Unable to process payment.");
+      await onPaid();
+    } catch (e: unknown) {
+      setError(getApiErrorMessage(e, "The payment result could not be confirmed. Check payment history before retrying."));
     } finally {
       setIsSubmitting(false);
     }
   }
 
   return (
-    <Dialog open={open} title={formTitle} onClose={onClose} panelClassName="max-w-2xl">
+    <Dialog open={open} title={formTitle} onClose={isSubmitting ? () => undefined : onClose} panelClassName="max-w-2xl">
       <form className="grid gap-5" onSubmit={submit}>
         <div className="rounded-md border border-slate-200 bg-slate-50 p-4">
-          <p className="text-sm font-medium uppercase text-slate-500">Remaining balance</p>
+          <p className="text-sm font-medium uppercase text-slate-500">Amount due</p>
           <p className="mt-1 text-3xl font-semibold text-slate-950">{formatMoneyPHP(remainingBalance)}</p>
         </div>
+
+        {offBookingDate ? (
+          isAdmin ? (
+            <label className="grid gap-1 text-sm font-semibold text-slate-700">
+              Admin override reason
+              <textarea
+                className="min-h-20 rounded-md border border-slate-300 px-3 py-2"
+                value={overrideReason}
+                onChange={(event) => setOverrideReason(event.target.value)}
+                placeholder="Explain why payment is being recorded outside the booking date"
+              />
+              <span className="text-xs font-normal text-slate-500">The override reason is saved in booking activity.</span>
+            </label>
+          ) : (
+            <p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900" role="alert">
+              Payment is recorded on the booking date. Since that date has passed, an admin must record it with an override reason.
+            </p>
+          )
+        ) : null}
 
         <section className="grid gap-3">
           <h3 className="text-sm font-semibold uppercase tracking-wide text-slate-500">Choose payment method</h3>
@@ -113,7 +149,7 @@ export default function DineInPayRemainingModal({ open, bookingId, remainingBala
           <Button disabled={!canSubmit} type="submit">
             {isSubmitting ? "Processing..." : (
               <span className="inline-flex items-center gap-2">
-                <CheckCircle2 className="h-4 w-4" /> Pay & Complete
+                <CheckCircle2 className="h-4 w-4" /> Collect payment
               </span>
             )}
           </Button>
@@ -122,4 +158,3 @@ export default function DineInPayRemainingModal({ open, bookingId, remainingBala
     </Dialog>
   );
 }
-

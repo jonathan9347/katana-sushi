@@ -3,14 +3,20 @@
   "version": "1.0.0",
   "main": "dist/server.js",
   "scripts": {
-    "dev": "npm run prisma:generate && ts-node-dev --respawn --transpile-only src/server.ts",
+    "dev": "npm run prisma:generate && ts-node-dev --respawn --transpile-only --watch src --ignore-watch node_modules --ignore-watch dist --ignore-watch uploads --ignore-watch backups --ignore-watch logs --ignore-watch prisma --debounce 1000 src/server.ts",
     "build": "npm run prisma:generate && tsc",
     "start": "node dist/server.js",
     "start:prod": "node dist/server.js",
     "prisma:generate": "prisma generate --schema=prisma/schema.prisma",
     "prisma:push": "prisma db push --schema=prisma/schema.prisma",
-    "prisma:seed": "prisma db seed",
-    "prisma:seed:prod": "prisma db seed --schema=prisma/schema.prisma"
+    "prisma:migrate:deploy": "prisma migrate deploy --schema=prisma/schema.prisma",
+    "db:migrate": "npm run prisma:migrate:deploy",
+    "db:seed": "prisma db seed --schema=prisma/schema.prisma",
+    "db:setup": "npm run db:migrate && npm run db:seed",
+    "db:ready": "npm run prisma:generate && npm run db:migrate && npm run build",
+    "prisma:seed": "npm run db:seed",
+    "prisma:seed:prod": "prisma db seed --schema=prisma/schema.prisma",
+    "inventory:reconcile": "ts-node-dev --transpile-only --exit-child src/scripts/reconcile-inventory.ts"
   },
   "prisma": {
     "seed": "ts-node-dev --transpile-only --exit-child prisma/seed.ts"

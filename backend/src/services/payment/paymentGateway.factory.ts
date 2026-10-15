@@ -11,6 +11,10 @@ const GATEWAY_TYPE = process.env.PAYMENT_GATEWAY ?? "fake";
 export class PaymentGatewayFactory {
   private static instance: PaymentGateway | null = null;
 
+  static isFakeGatewayActive(): boolean {
+    return this.getGateway().gatewayName === "fake_gateway";
+  }
+
   static getGateway(): PaymentGateway {
     if (!this.instance) {
       if (USE_REAL_GATEWAY) {

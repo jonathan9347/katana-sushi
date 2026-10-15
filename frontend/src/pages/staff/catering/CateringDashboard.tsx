@@ -1,10 +1,13 @@
 import { useQuery } from "@tanstack/react-query";
-import { CalendarCheck, Inbox, LockKeyhole, RefreshCw } from "lucide-react";
+import { CalendarCheck, Inbox, RefreshCw } from "lucide-react";
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import SectionNav, { SectionNavTab } from "../../../components/layout/SectionNav";
 import { Dialog } from "../../../components/ui/dialog";
-import { formatManilaDate, manilaDateKey, todayManilaDateKey } from "../../../lib/dateTime";
+import { Button } from "../../../components/ui/button";
+import { formatManilaDate, formatTime12, manilaDateKey, todayManilaDateKey } from "../../../lib/dateTime";
+import { formatCateringEventType } from "../../../lib/reservationDetails";
+import { formatCateringPackageSnapshots } from "../../../lib/cateringPackageSnapshot";
 import { api } from "../../../lib/api";
 import { getApiErrorMessage } from "../../../lib/errors";
 import { useToast } from "../../../hooks/useToast";
@@ -18,6 +21,8 @@ type Inquiry = {
   event_date: string;
   headcount: number;
   venue_type: string;
+  event_type?: string | null;
+  event_type_other?: string | null;
   package_type?: string | null;
   message?: string | null;
   status: string;
@@ -27,6 +32,9 @@ type CateringReservation = {
   id: string;
   reservation_id?: string;
   confirmed_date: string;
+  event_time?: string | null;
+  package_total?: number;
+  mobilization_fee?: number;
   total_price: number;
   deposit_paid: number;
   remaining_balance: number;
@@ -35,13 +43,7 @@ type CateringReservation = {
   status: string;
   inquiry?: Inquiry | null;
   package?: { name: string; pricePerPerson: number } | null;
-  ingredient_locks: Array<{
-    id: string;
-    reserved_quantity: number;
-    unit: string;
-    is_released: boolean;
-    raw_material: { name: string; current_stock: string };
-  }>;
+  package_snapshot?: unknown;
 };
 
 function dateText(date: string) {
@@ -52,20 +54,21 @@ function money(value: number) {
   return new Intl.NumberFormat("en-PH", { style: "currency", currency: "PHP" }).format(value);
 }
 
-type CateringTab = "pending" | "calendar" | "confirmed" | "locks";
+type CateringTab = "pending" | "calendar" | "confirmed";
 
 function cateringTabs(pendingCount: number, reservationCount: number): Array<SectionNavTab<CateringTab>> {
   return [
     { id: "pending", label: `Pending Reservations (${pendingCount})`, icon: <CalendarCheck className="h-4 w-4" /> },
     { id: "calendar", label: "Calendar", icon: <CalendarCheck className="h-4 w-4" /> },
-    { id: "confirmed", label: `Confirmed Events (${reservationCount})`, icon: <CalendarCheck className="h-4 w-4" /> },
-    { id: "locks", label: "Ingredient Locker", icon: <LockKeyhole className="h-4 w-4" /> }
+    { id: "confirmed", label: `Confirmed Events (${reservationCount})`, icon: <CalendarCheck className="h-4 w-4" /> }
   ];
 }
 
 export default function CateringDashboard() {
   const [searchParams] = useSearchParams();
   const [activeTab, setActiveTab] = useState<CateringTab>("pending");
+  const [approvalTarget, setApprovalTarget] = useState<CateringReservation | null>(null);
+  const [mobilizationFeeInput, setMobilizationFeeInput] = useState("0");
   const [completionTarget, setCompletionTarget] = useState<CateringReservation | null>(null);
   const [actionLoading, setActionLoading] = useState<Record<string, boolean>>({});
   const { toast } = useToast();
@@ -109,14 +112,30 @@ export default function CateringDashboard() {
   useEffect(() => {
     const tab = searchParams.get("tab");
 
-    if (tab === "confirmed" || tab === "locks" || tab === "pending" || tab === "calendar") {
+    if (tab === "confirmed" || tab === "pending" || tab === "calendar") {
       setActiveTab(tab as CateringTab);
     }
   }, [searchParams]);
 
-  async function approvePendingReservation(id: string) {
-    await api.put(`/api/staff/catering/reservations/${id}/approve`);
-    await Promise.all([pendingReservations.refetch(), reservations.refetch()]);
+  async function approvePendingReservation() {
+    if (!approvalTarget) return;
+    const mobilizationFee = Number(mobilizationFeeInput.trim());
+    if (!mobilizationFeeInput.trim() || !Number.isFinite(mobilizationFee) || mobilizationFee < 0 || mobilizationFee > 1_000_000) {
+      toast("Enter a fee between ₱0 and ₱1,000,000.");
+      return;
+    }
+    try {
+      setActionLoading((current) => ({ ...current, [approvalTarget.id]: true }));
+      await api.put(`/api/staff/catering/reservations/${approvalTarget.id}/approve`, {
+        mobilization_fee: mobilizationFee
+      });
+      await Promise.all([pendingReservations.refetch(), reservations.refetch()]);
+      setApprovalTarget(null);
+    } catch (error) {
+      toast(getApiErrorMessage(error, "Unable to approve the catering reservation."));
+    } finally {
+      setActionLoading((current) => ({ ...current, [approvalTarget.id]: false }));
+    }
   }
 
   async function startEvent(id: string) {
@@ -136,20 +155,6 @@ export default function CateringDashboard() {
 
   function hasOpenPayment(reservation: CateringReservation) {
     return Number(reservation.remaining_balance) > 0 || reservation.final_payment_status !== "paid";
-  }
-
-  async function recordCashPayment(reservation: CateringReservation) {
-    setActionLoading((current) => ({ ...current, [reservation.id]: true }));
-    try {
-      await api.post(`/api/staff/catering/reservations/${reservation.id}/record-cash-payment`, {
-        amount: reservation.remaining_balance,
-        received_by: "Staff"
-      });
-      await reservations.refetch();
-      await pendingReservations.refetch();
-    } finally {
-      setActionLoading((current) => ({ ...current, [reservation.id]: false }));
-    }
   }
 
   async function complete(id: string) {
@@ -203,15 +208,34 @@ export default function CateringDashboard() {
                   <h3 className="text-lg font-bold text-slate-950">
                     {reservation.reservation_id ?? "No ID"} | {reservation.package?.name ?? reservation.inquiry?.package_type?.replace("_", " ") ?? "Package"}
                   </h3>
+                  {formatCateringPackageSnapshots(reservation.package_snapshot).map((line) => (
+                    <p key={line} className="mt-1 text-sm font-semibold text-slate-700">{line}</p>
+                  ))}
                   <p className="mt-1 text-sm text-slate-700">
                     {reservation.inquiry ? `${reservation.inquiry.customer_name} | ${reservation.inquiry.customer_phone} | ${reservation.inquiry.customer_email}` : "No inquiry details"}
                   </p>
                   <p className="mt-2 text-sm text-slate-600">
                     {reservation.inquiry ? `${dateText(reservation.confirmed_date)} · ${reservation.inquiry.headcount} pax` : "Details pending"}
                   </p>
+                  <p className="mt-1 text-sm text-slate-600">
+                    Package total: {money(reservation.package_total ?? reservation.total_price)} · Paid: {money(reservation.deposit_paid)}
+                  </p>
+                  {reservation.event_time && <p className="mt-1 text-sm text-slate-600">Event time: {formatTime12(reservation.event_time)}</p>}
+                  {reservation.inquiry?.event_type && (
+                    <p className="mt-1 text-sm text-slate-600">
+                      Event type: {formatCateringEventType(reservation.inquiry.event_type, reservation.inquiry.event_type_other)}
+                    </p>
+                  )}
                   <div className="mt-4 flex flex-wrap gap-3">
-                    <button onClick={() => void approvePendingReservation(reservation.id)} className="rounded-md bg-emerald-700 px-4 py-2 text-sm font-bold text-white">
-                      Approve Event
+                    <button
+                      onClick={() => {
+                        setMobilizationFeeInput("0");
+                        setApprovalTarget(reservation);
+                      }}
+                      className="rounded-md bg-emerald-700 px-4 py-2 text-sm font-bold text-white disabled:opacity-50"
+                      disabled={actionLoading[reservation.id]}
+                    >
+                      {actionLoading[reservation.id] ? "Approving..." : "Approve Event"}
                     </button>
                   </div>
                 </article>
@@ -271,14 +295,23 @@ export default function CateringDashboard() {
                           <div>
                             <p className="text-lg font-bold text-slate-950">{reservation.reservation_id ?? 'No ID'}</p>
                             <p className="mt-1 text-sm text-slate-700">{reservation.package?.name ?? reservation.inquiry?.package_type?.replace('_', ' ') ?? 'Custom'}</p>
+                            {formatCateringPackageSnapshots(reservation.package_snapshot).map((line) => (
+                              <p key={line} className="text-sm font-semibold text-slate-700">{line}</p>
+                            ))}
                           </div>
                           <div className="grid gap-2 text-sm text-slate-700">
                             <p>{reservation.inquiry?.customer_name ?? 'Unknown customer'}</p>
+                            {reservation.event_time && <p>Event time: {formatTime12(reservation.event_time)}</p>}
+                            {reservation.inquiry?.event_type && (
+                              <p>Event type: {formatCateringEventType(reservation.inquiry.event_type, reservation.inquiry.event_type_other)}</p>
+                            )}
                             <p>{reservation.inquiry?.headcount ?? '—'} pax</p>
                             <p>Status: {reservation.status.replace('_', ' ')}</p>
-                            <p>Total: {money(reservation.total_price)}</p>
-                            <p>Deposit: {money(reservation.deposit_paid)}</p>
-                            <p>Remaining: {money(reservation.remaining_balance)}</p>
+                            <p>Package total: {money(reservation.package_total ?? reservation.total_price)}</p>
+                            {Number(reservation.mobilization_fee ?? 0) > 0 && <p>Mobilization fee: {money(reservation.mobilization_fee ?? 0)}</p>}
+                            <p>Approved total: {money(reservation.total_price)}</p>
+                            <p>Paid: {money(reservation.deposit_paid)}</p>
+                            <p>Amount due: {money(reservation.remaining_balance)}</p>
                           </div>
                         </div>
                       </article>
@@ -302,18 +335,18 @@ export default function CateringDashboard() {
                     {reservation.reservation_id ?? reservation.inquiry?.inquiry_id ?? "No ID"} | {dateText(reservation.confirmed_date)} | {reservation.inquiry?.headcount ?? "—"} pax
                   </h3>
                   <p className="mt-1 text-sm text-slate-700">
-                    Package: {reservation.package?.name ?? reservation.inquiry?.package_type?.replace("_", " ") ?? "Custom"} | Deposit: {money(reservation.deposit_paid)} | Status: {reservation.status}
+                    Package: {reservation.package?.name ?? reservation.inquiry?.package_type?.replace("_", " ") ?? "Custom"} | Paid: {money(reservation.deposit_paid)} | Status: {reservation.status}
+                  </p>
+                  {formatCateringPackageSnapshots(reservation.package_snapshot).map((line) => (
+                    <p key={line} className="mt-1 text-sm font-semibold text-slate-700">{line}</p>
+                  ))}
+                  <p className="mt-1 text-sm text-slate-600">
+                    {reservation.event_time ? `Event time: ${formatTime12(reservation.event_time)}` : "Event time: N/A"}
+                    {reservation.inquiry?.event_type
+                      ? ` · ${formatCateringEventType(reservation.inquiry.event_type, reservation.inquiry.event_type_other)}`
+                      : ""}
                   </p>
                   <div className="mt-4 flex flex-wrap gap-3">
-                    {reservation.status === "confirmed" && reservation.remaining_balance > 0 ? (
-                      <button
-                        onClick={() => void recordCashPayment(reservation)}
-                        className="rounded-md bg-amber-600 px-4 py-2 text-sm font-bold text-white hover:bg-amber-700 disabled:opacity-50"
-                        disabled={actionLoading[reservation.id]}
-                      >
-                        {actionLoading[reservation.id] ? "Processing..." : "Record cash payment"}
-                      </button>
-                    ) : null}
                     {reservation.status === "confirmed" ? (
                       <button
                         onClick={() => void startEvent(reservation.id)}
@@ -332,9 +365,6 @@ export default function CateringDashboard() {
                         {actionLoading[reservation.id] ? "Processing..." : hasOpenPayment(reservation) ? "Pending payment" : "Complete Event"}
                       </button>
                     ) : null}
-                    <button onClick={() => setActiveTab("locks")} className="rounded-md border border-slate-300 px-4 py-2 text-sm font-bold text-slate-800">
-                      View Locks
-                    </button>
                   </div>
                 </article>
               ))}
@@ -343,42 +373,50 @@ export default function CateringDashboard() {
           </section>
           )}
 
-          {activeTab === "locks" && (
-          <section>
-            <h2 className="mb-3 text-sm font-bold uppercase tracking-wide text-slate-600">Ingredient Locker</h2>
-            <div className="space-y-4">
-              {reservations.data?.flatMap((reservation) =>
-                reservation.ingredient_locks.length > 0 ? (
-                  <article key={`${reservation.id}-locks`} className="rounded-lg border border-slate-200 p-5">
-                    <h3 className="font-bold text-slate-950">
-                      {dateText(reservation.confirmed_date)} {reservation.inquiry?.venue_type ?? ""}
-                    </h3>
-                    <ul className="mt-3 space-y-1 text-sm text-slate-700">
-                      {reservation.ingredient_locks
-                        .slice()
-                        .sort((a, b) => {
-                          if (a.is_released !== b.is_released) {
-                            return a.is_released ? 1 : -1;
-                          }
-                          return a.raw_material.name.localeCompare(b.raw_material.name);
-                        })
-                        .map((lock) => (
-                          <li key={lock.id}>
-                            {lock.raw_material.name}: {lock.reserved_quantity}{lock.unit} {lock.is_released ? "released" : "reserved"}
-                          </li>
-                        ))}
-                    </ul>
-                  </article>
-                ) : []
-              )}
-              {reservations.data?.every((reservation) => reservation.ingredient_locks.length === 0) && (
-                <p className="rounded-md bg-slate-50 p-4 text-sm text-slate-600">No ingredient locks have been set.</p>
-              )}
-            </div>
-          </section>
-          )}
         </div>
       </section>
+
+      <Dialog
+        open={Boolean(approvalTarget)}
+        title={`Approve catering request${approvalTarget?.reservation_id ? `: ${approvalTarget.reservation_id}` : ""}`}
+        onClose={() => {
+          if (!approvalTarget || !actionLoading[approvalTarget.id]) setApprovalTarget(null);
+        }}
+      >
+        {approvalTarget && (
+          <div className="grid gap-4 text-sm text-slate-700">
+            <div className="rounded-md bg-slate-50 p-4">
+              <p className="font-semibold text-slate-950">{approvalTarget.inquiry?.customer_name ?? "Customer"}</p>
+              <p>Package total: {money(approvalTarget.package_total ?? approvalTarget.total_price)}</p>
+              <p>Initial payment received: {money(approvalTarget.deposit_paid)}</p>
+            </div>
+            <label className="grid gap-2 font-medium text-slate-800">
+              Mobilization fee (PHP)
+              <input
+                type="number"
+                min="0"
+                max="1000000"
+                step="0.01"
+                value={mobilizationFeeInput}
+                onChange={(event) => setMobilizationFeeInput(event.target.value)}
+                className="h-10 rounded-md border border-slate-300 px-3"
+                aria-label="Mobilization fee in PHP"
+              />
+            </label>
+            <p className="text-xs text-slate-500">
+              The fee will be added to the remaining balance. Enter 0 if no fee applies.
+            </p>
+            <div className="flex justify-end gap-2">
+              <Button variant="outline" onClick={() => setApprovalTarget(null)} disabled={Boolean(approvalTarget && actionLoading[approvalTarget.id])}>
+                Cancel
+              </Button>
+              <Button onClick={() => void approvePendingReservation()} disabled={Boolean(actionLoading[approvalTarget.id])}>
+                {actionLoading[approvalTarget.id] ? "Approving..." : "Confirm approval"}
+              </Button>
+            </div>
+          </div>
+        )}
+      </Dialog>
 
       <Dialog
         open={Boolean(completionTarget)}
@@ -393,27 +431,10 @@ export default function CateringDashboard() {
               </p>
               <p>{completionTarget.inquiry?.headcount ?? "—"} pax | {money(completionTarget.total_price)}</p>
             </div>
-            <div>
-              <p className="font-semibold text-slate-950">This will:</p>
-              <ul className="mt-2 list-disc space-y-1 pl-5">
-                <li>Release all ingredient locks for this event.</li>
-                <li>Deduct reserved ingredients from inventory permanently.</li>
-                <li>Mark the event as completed.</li>
-              </ul>
-            </div>
-            <div className="rounded-md border border-slate-200 bg-white p-3">
-              <p className="font-semibold text-slate-950">Reserved ingredients to deduct</p>
-              <ul className="mt-2 space-y-1">
-                {completionTarget.ingredient_locks.filter((lock) => !lock.is_released).map((lock) => (
-                  <li key={lock.id}>{lock.raw_material.name}: {lock.reserved_quantity} {lock.unit}</li>
-                ))}
-                {completionTarget.ingredient_locks.every((lock) => lock.is_released) && <li>No active locks remain.</li>}
-              </ul>
-            </div>
             <div className="flex flex-col gap-3">
               {hasOpenPayment(completionTarget) ? (
                 <div className="rounded-md bg-amber-50 p-3 text-sm text-amber-900">
-                  This event cannot be completed until the remaining balance is fully settled. Please record payment first.
+                  This event cannot be completed until the amount due is fully settled. Please record payment first.
                 </div>
               ) : null}
               <div className="flex justify-end gap-2">
@@ -421,7 +442,7 @@ export default function CateringDashboard() {
                   Cancel
                 </button>
                 <button onClick={() => void complete(completionTarget.id)} className="rounded-md bg-red-700 px-4 py-2 text-sm font-bold text-white" disabled={actionLoading[completionTarget.id] || hasOpenPayment(completionTarget)}>
-                  {actionLoading[completionTarget.id] ? "Processing..." : "Confirm & Release"}
+                  {actionLoading[completionTarget.id] ? "Processing..." : "Confirm completion"}
                 </button>
               </div>
             </div>

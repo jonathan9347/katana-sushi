@@ -1,7 +1,29 @@
+import axios from "axios";
 import { FormEvent, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { api } from "../../lib/api";
 import { Button } from "../../components/ui/button";
+
+function loginErrorMessage(error: unknown) {
+  if (axios.isAxiosError<{ message?: unknown }>(error)) {
+    if (error.response?.status === 401) {
+      return "Invalid email or password. Please try again.";
+    }
+
+    const responseMessage = error.response?.data?.message;
+    if (typeof responseMessage === "string" && responseMessage.trim()) {
+      return responseMessage;
+    }
+
+    if (!error.response) {
+      return error.code === "ECONNABORTED" || error.code === "ETIMEDOUT"
+        ? "The sign-in request timed out. Please try again."
+        : "Unable to reach the sign-in server. Check your connection and try again.";
+    }
+  }
+
+  return "Unable to sign in. Please try again.";
+}
 
 function defaultRouteForRole(role: string) {
   const normalized = role.toLowerCase();
@@ -48,8 +70,8 @@ export default function Login() {
       localStorage.setItem("katana_user", JSON.stringify(response.data.user));
       setMessage(`Logged in as ${response.data.user.name}`);
       navigate(defaultRouteForRole(response.data.user.role));
-    } catch {
-      setMessage("Invalid credentials. Please try again.");
+    } catch (error) {
+      setMessage(loginErrorMessage(error));
     }
   }
 
