@@ -4,6 +4,7 @@ import { Prisma } from "@prisma/client";
 import { z } from "zod";
 import { prisma } from "../lib/prisma";
 import { getBeverageStockMaterialName } from "../lib/beverageStock";
+import { normalizeTableStatus } from "../services/tableStatus.service";
 import { roleGuard } from "../middleware/roleGuard";
 import {
   assertBatchQuantitiesMatchOnHand,
@@ -237,7 +238,7 @@ router.get(
         id: table.id,
         table_number: table.table_number,
         capacity: table.capacity,
-        status: table.status,
+        status: normalizeTableStatus(table.status),
         active_session: table.dining_sessions[0] ?? null
       }))
     });
@@ -291,7 +292,7 @@ router.post(
         where: { table_id: table.id, status: "active" },
         select: { id: true }
       });
-      if (active || table.status === "occupied") {
+      if (active || normalizeTableStatus(table.status) === "occupied") {
         throw new InventoryError("This table already has an active dining session.", "TABLE_OCCUPIED", 409);
       }
       const created = await tx.diningTableSession.create({
@@ -334,7 +335,7 @@ router.patch(
       }
       const destination = await tx.table.findUnique({ where: { id: body.tableId } });
       if (!destination) throw new InventoryError("Destination table not found.", "TABLE_NOT_FOUND", 404);
-      if (destination.status === "occupied" || await tx.diningTableSession.findFirst({
+      if (normalizeTableStatus(destination.status) === "occupied" || await tx.diningTableSession.findFirst({
         where: { table_id: body.tableId, status: "active" },
         select: { id: true }
       })) {

@@ -10,15 +10,15 @@ datasource db {
 }
 
 model User {
-  id            String   @id @default(cuid())
-  email         String   @unique
+  id            String    @id @default(cuid())
+  email         String    @unique
   password_hash String
   role          String
   name          String
-  is_active     Boolean  @default(true)
+  is_active     Boolean   @default(true)
   last_login    DateTime?
-  created_at    DateTime @default(now())
-  updated_at    DateTime @updatedAt
+  created_at    DateTime  @default(now())
+  updated_at    DateTime  @updatedAt
 
   inventory_transactions InventoryTransaction[]
   inventory_movements    InventoryMovement[]
@@ -33,29 +33,29 @@ model User {
 }
 
 model RawMaterial {
-  id            String   @id @default(cuid())
-  name          String   @unique
-  category      String   @default("Raw Material")
-  unit          String
+  id                   String   @id @default(cuid())
+  name                 String   @unique
+  category             String   @default("Raw Material")
+  unit                 String
   current_stock        BigInt   @db.BigInt
   reorder_level        BigInt   @db.BigInt
   cost_per_unit        Decimal  @db.Decimal(18, 8)
   cost_source_amount   Decimal? @db.Decimal(18, 8)
   cost_source_quantity BigInt?  @db.BigInt
   cost_source_unit     String?
-  is_deleted    Boolean  @default(false)
-  created_at    DateTime @default(now())
-  updated_at    DateTime @updatedAt
+  is_deleted           Boolean  @default(false)
+  created_at           DateTime @default(now())
+  updated_at           DateTime @updatedAt
 
-  recipe_ingredients        RecipeIngredient[]
-  inventory_transactions    InventoryTransaction[]
-  inventory_movements       InventoryMovement[]
-  catering_ingredient_locks CateringIngredientLock[]
+  recipe_ingredients           RecipeIngredient[]
+  inventory_transactions       InventoryTransaction[]
+  inventory_movements          InventoryMovement[]
+  catering_ingredient_locks    CateringIngredientLock[]
   reservation_ingredient_locks ReservationIngredientLock[]
-  batches                   MaterialBatch[]
-  inventory_snapshots       InventorySnapshot[]
-  takeout_ingredient_locks  TakeoutIngredientLock[]
-  dine_in_ingredient_locks  DineInIngredientLock[]
+  batches                      MaterialBatch[]
+  inventory_snapshots          InventorySnapshot[]
+  takeout_ingredient_locks     TakeoutIngredientLock[]
+  dine_in_ingredient_locks     DineInIngredientLock[]
 
   @@map("raw_materials")
 }
@@ -135,11 +135,11 @@ model SellingProduct {
 }
 
 model Recipe {
-  id                   String  @id @default(cuid())
+  id                   String @id @default(cuid())
   selling_product_id   String
-  total_yield_quantity BigInt  @db.BigInt
+  total_yield_quantity BigInt @db.BigInt
   yield_unit           String
-  status               String  @default("recipe not confirmed")
+  status               String @default("recipe not confirmed")
 
   selling_product    SellingProduct     @relation(fields: [selling_product_id], references: [id], onDelete: Cascade)
   recipe_ingredients RecipeIngredient[]
@@ -148,10 +148,10 @@ model Recipe {
 }
 
 model RecipeIngredient {
-  id                 String  @id @default(cuid())
+  id                 String @id @default(cuid())
   recipe_id          String
   raw_material_id    String
-  quantity_per_yield BigInt  @db.BigInt
+  quantity_per_yield BigInt @db.BigInt
   unit               String
 
   recipe       Recipe      @relation(fields: [recipe_id], references: [id], onDelete: Cascade)
@@ -180,21 +180,21 @@ model InventoryTransaction {
 }
 
 model InventoryMovement {
-  id                String   @id @default(cuid())
-  raw_material_id   String
-  batch_id          String?
-  source_type       String?
-  source_reference  String?
-  action            String
-  quantity          BigInt   @db.BigInt
-  unit              String
-  quantity_before   BigInt?  @db.BigInt
-  quantity_after    BigInt?  @db.BigInt
-  reserved_before   BigInt?  @db.BigInt
-  reserved_after    BigInt?  @db.BigInt
-  actor_id          String?
-  note              String?
-  created_at        DateTime @default(now())
+  id               String   @id @default(cuid())
+  raw_material_id  String
+  batch_id         String?
+  source_type      String?
+  source_reference String?
+  action           String
+  quantity         BigInt   @db.BigInt
+  unit             String
+  quantity_before  BigInt?  @db.BigInt
+  quantity_after   BigInt?  @db.BigInt
+  reserved_before  BigInt?  @db.BigInt
+  reserved_after   BigInt?  @db.BigInt
+  actor_id         String?
+  note             String?
+  created_at       DateTime @default(now())
 
   raw_material RawMaterial    @relation(fields: [raw_material_id], references: [id], onDelete: Restrict)
   batch        MaterialBatch? @relation(fields: [batch_id], references: [id], onDelete: Restrict)
@@ -207,31 +207,31 @@ model InventoryMovement {
 }
 
 model PosTransaction {
-  id                 String   @id @default(cuid())
-  transaction_number String   @unique
-  customer_name      String?
-  dining_session_id  String?  @unique
-  transaction_type   String
-  subtotal           Float
-  tax                Float
-  unlimited_amount   Float    @default(0)
-  leftover_amount    Float    @default(0)
-  discount_amount    Float    @default(0)
-  guest_count        Int      @default(0)
-  discount_guest_count Int    @default(0)
-  total              Float
-  payment_method     String
-  cash_received      Float?
-  change_due         Float?
-  status             String
-  cashier_id         String
-  created_at         DateTime @default(now())
-  updated_at         DateTime @updatedAt
+  id                   String   @id @default(cuid())
+  transaction_number   String   @unique
+  customer_name        String?
+  dining_session_id    String?  @unique
+  transaction_type     String
+  subtotal             Float
+  tax                  Float
+  unlimited_amount     Float    @default(0)
+  leftover_amount      Float    @default(0)
+  discount_amount      Float    @default(0)
+  guest_count          Int      @default(0)
+  discount_guest_count Int      @default(0)
+  total                Float
+  payment_method       String
+  cash_received        Float?
+  change_due           Float?
+  status               String
+  cashier_id           String
+  created_at           DateTime @default(now())
+  updated_at           DateTime @updatedAt
 
-  cashier User      @relation(fields: [cashier_id], references: [id])
-  items   PosItem[]
-  charges PosTransactionCharge[]
-  dining_session DiningTableSession? @relation(fields: [dining_session_id], references: [id], onDelete: SetNull)
+  cashier        User                   @relation(fields: [cashier_id], references: [id])
+  items          PosItem[]
+  charges        PosTransactionCharge[]
+  dining_session DiningTableSession?    @relation(fields: [dining_session_id], references: [id], onDelete: SetNull)
 
   @@map("pos_transactions")
 }
@@ -255,7 +255,7 @@ model PosTransactionCharge {
   id             String   @id @default(cuid())
   transaction_id String
   line_type      String
-  name_snapshot String
+  name_snapshot  String
   quantity       Int
   unit_price     Float
   total_price    Float
@@ -268,30 +268,30 @@ model PosTransactionCharge {
 }
 
 model TakeoutOrder {
-  id                         String   @id @default(cuid())
-  order_number               String   @unique
-  idempotency_key            String   @unique
-  customer_name              String
-  customer_phone             String   @db.VarChar(11)
-  status                     String   @default("pending_approval")
-  payment_plan               String
-  payment_status             String   @default("unpaid")
-  payment_method             String?
-  payment_attempt            Int      @default(0)
-  payment_intent_reference_id String?  @unique
-  payment_transaction_id     String?  @unique
-  payment_expires_at         DateTime?
-  subtotal                   Float
-  total                      Float
-  paid_at                    DateTime?
-  prepared_at                DateTime?
-  ready_at                   DateTime?
-  released_at                DateTime?
-  cancelled_at               DateTime?
-  created_at                 DateTime @default(now())
-  updated_at                 DateTime @updatedAt
+  id                          String    @id @default(cuid())
+  order_number                String    @unique
+  idempotency_key             String    @unique
+  customer_name               String
+  customer_phone              String    @db.VarChar(11)
+  status                      String    @default("pending_approval")
+  payment_plan                String
+  payment_status              String    @default("unpaid")
+  payment_method              String?
+  payment_attempt             Int       @default(0)
+  payment_intent_reference_id String?   @unique
+  payment_transaction_id      String?   @unique
+  payment_expires_at          DateTime?
+  subtotal                    Float
+  total                       Float
+  paid_at                     DateTime?
+  prepared_at                 DateTime?
+  ready_at                    DateTime?
+  released_at                 DateTime?
+  cancelled_at                DateTime?
+  created_at                  DateTime  @default(now())
+  updated_at                  DateTime  @updatedAt
 
-  items           TakeoutOrderItem[]
+  items            TakeoutOrderItem[]
   ingredient_locks TakeoutIngredientLock[]
 
   @@index([status, created_at])
@@ -309,7 +309,7 @@ model TakeoutOrderItem {
   total_price        Float
   created_at         DateTime @default(now())
 
-  order           TakeoutOrder   @relation(fields: [order_id], references: [id], onDelete: Cascade)
+  order           TakeoutOrder    @relation(fields: [order_id], references: [id], onDelete: Cascade)
   selling_product SellingProduct? @relation(fields: [selling_product_id], references: [id], onDelete: SetNull)
 
   @@index([order_id])
@@ -336,19 +336,19 @@ model TakeoutIngredientLock {
 }
 
 model Table {
-  id           String   @id @default(cuid())
-  table_number Int      @unique
+  id           String    @id @default(cuid())
+  table_number Int       @unique
   capacity     Int
   status       String
-  is_archived  Boolean  @default(false)
+  is_archived  Boolean   @default(false)
   archived_at  DateTime?
-  created_at   DateTime @default(now())
+  created_at   DateTime  @default(now())
 
-  reservations        Reservation[]
+  reservations            Reservation[]
   reservation_assignments ReservationTableAssignment[]
-  unlimited_sessions   UnlimitedSession[]
-  dining_sessions     DiningTableSession[]
-  table_memberships   TableCombinationMember[]
+  unlimited_sessions      UnlimitedSession[]
+  dining_sessions         DiningTableSession[]
+  table_memberships       TableCombinationMember[]
 
   @@map("tables")
 }
@@ -362,19 +362,20 @@ model TableCombination {
 
   members                 TableCombinationMember[]
   reservation_assignments ReservationTableAssignment[]
+  dining_sessions         DiningTableSession[]
 
   @@map("table_combinations")
 }
 
 model TableCombinationMember {
-  id                  String   @id @default(cuid())
+  id                   String   @id @default(cuid())
   table_combination_id String
-  table_id            String
-  order_index         Int      @default(0)
-  created_at          DateTime @default(now())
+  table_id             String
+  order_index          Int      @default(0)
+  created_at           DateTime @default(now())
 
   table_combination TableCombination @relation(fields: [table_combination_id], references: [id], onDelete: Cascade)
-  table            Table            @relation(fields: [table_id], references: [id], onDelete: Restrict)
+  table             Table            @relation(fields: [table_id], references: [id], onDelete: Restrict)
 
   @@unique([table_combination_id, table_id])
   @@index([table_combination_id, order_index])
@@ -382,36 +383,36 @@ model TableCombinationMember {
 }
 
 model Reservation {
-  id                         String          @id @default(cuid())
-  booking_id                 String          @unique
+  id                         String                       @id @default(cuid())
+  booking_id                 String                       @unique
   customer_name              String
   customer_phone             String
   customer_email             String
-  reservation_type           String          @default("dine_in")
+  reservation_type           String                       @default("dine_in")
   date                       DateTime
   time                       String
   party_size                 Int
   selected_products          Json?
   unlimited_package_id       String?
-  unlimited_package         UnlimitedSetting? @relation(fields: [unlimited_package_id], references: [id])
+  unlimited_package          UnlimitedSetting?            @relation(fields: [unlimited_package_id], references: [id])
   assigned_table_id          String?
-  table                      Table?          @relation(fields: [assigned_table_id], references: [id])
-  subtotal                   Float           @default(0)
-  tax                        Float           @default(0)
-  total_price                Float           @default(0)
-  payment_plan               String          @default("initial_only")
-  downpayment_percent        Int             @default(50)
-  downpayment_amount         Float           @default(0)
-  remaining_balance          Float           @default(0)
-  downpayment_status         String          @default("pending")
+  table                      Table?                       @relation(fields: [assigned_table_id], references: [id])
+  subtotal                   Float                        @default(0)
+  tax                        Float                        @default(0)
+  total_price                Float                        @default(0)
+  payment_plan               String                       @default("initial_only")
+  downpayment_percent        Int                          @default(50)
+  downpayment_amount         Float                        @default(0)
+  remaining_balance          Float                        @default(0)
+  downpayment_status         String                       @default("pending")
   downpayment_method         String?
   downpayment_date           DateTime?
   downpayment_transaction_id String?
-  full_payment_paid          Boolean         @default(false)
+  full_payment_paid          Boolean                      @default(false)
   full_payment_date          DateTime?
-  remaining_paid_at_venue    Boolean         @default(false)
+  remaining_paid_at_venue    Boolean                      @default(false)
   remaining_paid_date        DateTime?
-  final_payment_status       String          @default("pending")
+  final_payment_status       String                       @default("pending")
   final_payment_method       String?
   final_payment_date         DateTime?
   status                     String
@@ -420,31 +421,31 @@ model Reservation {
   admin_notes                String?
   rejected_reason            String?
   alternative_suggestions    String?
-  created_at                 DateTime        @default(now())
-  updated_at                 DateTime        @updatedAt
+  created_at                 DateTime                     @default(now())
+  updated_at                 DateTime                     @updatedAt
   created_by                 String?
   payments                   ReservationPayment[]
   ingredient_locks           ReservationIngredientLock[]
   activity                   ReservationActivity[]
-  payment_claims              PaymentTransactionClaim[]
+  payment_claims             PaymentTransactionClaim[]
   table_assignments          ReservationTableAssignment[]
 
   @@map("reservations")
 }
 
 model ReservationTableAssignment {
-  id                  String   @id @default(cuid())
-  reservation_id      String
-  table_id            String
+  id                   String   @id @default(cuid())
+  reservation_id       String
+  table_id             String
   table_combination_id String?
-  seat_count          Int      @default(0)
-  status              String   @default("assigned")
-  created_at          DateTime @default(now())
-  updated_at          DateTime @updatedAt
+  seat_count           Int      @default(0)
+  status               String   @default("assigned")
+  created_at           DateTime @default(now())
+  updated_at           DateTime @updatedAt
 
-  reservation      Reservation        @relation(fields: [reservation_id], references: [id], onDelete: Cascade)
-  table            Table              @relation(fields: [table_id], references: [id], onDelete: Restrict)
-  table_combination TableCombination?  @relation(fields: [table_combination_id], references: [id], onDelete: SetNull)
+  reservation       Reservation       @relation(fields: [reservation_id], references: [id], onDelete: Cascade)
+  table             Table             @relation(fields: [table_id], references: [id], onDelete: Restrict)
+  table_combination TableCombination? @relation(fields: [table_combination_id], references: [id], onDelete: SetNull)
 
   @@unique([reservation_id, table_id])
   @@index([table_id, status])
@@ -464,21 +465,21 @@ model ReservationSlotCapacity {
 }
 
 model UnlimitedSession {
-  id             String    @id @default(cuid())
-  pax_count      Int
-  price_per_pax  Float
-  total_paid     Float
-  started_at     DateTime  @default(now())
-  first_round_at DateTime?
-  ends_at        DateTime
-  status         String
-  cashier_id     String
-  table_id       String?
-  dining_session_id String?
-  time_limit_minutes Int @default(90)
-  table          Table?    @relation(fields: [table_id], references: [id])
-  dining_session DiningTableSession? @relation(fields: [dining_session_id], references: [id], onDelete: SetNull)
-  created_at     DateTime  @default(now())
+  id                 String              @id @default(cuid())
+  pax_count          Int
+  price_per_pax      Float
+  total_paid         Float
+  started_at         DateTime            @default(now())
+  first_round_at     DateTime?
+  ends_at            DateTime
+  status             String
+  cashier_id         String
+  table_id           String?
+  dining_session_id  String?
+  time_limit_minutes Int                 @default(90)
+  table              Table?              @relation(fields: [table_id], references: [id])
+  dining_session     DiningTableSession? @relation(fields: [dining_session_id], references: [id], onDelete: SetNull)
+  created_at         DateTime            @default(now())
 
   cashier        User                    @relation(fields: [cashier_id], references: [id])
   rounds         UnlimitedRound[]
@@ -491,33 +492,37 @@ model UnlimitedSession {
 }
 
 model DiningTableSession {
-  id                String   @id @default(cuid())
-  table_id          String
-  cashier_id        String
-  status            String   @default("active")
-  opened_at         DateTime @default(now())
-  closed_at         DateTime?
-  created_at        DateTime @default(now())
-  updated_at        DateTime @updatedAt
+  id                   String    @id @default(cuid())
+  table_id             String
+  table_combination_id String?
+  seat_count_at_start  Int?
+  cashier_id           String
+  status               String    @default("active")
+  opened_at            DateTime  @default(now())
+  closed_at            DateTime?
+  created_at           DateTime  @default(now())
+  updated_at           DateTime  @updatedAt
 
-  table              Table           @relation(fields: [table_id], references: [id], onDelete: Restrict)
-  cashier            User            @relation(fields: [cashier_id], references: [id], onDelete: Restrict)
-  guests             DiningGuest[]
-  orders             DiningOrder[]
-  unlimited_sessions UnlimitedSession[]
+  table                Table              @relation(fields: [table_id], references: [id], onDelete: Restrict)
+  table_combination    TableCombination?  @relation(fields: [table_combination_id], references: [id], onDelete: Restrict)
+  cashier              User               @relation(fields: [cashier_id], references: [id], onDelete: Restrict)
+  guests               DiningGuest[]
+  orders               DiningOrder[]
+  unlimited_sessions   UnlimitedSession[]
   checkout_transaction PosTransaction?
 
   @@index([table_id, status])
+  @@index([table_combination_id])
   @@map("dining_table_sessions")
 }
 
 model DiningGuest {
-  id                 String   @id @default(cuid())
-  dining_session_id  String
-  guest_number       Int
-  discount_type      String   @default("none")
-  created_at         DateTime @default(now())
-  updated_at         DateTime @updatedAt
+  id                String   @id @default(cuid())
+  dining_session_id String
+  guest_number      Int
+  discount_type     String   @default("none")
+  created_at        DateTime @default(now())
+  updated_at        DateTime @updatedAt
 
   dining_session DiningTableSession @relation(fields: [dining_session_id], references: [id], onDelete: Cascade)
   order_items    DiningOrderItem[]
@@ -527,26 +532,26 @@ model DiningGuest {
 }
 
 model DiningOrder {
-  id                  String   @id @default(cuid())
-  order_number        String   @unique
-  idempotency_key     String   @unique
-  dining_session_id   String
+  id                   String    @id @default(cuid())
+  order_number         String    @unique
+  idempotency_key      String    @unique
+  dining_session_id    String
   unlimited_session_id String?
-  order_type          String
-  status              String   @default("reserved")
-  created_by          String
-  prepared_at         DateTime?
-  ready_at            DateTime?
-  released_at         DateTime?
-  cancelled_at        DateTime?
-  created_at          DateTime @default(now())
-  updated_at          DateTime @updatedAt
+  order_type           String
+  status               String    @default("reserved")
+  created_by           String
+  prepared_at          DateTime?
+  ready_at             DateTime?
+  released_at          DateTime?
+  cancelled_at         DateTime?
+  created_at           DateTime  @default(now())
+  updated_at           DateTime  @updatedAt
 
-  dining_session   DiningTableSession     @relation(fields: [dining_session_id], references: [id], onDelete: Restrict)
-  unlimited_session UnlimitedSession?    @relation(fields: [unlimited_session_id], references: [id], onDelete: SetNull)
-  creator          User                  @relation(fields: [created_by], references: [id], onDelete: Restrict)
-  items            DiningOrderItem[]
-  ingredient_locks DineInIngredientLock[]
+  dining_session    DiningTableSession     @relation(fields: [dining_session_id], references: [id], onDelete: Restrict)
+  unlimited_session UnlimitedSession?      @relation(fields: [unlimited_session_id], references: [id], onDelete: SetNull)
+  creator           User                   @relation(fields: [created_by], references: [id], onDelete: Restrict)
+  items             DiningOrderItem[]
+  ingredient_locks  DineInIngredientLock[]
 
   @@index([status, created_at])
   @@index([dining_session_id, status])
@@ -565,8 +570,8 @@ model DiningOrderItem {
   total_price        Float
   created_at         DateTime @default(now())
 
-  order           DiningOrder  @relation(fields: [order_id], references: [id], onDelete: Cascade)
-  guest           DiningGuest  @relation(fields: [guest_id], references: [id], onDelete: Restrict)
+  order           DiningOrder     @relation(fields: [order_id], references: [id], onDelete: Cascade)
+  guest           DiningGuest     @relation(fields: [guest_id], references: [id], onDelete: Restrict)
   selling_product SellingProduct? @relation(fields: [selling_product_id], references: [id], onDelete: SetNull)
 
   @@index([order_id])
@@ -594,11 +599,11 @@ model DineInIngredientLock {
 }
 
 model UnlimitedExtension {
-  id                  String   @id @default(cuid())
+  id                   String   @id @default(cuid())
   unlimited_session_id String
-  minutes             Int      @default(30)
-  approved_by         String
-  created_at          DateTime @default(now())
+  minutes              Int      @default(30)
+  approved_by          String
+  created_at           DateTime @default(now())
 
   unlimited_session UnlimitedSession @relation(fields: [unlimited_session_id], references: [id], onDelete: Cascade)
   approver          User             @relation(fields: [approved_by], references: [id], onDelete: Restrict)
@@ -652,7 +657,7 @@ model UnlimitedSetting {
   leftover_charge_percent Float
   updated_at              DateTime @updatedAt
 
-  reservations             Reservation[]
+  reservations Reservation[]
 
   @@map("unlimited_settings")
 }
@@ -668,28 +673,29 @@ model UnlimitedIncludedProduct {
 }
 
 model SystemSetting {
-  id               String   @id @default(cuid())
-  singleton_key    String   @unique @default("default")
-  restaurant_name  String   @default("Katana Sushi")
-  timezone         String   @default("Asia/Manila")
-  currency         String   @default("PHP")
-  tax_rate_percent Float    @default(12)
-  receipt_paper_size String @default("80mm")
-  receipt_footer   String   @default("Thank you for dining with us!")
-  max_party_size    Int     @default(30)
-  reservation_duration_minutes Int @default(90)
-  reservation_grace_period_minutes Int @default(15)
-  minimum_catering_pax Int @default(10)
-  default_downpayment_percent Float @default(50)
-  auto_lock_catering_ingredients Boolean @default(true)
-  release_catering_locks_on_completion Boolean @default(true)
-  default_reorder_level Int   @default(10)
-  low_stock_threshold_percent Float @default(100)
-  auto_reorder_enabled Boolean @default(false)
-  email_notifications_enabled Boolean @default(true)
-  sms_notifications_enabled Boolean @default(false)
-  low_stock_alerts_enabled Boolean @default(true)
-  updated_at       DateTime @updatedAt
+  id                                   String   @id @default(cuid())
+  singleton_key                        String   @unique @default("default")
+  restaurant_name                      String   @default("Katana Sushi")
+  timezone                             String   @default("Asia/Manila")
+  currency                             String   @default("PHP")
+  tax_rate_percent                     Float    @default(12)
+  receipt_paper_size                   String   @default("80mm")
+  receipt_footer                       String   @default("Thank you for dining with us!")
+  max_party_size                       Int      @default(30)
+  reservation_duration_minutes         Int      @default(90)
+  estimated_dining_duration_minutes    Int      @default(120)
+  reservation_grace_period_minutes     Int      @default(15)
+  minimum_catering_pax                 Int      @default(10)
+  default_downpayment_percent          Float    @default(50)
+  auto_lock_catering_ingredients       Boolean  @default(true)
+  release_catering_locks_on_completion Boolean  @default(true)
+  default_reorder_level                Int      @default(10)
+  low_stock_threshold_percent          Float    @default(100)
+  auto_reorder_enabled                 Boolean  @default(false)
+  email_notifications_enabled          Boolean  @default(true)
+  sms_notifications_enabled            Boolean  @default(false)
+  low_stock_alerts_enabled             Boolean  @default(true)
+  updated_at                           DateTime @updatedAt
 
   @@map("system_settings")
 }
@@ -714,22 +720,22 @@ model CateringPackage {
 }
 
 model CateringInquiry {
-  id             String   @id @default(cuid())
-  inquiry_id     String   @unique
-  customer_name  String
-  customer_phone String
-  customer_email String
-  event_date     DateTime
-  headcount      Int?
-  venue_type     String
-  event_type     String?
+  id               String   @id @default(cuid())
+  inquiry_id       String   @unique
+  customer_name    String
+  customer_phone   String
+  customer_email   String
+  event_date       DateTime
+  headcount        Int?
+  venue_type       String
+  event_type       String?
   event_type_other String?
-  package_type   String?
-  message        String?
-  status         String
-  admin_notes    String?
-  created_at     DateTime @default(now())
-  updated_at     DateTime @updatedAt
+  package_type     String?
+  message          String?
+  status           String
+  admin_notes      String?
+  created_at       DateTime @default(now())
+  updated_at       DateTime @updatedAt
 
   catering_reservation CateringReservation?
 
@@ -737,46 +743,46 @@ model CateringInquiry {
 }
 
 model CateringReservation {
-  id                   String    @id @default(cuid())
-  reservation_id       String?   @unique
-  inquiry_id           String?   @unique
-  customer_name        String?
-  customer_phone       String?
-  customer_email       String?
-  event_date           DateTime?
-  event_time           String?
-  sashimi_quantity_kg  Float?
-  headcount            Int?
-  package_id           String?
-  package_ids          Json?
-  package_snapshot     Json?     @map("package_snapshot")
-  package              CateringPackage? @relation(fields: [package_id], references: [id])
-  package_total        Float     @default(0)
-  mobilization_fee     Float     @default(0)
-  total_price          Float     @default(0)
-  payment_plan         String    @default("initial_only")
-  downpayment_percent  Int       @default(50)
-  downpayment_amount   Float     @default(0)
-  downpayment_status   String    @default("pending")
-  downpayment_method   String?
-  downpayment_date     DateTime?
+  id                         String           @id @default(cuid())
+  reservation_id             String?          @unique
+  inquiry_id                 String?          @unique
+  customer_name              String?
+  customer_phone             String?
+  customer_email             String?
+  event_date                 DateTime?
+  event_time                 String?
+  sashimi_quantity_kg        Float?
+  headcount                  Int?
+  package_id                 String?
+  package_ids                Json?
+  package_snapshot           Json?            @map("package_snapshot")
+  package                    CateringPackage? @relation(fields: [package_id], references: [id])
+  package_total              Float            @default(0)
+  mobilization_fee           Float            @default(0)
+  total_price                Float            @default(0)
+  payment_plan               String           @default("initial_only")
+  downpayment_percent        Int              @default(50)
+  downpayment_amount         Float            @default(0)
+  downpayment_status         String           @default("pending")
+  downpayment_method         String?
+  downpayment_date           DateTime?
   downpayment_transaction_id String?
-  full_payment_paid    Boolean   @default(false)
-  full_payment_date    DateTime?
-  remaining_paid_at_venue Boolean @default(false)
-  remaining_paid_date  DateTime?
-  remaining_balance    Float     @default(0)
-  final_payment_status String    @default("pending")
-  final_payment_method String?
-  final_payment_date   DateTime?
-  status               String?
-  confirmed_date       DateTime?
-  deposit_paid         Float     @default(0)
-  deposit_due_date     DateTime?
-  ingredients_locked   Boolean   @default(false)
-  created_at           DateTime  @default(now())
-  updated_at           DateTime  @default(now()) @updatedAt
-  created_by           String?
+  full_payment_paid          Boolean          @default(false)
+  full_payment_date          DateTime?
+  remaining_paid_at_venue    Boolean          @default(false)
+  remaining_paid_date        DateTime?
+  remaining_balance          Float            @default(0)
+  final_payment_status       String           @default("pending")
+  final_payment_method       String?
+  final_payment_date         DateTime?
+  status                     String?
+  confirmed_date             DateTime?
+  deposit_paid               Float            @default(0)
+  deposit_due_date           DateTime?
+  ingredients_locked         Boolean          @default(false)
+  created_at                 DateTime         @default(now())
+  updated_at                 DateTime         @default(now()) @updatedAt
+  created_by                 String?
 
   inquiry          CateringInquiry?          @relation(fields: [inquiry_id], references: [id])
   ingredient_locks CateringIngredientLock[]
@@ -788,54 +794,54 @@ model CateringReservation {
 }
 
 model ReservationPayment {
-  id                         String               @id @default(cuid())
-  reservation_id             String?
-  catering_reservation_id    String?
-  payment_stage              String
-  method                     String
-  amount                     Float
-  reference_number           String?
-  cash_received              Float?
-  change_due                 Float?
-  source                     String               @default("staff")
-  recorded_by_id             String?
-  override_reason            String?
-  received_at                DateTime             @default(now())
-  created_at                 DateTime             @default(now())
+  id                      String   @id @default(cuid())
+  reservation_id          String?
+  catering_reservation_id String?
+  payment_stage           String
+  method                  String
+  amount                  Float
+  reference_number        String?
+  cash_received           Float?
+  change_due              Float?
+  source                  String   @default("staff")
+  recorded_by_id          String?
+  override_reason         String?
+  received_at             DateTime @default(now())
+  created_at              DateTime @default(now())
 
-  reservation                Reservation?         @relation(fields: [reservation_id], references: [id], onDelete: Cascade)
-  catering_reservation       CateringReservation? @relation(fields: [catering_reservation_id], references: [id], onDelete: Cascade)
+  reservation          Reservation?         @relation(fields: [reservation_id], references: [id], onDelete: Cascade)
+  catering_reservation CateringReservation? @relation(fields: [catering_reservation_id], references: [id], onDelete: Cascade)
 
   @@map("reservation_payments")
 }
 
 model PaymentTransactionClaim {
-  transaction_id           String   @id
-  reservation_id           String?
-  catering_reservation_id  String?
-  created_at               DateTime @default(now())
+  transaction_id          String   @id
+  reservation_id          String?
+  catering_reservation_id String?
+  created_at              DateTime @default(now())
 
-  reservation         Reservation?         @relation(fields: [reservation_id], references: [id], onDelete: Cascade)
+  reservation          Reservation?         @relation(fields: [reservation_id], references: [id], onDelete: Cascade)
   catering_reservation CateringReservation? @relation(fields: [catering_reservation_id], references: [id], onDelete: Cascade)
 
   @@map("payment_transaction_claims")
 }
 
 model PaymentIntent {
-  reference_id     String    @id
-  booking_id       String
-  purpose          String    @default("downpayment")
-  idempotency_key  String?
+  reference_id      String    @id
+  booking_id        String
+  purpose           String    @default("downpayment")
+  idempotency_key   String?
   gateway_reference String?
-  amount           Float
-  payment_method   String
-  reservation_type String
-  status           String    @default("pending")
-  transaction_id   String?   @unique
-  paid_at          DateTime?
-  expires_at       DateTime?
-  created_at       DateTime  @default(now())
-  updated_at       DateTime  @updatedAt
+  amount            Float
+  payment_method    String
+  reservation_type  String
+  status            String    @default("pending")
+  transaction_id    String?   @unique
+  paid_at           DateTime?
+  expires_at        DateTime?
+  created_at        DateTime  @default(now())
+  updated_at        DateTime  @updatedAt
 
   @@index([booking_id])
   @@index([status, created_at])
@@ -843,17 +849,17 @@ model PaymentIntent {
 }
 
 model ReservationIngredientLock {
-  id                String   @id @default(cuid())
+  id                String    @id @default(cuid())
   reservation_id    String
   raw_material_id   String
-  reserved_quantity BigInt   @db.BigInt
+  reserved_quantity BigInt    @db.BigInt
   unit              String
-  is_released       Boolean  @default(false)
-  created_at        DateTime @default(now())
+  is_released       Boolean   @default(false)
+  created_at        DateTime  @default(now())
   released_at       DateTime?
 
-  reservation  Reservation  @relation(fields: [reservation_id], references: [id], onDelete: Cascade)
-  raw_material RawMaterial  @relation(fields: [raw_material_id], references: [id])
+  reservation  Reservation @relation(fields: [reservation_id], references: [id], onDelete: Cascade)
+  raw_material RawMaterial @relation(fields: [raw_material_id], references: [id])
 
   @@index([raw_material_id, is_released])
   @@index([reservation_id, is_released])
@@ -874,7 +880,7 @@ model ReservationActivity {
   details                 Json?
   created_at              DateTime @default(now())
 
-  reservation         Reservation?         @relation(fields: [reservation_id], references: [id], onDelete: Cascade)
+  reservation          Reservation?         @relation(fields: [reservation_id], references: [id], onDelete: Cascade)
   catering_reservation CateringReservation? @relation(fields: [catering_reservation_id], references: [id], onDelete: Cascade)
 
   @@index([reservation_id, created_at])

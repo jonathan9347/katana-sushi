@@ -535,10 +535,11 @@ export async function seedDemoData(prisma: PrismaClient) {
   });
 
   await prisma.table.createMany({
-    data: [2, 4, 4, 2, 4, 6, 2, 4, 8, 4].map((capacity, index) => ({
+    data: Array.from({ length: 16 }, (_, index) => ({
       table_number: index + 1,
-      capacity,
-      status: "AVAILABLE"
-    }))
+      capacity: index < 8 ? 4 : 2,
+      status: "available"
+    })),
+    skipDuplicates: true
   });
 }

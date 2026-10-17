@@ -120,6 +120,10 @@ function formatTime(value: string) {
   return new Date(value).toLocaleString();
 }
 
+function normalizeTableStatus(status: string) {
+  return status.trim().toLowerCase();
+}
+
 function escapeHtml(value: string) {
   return value.replace(/[&<>"']/g, (character) => ({
     "&": "&amp;",
@@ -201,7 +205,7 @@ export default function DiningService({ mode = "service" }: Props) {
     ? session?.guests.filter((guest) => guest.guest_number <= activeUnlimited.pax_count) ?? []
     : session?.guests ?? [];
   const availableTables = (tablesQuery.data ?? []).filter((table) =>
-    !table.active_session && table.status !== "occupied"
+    !table.active_session && normalizeTableStatus(table.status) !== "occupied"
   );
   const availableProducts = useMemo(
     () => (orderType === "unlimited" ? unlimitedProductsQuery.data : productsQuery.data) ?? [],

@@ -44,6 +44,7 @@ import { prisma } from "./lib/prisma";
 import { checkDatabaseHealth, getDatabaseStatus, markDatabaseDown } from "./lib/database";
 import { getJwtSecret } from "./lib/jwt";
 import { reservationTimeError, RESERVATION_SETTINGS } from "./config/reservationSettings";
+import { normalizeTableStatus } from "./services/tableStatus.service";
 import {
   calculateAvailableReservationPax,
   getReservationSlotStart
@@ -4722,7 +4723,8 @@ app.get("/api/staff/tables", async (req, res, next) => {
     }
 
     const tables = await prisma.table.findMany({ orderBy: { table_number: "asc" } });
-    return res.json({ tables });
+    const normalizedTables = tables.map((table) => ({ ...table, status: normalizeTableStatus(table.status) }));
+    return res.json({ tables: normalizedTables });
   } catch (error) {
     return next(error);
   }
@@ -4824,7 +4826,12 @@ app.put("/api/staff/tables/:id/status", async (req, res, next) => {
       return;
     }
 
-    const body = z.object({ status: z.enum(["available", "occupied", "reserved"]) }).parse(req.body);
+    const body = z.object({
+      status: z.preprocess(
+        (value) => typeof value === "string" ? normalizeTableStatus(value) : value,
+        z.enum(["available", "occupied", "reserved"])
+      )
+    }).parse(req.body);
     const table = await prisma.table.update({ where: { id: req.params.id }, data: { status: body.status } });
     return res.json({ table });
   } catch (error) {
@@ -8174,7 +8181,7 @@ app.get("/api/products/grouped", async (_req, res, next) => {
 app.get("/api/tables", async (_req, res, next) => {
   try {
     const tables = await prisma.table.findMany({ orderBy: { table_number: "asc" } });
-    res.json({ tables });
+    res.json({ tables: tables.map((table) => ({ ...table, status: normalizeTableStatus(table.status) })) });
   } catch (error) {
     next(error);
   }
