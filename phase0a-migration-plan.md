@@ -9,9 +9,9 @@
 3. Stored material and batch costs use `DECIMAL(18,8)` and are stored per base unit. Staff sees costs per 100 g, per 100 ml, or per piece/sheet/cup/bottle.
 4. Avocado is weight-only. The editable estimate is `INVENTORY_STANDARDS.estimatedAvocadoUsableGramsPerFruit = 150`; reorder level is 1,500 g, recipe quantity is 20 g, and stored cost is 0.36666667 per g. Its source basis remains recorded as 55 per 150 g. This is an estimate, not kitchen-confirmed.
 5. Every recipe is marked `recipe not confirmed`. The baked-sushi estimates differ as approved: Small is Crabstick 2 pieces, Ebiko 20 g, Nori 1 sheet, Rice 200 g; Medium is Crabstick 3 pieces, Ebiko 30 g, Nori 2 sheets, Rice 300 g.
-6. Crabstick stays in pieces. The Large and Medium Classic Platter flat recipe lines now use 31 and 25 pieces; the old flat lines remain in place and flagged for later Phase 0C composition work. Kani tempura stays in pieces. Aonori is 1 g.
+6. Crabstick stays in pieces. The Large and Medium Classic Platter flat lines currently contain 31 and 25 pieces, but these values were literal hard-coded guesses in both seed paths, not values calculated from selected Hoso/Futo products or a saved composition. The pre-migration review sheet preserves the original `0.020 kg` values. Those legacy fractional-kilogram amounts cannot be put back into the current `BIGINT` piece quantity without violating the base-unit and integer rules. The platter line amounts therefore need the owner's decision before they are used for real sales. All platter flat lines remain in the database and the Phase 0C composition is still a separate approval; no Hoso/Futo products were selected by the migration.
 7. The shared editable seed standards are in `backend/src/config/inventoryStandards.ts`: owner-confirmed Spicy mayo 10 ml; estimated Teriyaki sauce 10 ml, Aonori 1 g, Tempura flakes 20 g, Sriracha 5 ml; and Avocado 150 g/fruit. Sriracha remains a default only and has no added recipe lines. A guarded follow-up migration corrected all six Spicy mayo recipe lines to 10 ml after verification found four lines at 20 ml.
-8. The approved Softdrinks merge was applied. Keeper `cmv3t32dl00061da4l74v2ku0` is now named exactly `Softdrinks`. References from duplicate `cmv6blwod028vn68q5g33s23u` were repointed; the old material row remains archived (`is_deleted = true`). Keeper snapshot `cmv96a4t600xsmbt88ki6vgne` remains. Duplicate zero snapshot `cmv96a4tc00xymbt8tf5o4626` (2026-10-14) was copied to `inventory_snapshot_archives` with its ID and archive reason, then removed from the live snapshot table.
+8. The owner explicitly approved merging the Softdrinks material records in a later decision. Keeper `cmv3t32dl00061da4l74v2ku0` was originally named `Softdrinks (Coke/Sprite/Royal)`; duplicate `cmv6blwod028vn68q5g33s23u` was named `Softdrinks ` (trailing space). The initial migration renamed the keeper, repointed references, and archived the duplicate snapshot. Runtime verification then found the legacy selling product also has a trailing-space name; `ensureBeverageStockMaterials()` was reactivating the duplicate material through its upsert. The backend now trims beverage names and maps both `Softdrinks` aliases to the descriptive keeper. Guarded migrations `20261017030000_phase0a_softdrinks_archive_repair` and `20261017040000_phase0a_softdrinks_alias_rearchive` restore the keeper's descriptive name and archive the duplicate row (`is_deleted = true`) without deleting either material row. Keeper snapshot `cmv96a4t600xsmbt88ki6vgne` remains live. Duplicate zero snapshot `cmv96a4tc00xymbt8tf5o4626` (2026-10-14) remains preserved in `inventory_snapshot_archives`, with its original ID and archive reason; it is not silently deleted.
 9. Seed and demo-seed paths now use base units, integer recipe amounts, the shared standards above, and `recipe not confirmed`. The beverage lookup maps the old Softdrinks product display name to the canonical stock material rather than recreating a duplicate.
 10. The Phase 0C platter Includes editor and mappings remain out of scope and were not built.
 
@@ -28,7 +28,7 @@
 | Active recipe/material unit mismatches | 0 |
 | Recipes not flagged `recipe not confirmed` | 0 |
 | Existing conversion-rule rows retained | 3 |
-| Prisma migrations | Up to date (15 migrations applied) |
+| Prisma migrations | Up to date (17 migrations applied, including the Spicy mayo correction and Softdrinks archive repairs) |
 
 All reported material on-hand quantities remained zero. The material-level pre-/post-migration values and Softdrinks archive actions are in [phase0a-dry-run-materials.csv](./phase0a-dry-run-materials.csv); recipe-line details remain in [phase0-recipe-review.csv](./phase0-recipe-review.csv) and standard totals in [phase0-standard-portions.csv](./phase0-standard-portions.csv).
 
@@ -36,13 +36,13 @@ The older Supabase database contains real data on an older schema. It needs its 
 
 ## Rollback
 
-The pre-migration dump is the rollback source; do not try to reverse estimated or converted values by arithmetic. The backend was restarted for a health check after migration; no operational writes have occurred since the migrations. If rollback is authorized now:
+The pre-migration dump is the rollback source; do not try to reverse estimated or converted values by arithmetic. Migrations `20261017010000_phase0a_base_units`, `20261017020000_phase0a_spicy_mayo_standard`, `20261017030000_phase0a_softdrinks_archive_repair`, and `20261017040000_phase0a_softdrinks_alias_rearchive` are forward-only guarded data changes. The second migration corrects all six Spicy mayo lines to 10 ml after four lines were found at 20 ml. The last two restore the descriptive Softdrinks keeper name and keep the duplicate material archived despite its legacy selling-product alias; no material or snapshot row is deleted. No sales, inventory transactions, movements, batches, or active holds exist. If rollback is authorized now:
 
 1. Stop the backend with Ctrl+C in its existing terminal and verify port 5001 is clear with `netstat -ano | findstr :5001`.
 2. Restore the pre-migration dump into a separate empty database and verify its original counts first.
 3. Take and verify a post-migration dump of `katana_sushi_dev`.
 4. Only after explicit authorization, restore the verified pre-migration dump to `katana_sushi_dev`; this replaces the current development database. Do not use `pg_restore --clean` against the target without that approval.
-5. Recheck database identity, baseline counts, and migration history before reconnecting the application. If new operational writes occur, stop and reconcile them rather than restoring the old dump blindly.
+5. Recheck database identity, baseline counts, and migration history before reconnecting the application. A restore of the pre-migration dump rolls back all four Phase 0A migrations at once; do not edit applied migration SQL or reverse only one migration by arithmetic. If new operational writes occur, stop and reconcile them rather than restoring the old dump blindly.
 
 ## Deferred approvals
 

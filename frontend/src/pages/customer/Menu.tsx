@@ -120,7 +120,6 @@ export default function Menu() {
               <img
                 src="/images/Menu-head.png"
                 alt="Katana Sushi menu showcase"
-                fetchPriority="high"
                 decoding="async"
                 className="mx-auto h-[220px] w-full max-w-[420px] object-contain transition duration-500 ease-out group-hover:scale-105 group-hover:[transform:rotateY(8deg)_rotateX(-6deg)] sm:h-[260px] lg:h-[320px]"
               />
@@ -144,7 +143,7 @@ export default function Menu() {
                 <article key={product.id} className="customer-menu-product-card group">
                   <div className="customer-menu-product-art">
                     {imageSrc ? (
-                      <img src={imageSrc} alt={product.name} loading="eager" fetchPriority="high" decoding="async" onError={(event) => fallbackToBackendImage(event.currentTarget, product.image_url)} />
+                      <img src={imageSrc} alt={product.name} loading="eager" decoding="async" onError={(event) => fallbackToBackendImage(event.currentTarget, product.image_url)} />
                     ) : (
                       <span className="text-6xl" aria-hidden="true">🍣</span>
                     )}
@@ -177,7 +176,7 @@ export default function Menu() {
                     >
                       <div className="customer-menu-product-art">
                         {imageSrc ? (
-                          <img src={imageSrc} alt={product.name} loading={eagerImage ? "eager" : "lazy"} fetchPriority={eagerImage ? "high" : "auto"} decoding="async" onError={(event) => fallbackToBackendImage(event.currentTarget, product.image_url)} />
+                          <img src={imageSrc} alt={product.name} loading={eagerImage ? "eager" : "lazy"} decoding="async" onError={(event) => fallbackToBackendImage(event.currentTarget, product.image_url)} />
                         ) : (
                           <span className="text-6xl" aria-hidden="true">🍣</span>
                         )}

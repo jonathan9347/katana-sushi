@@ -5160,7 +5160,10 @@ async function ensureBeverageStockMaterials() {
 
   await Promise.all(
     beverageProducts.map((product) => {
-      const materialName = product.name === "Softdrinks (Coke/Sprite/Royal)" ? "Softdrinks" : product.name;
+      const normalizedProductName = product.name.trim();
+      const materialName = /^softdrinks(?: \(coke\/sprite\/royal\))?$/i.test(normalizedProductName)
+        ? "Softdrinks (Coke/Sprite/Royal)"
+        : normalizedProductName;
       return prisma.rawMaterial.upsert({
         where: { name: materialName },
         update: { category: "Beverage", is_deleted: false },
