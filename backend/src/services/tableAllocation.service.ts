@@ -2,7 +2,6 @@ export type TableSeatCandidate = {
   id: string;
   table_number: number;
   capacity: number;
-  status?: string | null;
   is_archived?: boolean | null;
 };
 
@@ -13,27 +12,63 @@ export type AllocationResult = {
   tableCount: number;
 };
 
+export type TablePlanningWindow = {
+  serviceDate: string;
+  startTime: string;
+  tableIds: string[];
+};
+
+type TableAllocationOptions = {
+  unavailableTableIds?: Iterable<string>;
+};
+
 function normalizeTable(table: TableSeatCandidate) {
   return {
     ...table,
     capacity: Number(table.capacity),
     table_number: Number(table.table_number),
-    status: table.status?.trim().toLowerCase() ?? "available",
     is_archived: Boolean(table.is_archived)
   };
 }
 
+function serviceMinute(serviceDate: string, startTime: string) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(serviceDate)) {
+    throw new RangeError(`Invalid service date: ${serviceDate}`);
+  }
+  const [year, month, day] = serviceDate.split("-").map(Number);
+  const date = new Date(Date.UTC(year, month - 1, day));
+  if (date.toISOString().slice(0, 10) !== serviceDate) {
+    throw new RangeError(`Invalid service date: ${serviceDate}`);
+  }
+  if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(startTime)) {
+    throw new RangeError(`Invalid service time: ${startTime}`);
+  }
+
+  const [hours, minutes] = startTime.split(":").map(Number);
+  return Math.floor(date.getTime() / 60_000) + hours * 60 + minutes;
+}
+
+function overlaps(leftStart: number, leftEnd: number, rightStart: number, rightEnd: number) {
+  return leftStart < rightEnd && rightStart < leftEnd;
+}
+
 export function findBestTableCombination(
   requiredSeats: number,
-  tables: TableSeatCandidate[]
+  tables: TableSeatCandidate[],
+  options: TableAllocationOptions = {}
 ): AllocationResult | null {
   if (!Number.isInteger(requiredSeats) || requiredSeats <= 0) {
     return null;
   }
 
+  const unavailableTableIds = new Set(options.unavailableTableIds ?? []);
   const activeTables = tables
     .map(normalizeTable)
-    .filter((table) => !table.is_archived && table.capacity > 0 && table.status === "available")
+    .filter((table) =>
+      !table.is_archived &&
+      table.capacity > 0 &&
+      !unavailableTableIds.has(table.id)
+    )
     .sort((left, right) => left.table_number - right.table_number || left.id.localeCompare(right.id));
 
   if (activeTables.length === 0) {
@@ -79,31 +114,35 @@ export function findBestTableCombination(
   };
 }
 
-export function isSameDayReservationWindow(date: Date, time: string, now: Date) {
-  const [hours, minutes] = time.split(":").map(Number);
-  const candidate = new Date(date);
-  candidate.setHours(hours, minutes, 0, 0);
-
-  const todayStart = new Date(now);
-  todayStart.setHours(0, 0, 0, 0);
-  const todayEnd = new Date(todayStart);
-  todayEnd.setHours(23, 59, 59, 999);
-
-  if (date < todayStart || date > todayEnd) {
-    return false;
+export function getTablesUnavailableForSlot(
+  serviceDate: string,
+  startTime: string,
+  estimatedDurationMinutes: number,
+  reservationWindows: TablePlanningWindow[],
+  activeDiningSessions: TablePlanningWindow[]
+) {
+  if (!Number.isInteger(estimatedDurationMinutes) || estimatedDurationMinutes <= 0) {
+    throw new RangeError("Estimated dining duration must be a positive whole number of minutes.");
   }
 
-  const diffMinutes = (candidate.getTime() - now.getTime()) / 60000;
-  return diffMinutes >= 0 && diffMinutes <= 120;
-}
+  const requestedStart = serviceMinute(serviceDate, startTime);
+  const requestedEnd = requestedStart + estimatedDurationMinutes;
+  const unavailableTableIds = new Set<string>();
 
-export function getReservationTableHoldsForDate(
-  reservationDate: Date,
-  activeReservations: Array<{ date: Date; time: string; party_size: number }>
-) {
-  return activeReservations.filter((reservation) =>
-    reservation.date.getFullYear() === reservationDate.getFullYear() &&
-    reservation.date.getMonth() === reservationDate.getMonth() &&
-    reservation.date.getDate() === reservationDate.getDate()
+  const addOverlappingTables = (windows: TablePlanningWindow[]) => {
+    for (const window of windows) {
+      const windowStart = serviceMinute(window.serviceDate, window.startTime);
+      const windowEnd = windowStart + estimatedDurationMinutes;
+      if (overlaps(requestedStart, requestedEnd, windowStart, windowEnd)) {
+        window.tableIds.forEach((tableId) => unavailableTableIds.add(tableId));
+      }
+    }
+  };
+
+  addOverlappingTables(reservationWindows);
+  addOverlappingTables(
+    activeDiningSessions.filter((session) => session.serviceDate === serviceDate)
   );
+
+  return Array.from(unavailableTableIds).sort();
 }

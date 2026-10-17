@@ -3,9 +3,11 @@ import assert from "node:assert/strict";
 
 import {
   findBestTableCombination,
-  getReservationTableHoldsForDate,
-  isSameDayReservationWindow
+  getTablesUnavailableForSlot,
+  type TablePlanningWindow
 } from "./tableAllocation.service";
+
+const estimatedDurationMinutes = 120;
 
 test("fits six guests with a 2-seat plus 4-seat table", () => {
   const result = findBestTableCombination(6, [
@@ -46,12 +48,12 @@ test("rejects impossible allocations", () => {
   assert.equal(result, null);
 });
 
-test("does not allocate occupied or archived tables", () => {
+test("excludes archived and already allocated tables", () => {
   const result = findBestTableCombination(2, [
-    { id: "occupied", table_number: 1, capacity: 4, status: "OCCUPIED" },
     { id: "archived", table_number: 2, capacity: 4, is_archived: true },
-    { id: "available", table_number: 3, capacity: 2, status: "AVAILABLE" }
-  ]);
+    { id: "held", table_number: 1, capacity: 4 },
+    { id: "available", table_number: 3, capacity: 2 }
+  ], { unavailableTableIds: ["held"] });
 
   assert.deepEqual(result, {
     tableIds: ["available"],
@@ -61,19 +63,62 @@ test("does not allocate occupied or archived tables", () => {
   });
 });
 
-test("same-day POS occupancy lookahead includes exactly two hours", () => {
-  const now = new Date("2026-10-17T18:00:00");
-  assert.equal(isSameDayReservationWindow(new Date("2026-10-17T00:00:00"), "18:30", now), true);
-  assert.equal(isSameDayReservationWindow(new Date("2026-10-17T00:00:00"), "20:00", now), true);
-  assert.equal(isSameDayReservationWindow(new Date("2026-10-17T00:00:00"), "20:01", now), false);
-});
-
-test("active reservations hold tables for the date until staff releases or completes them", () => {
-  const date = new Date("2026-10-17T00:00:00");
-  const activeReservations = [
-    { date, time: "18:00", party_size: 2 },
-    { date: new Date("2026-10-18T00:00:00"), time: "10:00", party_size: 2 }
+test("reservation assignments block a slot only when estimated intervals overlap", () => {
+  const reservations: TablePlanningWindow[] = [
+    { serviceDate: "2026-10-17", startTime: "18:00", tableIds: ["t1"] }
   ];
 
-  assert.deepEqual(getReservationTableHoldsForDate(date, activeReservations), [activeReservations[0]]);
+  assert.deepEqual(
+    getTablesUnavailableForSlot("2026-10-17", "19:59", estimatedDurationMinutes, reservations, []),
+    ["t1"]
+  );
+  assert.deepEqual(
+    getTablesUnavailableForSlot("2026-10-17", "20:00", estimatedDurationMinutes, reservations, []),
+    []
+  );
+  assert.deepEqual(
+    getTablesUnavailableForSlot("2026-10-18", "18:00", estimatedDurationMinutes, reservations, []),
+    []
+  );
+});
+
+test("same-day POS sessions affect planning availability by estimated interval", () => {
+  const sessions: TablePlanningWindow[] = [
+    { serviceDate: "2026-10-17", startTime: "18:00", tableIds: ["t2"] }
+  ];
+
+  assert.deepEqual(
+    getTablesUnavailableForSlot("2026-10-17", "19:00", estimatedDurationMinutes, [], sessions),
+    ["t2"]
+  );
+  assert.deepEqual(
+    getTablesUnavailableForSlot("2026-10-17", "20:00", estimatedDurationMinutes, [], sessions),
+    []
+  );
+  assert.deepEqual(
+    getTablesUnavailableForSlot("2026-10-18", "19:00", estimatedDurationMinutes, [], sessions),
+    []
+  );
+  assert.equal(sessions[0].tableIds[0], "t2");
+});
+
+test("uses stable table ID order to break otherwise equal allocation ties", () => {
+  const result = findBestTableCombination(2, [
+    { id: "b", table_number: 2, capacity: 2 },
+    { id: "a", table_number: 1, capacity: 2 }
+  ]);
+
+  assert.deepEqual(result, {
+    tableIds: ["a"],
+    totalCapacity: 2,
+    unusedSeats: 0,
+    tableCount: 1
+  });
+});
+
+test("rejects an invalid estimated duration instead of silently treating it as an availability rule", () => {
+  assert.throws(
+    () => getTablesUnavailableForSlot("2026-10-17", "18:00", 0, [], []),
+    RangeError
+  );
 });
