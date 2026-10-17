@@ -46,7 +46,7 @@ export async function seedDemoData(prisma: PrismaClient) {
     { name: "Chicken", unit: "kg", current_stock: 6, reorder_level: 2, cost_per_unit: 240 },
     { name: "Aonori", unit: "kg", current_stock: 1, reorder_level: 0.25, cost_per_unit: 680 },
     { name: "Bottled Water", unit: "bottle", current_stock: 0, reorder_level: 0, cost_per_unit: 0 },
-    { name: "Softdrinks (Coke/Sprite/Royal)", unit: "bottle", current_stock: 0, reorder_level: 0, cost_per_unit: 0 },
+    { name: "Softdrinks", unit: "bottle", current_stock: 0, reorder_level: 0, cost_per_unit: 0 },
     { name: "Iced Tea", unit: "bottle", current_stock: 0, reorder_level: 0, cost_per_unit: 0 },
     { name: "Japanese Soda Ramune", unit: "bottle", current_stock: 0, reorder_level: 0, cost_per_unit: 0 },
     { name: "Green Tea (Hot/Cold)", unit: "cup", current_stock: 0, reorder_level: 0, cost_per_unit: 0 },
@@ -89,7 +89,7 @@ export async function seedDemoData(prisma: PrismaClient) {
   });
   const beverageMaterialNames = new Set([
     "Bottled Water",
-    "Softdrinks (Coke/Sprite/Royal)",
+    "Softdrinks",
     "Iced Tea",
     "Japanese Soda Ramune",
     "Green Tea (Hot/Cold)",

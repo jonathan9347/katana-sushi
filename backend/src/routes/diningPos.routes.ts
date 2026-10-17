@@ -3,6 +3,7 @@ import express, { NextFunction, Request, Response } from "express";
 import { Prisma } from "@prisma/client";
 import { z } from "zod";
 import { prisma } from "../lib/prisma";
+import { getBeverageStockMaterialName } from "../lib/beverageStock";
 import { roleGuard } from "../middleware/roleGuard";
 import {
   assertBatchQuantitiesMatchOnHand,
@@ -117,7 +118,7 @@ async function findInventoryNeeds(
     const ingredients = product.recipes[0]?.recipe_ingredients ?? [];
     if (ingredients.length === 0 && product.category.trim().toLowerCase() === "beverage") {
       const material = await tx.rawMaterial.findFirst({
-        where: { name: product.name, is_deleted: false },
+        where: { name: getBeverageStockMaterialName(product.name), is_deleted: false },
         select: { id: true, name: true, unit: true }
       });
       if (!material) {

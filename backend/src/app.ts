@@ -17,6 +17,7 @@ import paymentRoutes from "./routes/payment.routes";
 import diningPosRoutes from "./routes/diningPos.routes";
 import { seedDemoData } from "./services/demoSeed.service";
 import { assertDevelopmentDatabase } from "./lib/seedSafety";
+import { getBeverageStockMaterialName } from "./lib/beverageStock";
 import {
   assertEnoughAvailable,
   assertBatchQuantitiesMatchOnHand,
@@ -5163,10 +5164,7 @@ async function ensureBeverageStockMaterials() {
 
   await Promise.all(
     beverageProducts.map((product) => {
-      const normalizedProductName = product.name.trim();
-      const materialName = /^softdrinks(?: \(coke\/sprite\/royal\))?$/i.test(normalizedProductName)
-        ? "Softdrinks (Coke/Sprite/Royal)"
-        : normalizedProductName;
+      const materialName = getBeverageStockMaterialName(product.name);
       return prisma.rawMaterial.upsert({
         where: { name: materialName },
         update: { category: "Beverage", is_deleted: false },
@@ -7006,7 +7004,7 @@ async function getAvailableProductStocks(products: ProductStockSource[]) {
   );
   const beverageNames = products
     .filter((product) => product.category.toLowerCase() === "beverage" && (product.recipes[0]?.recipe_ingredients.length ?? 0) === 0)
-    .map((product) => product.name);
+    .map((product) => getBeverageStockMaterialName(product.name));
   const beverageMaterials = beverageNames.length > 0
     ? await prisma.rawMaterial.findMany({
         where: { name: { in: beverageNames }, is_deleted: false },
@@ -7026,7 +7024,7 @@ async function getAvailableProductStocks(products: ProductStockSource[]) {
     const ingredients = product.recipes[0]?.recipe_ingredients ?? [];
 
     if (product.category.toLowerCase() === "beverage" && ingredients.length === 0) {
-      const material = materialByName.get(product.name);
+      const material = materialByName.get(getBeverageStockMaterialName(product.name));
       const available = material
         ? calculateAvailableQuantity(
             Number(material.current_stock),
@@ -7107,7 +7105,7 @@ async function getTakeoutRequirements(
 
     if (product.category.toLowerCase() === "beverage" && ingredients.length === 0) {
       const material = await tx.rawMaterial.findFirst({
-        where: { name: product.name, is_deleted: false }
+        where: { name: getBeverageStockMaterialName(product.name), is_deleted: false }
       });
       if (!material) {
         throw new InventoryError(`${product.name} is out of stock.`, "PRODUCT_OUT_OF_STOCK", 409);
@@ -8013,14 +8011,15 @@ app.post("/api/products", upload.single("imageFile"), async (req, res, next) => 
 
       if (shouldTrackBeverageStock) {
         const beverageUnit = normalizedBeverageUnit(body.name);
+        const materialName = getBeverageStockMaterialName(body.name);
         await tx.rawMaterial.upsert({
-          where: { name: body.name },
+          where: { name: materialName },
           update: {
             is_deleted: false,
             unit: beverageUnit
           },
           create: {
-            name: body.name,
+            name: materialName,
             unit: beverageUnit,
             current_stock: 0,
             reorder_level: 0,
@@ -8084,14 +8083,15 @@ app.put("/api/products/:id", upload.single("imageFile"), async (req, res, next) 
 
     if (product.category.toLowerCase() === "beverage") {
       const beverageUnit = normalizedBeverageUnit(product.name);
+      const materialName = getBeverageStockMaterialName(product.name);
       await prisma.rawMaterial.upsert({
-        where: { name: product.name },
+        where: { name: materialName },
         update: {
           is_deleted: false,
           unit: beverageUnit
         },
         create: {
-          name: product.name,
+          name: materialName,
           unit: beverageUnit,
           current_stock: 0,
           reorder_level: 0,
@@ -8554,7 +8554,7 @@ app.post("/api/pos/transaction", async (req, res, next) => {
 
         if (product && product.category.toLowerCase() === "beverage" && recipeIngredients.length === 0) {
           const beverageMaterial = await tx.rawMaterial.findFirst({
-            where: { name: product.name, is_deleted: false }
+            where: { name: getBeverageStockMaterialName(product.name), is_deleted: false }
           });
 
           if (!beverageMaterial) {

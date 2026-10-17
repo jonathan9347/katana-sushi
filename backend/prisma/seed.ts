@@ -43,7 +43,8 @@ const rawMaterials = [
   { name: "Tuna sashimi block", unit: "kg", current_stock: 6, reorder_level: 2, cost_per_unit: 900 },
   { name: "Salmon sashimi block", unit: "kg", current_stock: 6, reorder_level: 2, cost_per_unit: 1050 },
   { name: "Chicken", unit: "kg", current_stock: 6, reorder_level: 2, cost_per_unit: 240 },
-  { name: "Aonori", unit: "kg", current_stock: 1, reorder_level: 0.25, cost_per_unit: 680 }
+  { name: "Aonori", unit: "kg", current_stock: 1, reorder_level: 0.25, cost_per_unit: 680 },
+  { name: "Softdrinks", category: "Beverage", unit: "bottle", current_stock: 0, reorder_level: 0, cost_per_unit: 0 }
 ];
 
 const seededMaterials = rawMaterials.map((material) => {
