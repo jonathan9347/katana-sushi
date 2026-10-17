@@ -1,6 +1,7 @@
 import bcrypt from "bcrypt";
 import { PrismaClient } from "@prisma/client";
 import { INVENTORY_STANDARDS } from "../src/config/inventoryStandards";
+import { assertDevelopmentDatabase } from "../src/lib/seedSafety";
 
 const prisma = new PrismaClient();
 
@@ -9,6 +10,7 @@ type ProductSeed = {
   category: string;
   price: number;
   description?: string;
+  is_available?: boolean;
   recipe: Array<{ material: string; quantity: number; unit: string }>;
 };
 
@@ -112,9 +114,9 @@ function normalizeSeedIngredient(ingredient: { material: string; quantity: numbe
   }
   if (ingredient.material === "Crabstick") {
     const quantity = productName === "Large Classic Platter (71pcs)"
-      ? 31
+      ? 0
       : productName === "Medium Classic Platter (40pcs)"
-        ? 25
+        ? 0
         : productName === "Baked Sushi California Small"
           ? 2
           : productName === "Baked Sushi California Medium"
@@ -288,8 +290,8 @@ const products: ProductSeed[] = [
   { name: "Tuna Sashimi 1000g", category: "Sashimi", price: 1300, recipe: [{ material: "Tuna sashimi block", quantity: 1, unit: "kg" }] },
   { name: "Baked Sushi California Small", category: "Baked Sushi", price: 320, recipe: defaultRoll("Crabstick", "Ebiko") },
   { name: "Baked Sushi California Medium", category: "Baked Sushi", price: 600, recipe: defaultRoll("Crabstick", "Ebiko") },
-  { name: "Large Classic Platter (71pcs)", category: "Platter", price: 1400, recipe: defaultRoll("Salmon", "Crabstick") },
-  { name: "Medium Classic Platter (40pcs)", category: "Platter", price: 750, recipe: defaultRoll("Tuna", "Crabstick") },
+  { name: "Large Classic Platter (71pcs)", category: "Platter", price: 1400, is_available: false, recipe: defaultRoll("Salmon", "Crabstick") },
+  { name: "Medium Classic Platter (40pcs)", category: "Platter", price: 750, is_available: false, recipe: defaultRoll("Tuna", "Crabstick") },
   { name: "Kani Spring Roll (3pcs)", category: "Spring Roll", price: 150, recipe: defaultRoll("Crabstick", "Lettuce") },
   { name: "Tuna Gyozai (4pcs)", category: "Gyozai", price: 160, recipe: defaultRoll("Tuna", "Spring onion") },
   { name: "Bottled Water", category: "Beverage", price: 20, recipe: [] },
@@ -330,6 +332,8 @@ const unlimitedIncludedProductNames = new Set([
 ]);
 
 async function main() {
+  await assertDevelopmentDatabase(prisma);
+
   await prisma.auditLog.deleteMany();
   await prisma.cateringInquiry.deleteMany();
   await prisma.cateringPackage.deleteMany();
@@ -398,6 +402,7 @@ async function main() {
         name: product.name,
         category: product.category,
         price: product.price,
+        is_available: product.is_available ?? true,
         description: product.description ?? `${product.category} menu item`,
         image_url: chosenImage
       }
@@ -408,7 +413,7 @@ async function main() {
         selling_product_id: sellingProduct.id,
         total_yield_quantity: 1,
         yield_unit: "serving",
-        status: "recipe not confirmed"
+        status: product.category === "Platter" ? "superseded by composition" : "recipe not confirmed"
       }
     });
 

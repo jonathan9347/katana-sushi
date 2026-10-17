@@ -4,8 +4,10 @@
 
 - Backend dev: `cd backend && npm run dev`
 - Frontend dev: `cd frontend && npm run dev`
-- Backend build check on Windows if Prisma engine is locked:
-  `set PRISMA_GENERATE_NO_ENGINE=1&& npm run build`
+- On Windows, stop the backend with Ctrl+C and wait for the prompt before running
+  `npm run build` or `npm run prisma:generate`; a running server can hold the
+  Prisma engine and cause `EPERM`. Check port 5001 before restarting.
+- Backend build check: `cd backend && npm run build`
 - Frontend build check: `cd frontend && npm run build`
 - Database migrations: `cd backend && npm run prisma:migrate:deploy`
 - Apply migrations and demo seed intentionally: `cd backend && npm run db:setup`
@@ -51,6 +53,11 @@ not use a built-in fallback secret.
 - Local development should use a separate development database, not the same database used by the deployed site.
 - If local development and the deployed site share one database, keep the local backend stopped; local API requests may write to that database.
 - Runtime startup does not create tables, alter schema, or seed demo data. Run migrations and seed commands explicitly.
+- The development seed contains default staff credentials in
+  `backend/prisma/seed.ts`, `backend/src/services/demoSeed.service.ts`, and the
+  legacy fallback in `backend/src/app.ts`. Seeding is restricted to the local
+  `katana_sushi_dev` database. Change all seeded/default credentials before any
+  live deployment; never use the development accounts in production.
 
 ## Payments and Authentication
 

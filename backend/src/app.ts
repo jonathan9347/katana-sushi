@@ -16,6 +16,7 @@ import { generateTransactionNumber } from "./utils/transactionNumber";
 import paymentRoutes from "./routes/payment.routes";
 import diningPosRoutes from "./routes/diningPos.routes";
 import { seedDemoData } from "./services/demoSeed.service";
+import { assertDevelopmentDatabase } from "./lib/seedSafety";
 import {
   assertEnoughAvailable,
   assertBatchQuantitiesMatchOnHand,
@@ -102,6 +103,7 @@ const defaultStaffUsers = [
 ];
 
 async function ensureDefaultStaffUsers() {
+  await assertDevelopmentDatabase(prisma);
   const existingUserCount = await prisma.user.count();
 
   if (existingUserCount > 0) {
@@ -128,6 +130,7 @@ async function ensureDefaultStaffUsers() {
 
 export async function ensureDemoSeed() {
   try {
+    await assertDevelopmentDatabase(prisma);
     await ensureOperationalSchema();
     await ensureCustomerFeedbackTable();
     const userCount = await prisma.user.count();
