@@ -1,5 +1,6 @@
 import bcrypt from "bcrypt";
 import { PrismaClient } from "@prisma/client";
+import { INVENTORY_STANDARDS } from "../config/inventoryStandards";
 
 export async function seedDemoData(prisma: PrismaClient) {
   type ProductSeed = {
@@ -41,7 +42,7 @@ export async function seedDemoData(prisma: PrismaClient) {
     { name: "Chicken", unit: "kg", current_stock: 6, reorder_level: 2, cost_per_unit: 240 },
     { name: "Aonori", unit: "kg", current_stock: 1, reorder_level: 0.25, cost_per_unit: 680 },
     { name: "Bottled Water", unit: "bottle", current_stock: 0, reorder_level: 0, cost_per_unit: 0 },
-    { name: "Softdrinks (Coke/Sprite/Royal)", unit: "bottle", current_stock: 0, reorder_level: 0, cost_per_unit: 0 },
+    { name: "Softdrinks", unit: "bottle", current_stock: 0, reorder_level: 0, cost_per_unit: 0 },
     { name: "Iced Tea", unit: "bottle", current_stock: 0, reorder_level: 0, cost_per_unit: 0 },
     { name: "Japanese Soda Ramune", unit: "bottle", current_stock: 0, reorder_level: 0, cost_per_unit: 0 },
     { name: "Green Tea (Hot/Cold)", unit: "cup", current_stock: 0, reorder_level: 0, cost_per_unit: 0 },
@@ -52,9 +53,39 @@ export async function seedDemoData(prisma: PrismaClient) {
     { name: "Calamansi Juice", unit: "bottle", current_stock: 0, reorder_level: 0, cost_per_unit: 0 },
     { name: "Mango Shake", unit: "cup", current_stock: 0, reorder_level: 0, cost_per_unit: 0 }
   ];
+  const seededMaterials = rawMaterials.map((material) => {
+    if (material.name === "Avocado") {
+      return {
+        ...material,
+        unit: "g",
+        current_stock: BigInt(material.current_stock * INVENTORY_STANDARDS.estimatedAvocadoUsableGramsPerFruit),
+        reorder_level: BigInt(material.reorder_level * INVENTORY_STANDARDS.estimatedAvocadoUsableGramsPerFruit),
+        cost_per_unit: Number((material.cost_per_unit / INVENTORY_STANDARDS.estimatedAvocadoUsableGramsPerFruit).toFixed(8)),
+        cost_source_amount: 55,
+        cost_source_quantity: 150,
+        cost_source_unit: "g"
+      };
+    }
+    if (material.unit === "kg" || material.unit === "L") {
+      const factor = 1000;
+      return {
+        ...material,
+        unit: material.unit === "kg" ? "g" : "ml",
+        current_stock: BigInt(material.current_stock * factor),
+        reorder_level: BigInt(material.reorder_level * factor),
+        cost_per_unit: material.cost_per_unit / factor
+      };
+    }
+    return {
+      ...material,
+      unit: material.unit === "pieces" ? "piece" : material.unit === "sheets" ? "sheet" : material.unit,
+      current_stock: BigInt(material.current_stock),
+      reorder_level: BigInt(material.reorder_level)
+    };
+  });
   const beverageMaterialNames = new Set([
     "Bottled Water",
-    "Softdrinks (Coke/Sprite/Royal)",
+    "Softdrinks",
     "Iced Tea",
     "Japanese Soda Ramune",
     "Green Tea (Hot/Cold)",
@@ -67,20 +98,80 @@ export async function seedDemoData(prisma: PrismaClient) {
   ]);
 
   const classicBase = [
-    { material: "Rice", quantity: 0.2, unit: "kg" },
+    { material: "Rice", quantity: 200, unit: "g" },
     { material: "Nori", quantity: 1, unit: "sheet" }
   ];
 
   const hosoBase = [
-    { material: "Rice", quantity: 0.1, unit: "kg" },
+    { material: "Rice", quantity: 100, unit: "g" },
     { material: "Nori", quantity: 1, unit: "sheet" }
   ];
 
-  const defaultRoll = (protein: string, secondary: string) => [
-    ...classicBase,
-    { material: protein, quantity: 0.03, unit: "kg" },
-    { material: secondary, quantity: 0.02, unit: "kg" }
-  ];
+  const defaultRoll = (protein: string, secondary: string) => {
+    const ingredient = (material: string, quantity: number, unit: string) => ({ material, quantity, unit });
+    const proteinIngredient = protein === "Crabstick"
+      ? ingredient(protein, 4, "piece")
+      : protein === "Kani tempura"
+        ? ingredient(protein, 1, "piece")
+        : ingredient(protein, 30, "g");
+    const secondaryIngredient = secondary === "Spicy mayo"
+      ? ingredient(secondary, INVENTORY_STANDARDS.ownerConfirmedSpicyMayoMlPerServing, "ml")
+      : secondary === "Crabstick"
+        ? ingredient(secondary, 4, "piece")
+        : ingredient(secondary, 20, "g");
+    return [...classicBase, proteinIngredient, secondaryIngredient];
+  };
+
+  function normalizeSeedIngredient(ingredient: { material: string; quantity: number; unit: string }, productName: string) {
+    if (productName === "Baked Sushi California Small" || productName === "Baked Sushi California Medium") {
+      const isMedium = productName.endsWith("Medium");
+      const bakedAmounts: Record<string, number> = {
+        Ebiko: isMedium ? 30 : 20,
+        Nori: isMedium ? 2 : 1,
+        Rice: isMedium ? 300 : 200
+      };
+      if (ingredient.material in bakedAmounts) {
+        const unit = ingredient.material === "Nori" ? "sheet" : "g";
+        return { quantity_per_yield: BigInt(bakedAmounts[ingredient.material]), unit };
+      }
+    }
+    if (ingredient.material === "Spicy mayo") {
+      return { quantity_per_yield: BigInt(INVENTORY_STANDARDS.ownerConfirmedSpicyMayoMlPerServing), unit: "ml" };
+    }
+    if (ingredient.material === "Aonori") {
+      return { quantity_per_yield: BigInt(INVENTORY_STANDARDS.estimatedAonoriGramsPerServing), unit: "g" };
+    }
+    if (ingredient.material === "Teriyaki sauce") {
+      return { quantity_per_yield: BigInt(INVENTORY_STANDARDS.estimatedTeriyakiSauceMlPerServing), unit: "ml" };
+    }
+    if (ingredient.material === "Tempura flakes") {
+      return { quantity_per_yield: BigInt(INVENTORY_STANDARDS.estimatedTempuraFlakesGramsPerServing), unit: "g" };
+    }
+    if (ingredient.material === "Crabstick") {
+      const quantity = productName === "Large Classic Platter (71pcs)"
+        ? 31
+        : productName === "Medium Classic Platter (40pcs)"
+          ? 25
+          : productName === "Baked Sushi California Small"
+            ? 2
+            : productName === "Baked Sushi California Medium"
+              ? 3
+              : productName.endsWith("Hoso")
+                ? 3
+                : 4;
+      return { quantity_per_yield: BigInt(quantity), unit: "piece" };
+    }
+    if (ingredient.material === "Kani tempura") {
+      return { quantity_per_yield: 1n, unit: "piece" };
+    }
+    if (ingredient.unit === "kg") {
+      return { quantity_per_yield: BigInt(Math.round(ingredient.quantity * 1000)), unit: "g" };
+    }
+    if (ingredient.unit === "L") {
+      return { quantity_per_yield: BigInt(Math.round(ingredient.quantity * 1000)), unit: "ml" };
+    }
+    return { quantity_per_yield: BigInt(ingredient.quantity), unit: ingredient.unit === "sheets" ? "sheet" : ingredient.unit };
+  }
 
   const products: ProductSeed[] = [
     {
@@ -280,7 +371,6 @@ export async function seedDemoData(prisma: PrismaClient) {
   await prisma.recipeIngredient.deleteMany();
   await prisma.recipe.deleteMany();
   await prisma.sellingProduct.deleteMany();
-  await prisma.conversionRule.deleteMany();
   await prisma.rawMaterial.deleteMany();
   await prisma.user.deleteMany();
 
@@ -307,7 +397,7 @@ export async function seedDemoData(prisma: PrismaClient) {
   );
 
   await prisma.rawMaterial.createMany({
-    data: rawMaterials.map((material) => ({
+    data: seededMaterials.map((material) => ({
       ...material,
       category: beverageMaterialNames.has(material.name) ? "Beverage" : "Raw Material"
     }))
@@ -343,7 +433,8 @@ export async function seedDemoData(prisma: PrismaClient) {
       data: {
         selling_product_id: sellingProduct.id,
         total_yield_quantity: 1,
-        yield_unit: "serving"
+        yield_unit: "serving",
+        status: "recipe not confirmed"
       }
     });
 
@@ -357,10 +448,9 @@ export async function seedDemoData(prisma: PrismaClient) {
           }
 
           return {
+            ...normalizeSeedIngredient(ingredient, product.name),
             recipe_id: recipe.id,
-            raw_material_id: rawMaterialId,
-            quantity_per_yield: ingredient.quantity,
-            unit: ingredient.unit
+            raw_material_id: rawMaterialId
           };
         })
       });
@@ -382,14 +472,6 @@ export async function seedDemoData(prisma: PrismaClient) {
       selling_product_id: product.id,
       is_included: unlimitedIncludedProductNames.has(product.name)
     }))
-  });
-
-  await prisma.conversionRule.createMany({
-    data: [
-      { name: "Raw rice to cooked rice", from_quantity: 1, from_unit: "kg raw rice", to_quantity: 2.5, to_unit: "kg cooked rice" },
-      { name: "Salmon usable yield", from_quantity: 1, from_unit: "kg salmon", to_quantity: 0.9, to_unit: "kg usable salmon" },
-      { name: "Tuna usable yield", from_quantity: 1, from_unit: "kg tuna", to_quantity: 0.85, to_unit: "kg usable tuna" }
-    ]
   });
 
   await prisma.cateringPackage.createMany({

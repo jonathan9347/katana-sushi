@@ -58,6 +58,17 @@ function expiryLabel(status: MaterialBatch["expiryStatus"]) {
   }
 }
 
+function costDisplayFactor(unit: string) {
+  return ["g", "ml"].includes(unit.trim().toLowerCase()) ? 100 : 1;
+}
+
+function costDisplayUnit(unit: string) {
+  const normalized = unit.trim().toLowerCase();
+  if (normalized === "g") return "100 g";
+  if (normalized === "ml") return "100 ml";
+  return unit;
+}
+
 export default function BatchManagement({
   initialExpiringOnly = false,
   onExpiringOnlyChange
@@ -144,6 +155,7 @@ export default function BatchManagement({
     () => (expiringQuery.data ?? []).filter((batch) => batch.expiryStatus === "expired").length,
     [expiringQuery.data]
   );
+  const selectedBatchMaterial = materialsQuery.data?.find((material) => material.id === batchForm.raw_material_id);
 
   function handleMaterialChange(materialId: string) {
     const material = materialsQuery.data?.find((entry) => entry.id === materialId);
@@ -288,8 +300,8 @@ export default function BatchManagement({
             Quantity
             <input
               required
-              min="0.001"
-              step="0.001"
+              min="1"
+              step="1"
               type="number"
               className="h-10 rounded-md border border-slate-300 px-3"
               value={batchForm.quantity}
@@ -307,15 +319,23 @@ export default function BatchManagement({
             />
           </label>
           <label className="grid gap-1 text-sm">
-            Cost per unit
+            Cost per {selectedBatchMaterial ? costDisplayUnit(selectedBatchMaterial.unit) : "base unit"}
             <input
               required
               min="0"
-              step="0.01"
+              step={selectedBatchMaterial && costDisplayFactor(selectedBatchMaterial.unit) === 100
+                ? "0.000001"
+                : "0.00000001"}
               type="number"
               className="h-10 rounded-md border border-slate-300 px-3"
-              value={batchForm.cost_per_unit}
-              onChange={(event) => setBatchForm((current) => ({ ...current, cost_per_unit: event.target.value }))}
+              value={(() => {
+                const factor = selectedBatchMaterial ? costDisplayFactor(selectedBatchMaterial.unit) : 1;
+                return (Number(batchForm.cost_per_unit) * factor).toFixed(factor === 100 ? 6 : 8);
+              })()}
+              onChange={(event) => {
+                const factor = selectedBatchMaterial ? costDisplayFactor(selectedBatchMaterial.unit) : 1;
+                setBatchForm((current) => ({ ...current, cost_per_unit: String(Number(event.target.value) / factor) }));
+              }}
             />
           </label>
           <label className="grid gap-1 text-sm">

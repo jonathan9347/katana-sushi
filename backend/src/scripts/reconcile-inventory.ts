@@ -1,7 +1,7 @@
 import path from "path";
 import dotenv from "dotenv";
 import { PrismaClient } from "@prisma/client";
-import { canConvertInventoryUnits, isTerminalReservationStatus } from "../services/inventory.service";
+import { inventoryUnitsMatch, isTerminalReservationStatus } from "../services/inventory.service";
 
 if (process.env.NODE_ENV !== "production") {
   dotenv.config({ path: path.resolve(__dirname, "..", "..", ".env") });
@@ -10,7 +10,7 @@ if (process.env.NODE_ENV !== "production") {
 const prisma = new PrismaClient();
 
 async function main() {
-  const [materials, products, conversionRules] = await Promise.all([
+  const [materials, products] = await Promise.all([
     prisma.rawMaterial.findMany({
       where: { is_deleted: false },
       orderBy: { name: "asc" },
@@ -38,17 +38,6 @@ async function main() {
           }
         }
       }
-    }),
-    prisma.conversionRule.findMany({
-      orderBy: { name: "asc" },
-      select: {
-        id: true,
-        name: true,
-        from_quantity: true,
-        from_unit: true,
-        to_quantity: true,
-        to_unit: true
-      }
     })
   ]);
 
@@ -65,12 +54,9 @@ async function main() {
     const available = onHand - reserved;
     const reasons: string[] = [];
 
-    if (Math.abs(onHand - batchQuantity) > 0.0005) reasons.push("on_hand_differs_from_batch_total");
-    if (available < -0.0005) reasons.push("negative_available");
-    if (["piece", "pieces", "pc", "pcs", "sheet", "sheets"].includes(material.unit.trim().toLowerCase())
-      && !Number.isInteger(onHand)) {
-      reasons.push("fractional_countable_stock");
-    }
+    if (onHand !== batchQuantity) reasons.push("on_hand_differs_from_batch_total");
+    if (available < 0) reasons.push("negative_available");
+    if (!Number.isSafeInteger(onHand)) reasons.push("fractional_stock");
 
     if (reasons.length === 0) return [];
 
@@ -79,10 +65,10 @@ async function main() {
       material: material.name,
       unit: material.unit,
       on_hand: onHand,
-      batch_total: Number(batchQuantity.toFixed(3)),
-      batch_difference: Number((onHand - batchQuantity).toFixed(3)),
-      active_reserved: Number(reserved.toFixed(3)),
-      available: Number(available.toFixed(3)),
+      batch_total: batchQuantity,
+      batch_difference: onHand - batchQuantity,
+      active_reserved: reserved,
+      available,
       reasons,
       active_booking_holds: activeLocks.map((lock) => ({
         booking_reference: lock.catering_reservation.reservation_id ?? lock.catering_reservation.id,
@@ -96,7 +82,7 @@ async function main() {
   const recipeUnitMismatches = products.flatMap((product) =>
     product.recipes.flatMap((recipe) =>
       recipe.recipe_ingredients.flatMap((ingredient) =>
-        canConvertInventoryUnits(ingredient.unit, ingredient.raw_material.unit)
+        inventoryUnitsMatch(ingredient.unit, ingredient.raw_material.unit)
           ? []
           : [{
               product: product.name,
@@ -118,7 +104,6 @@ async function main() {
     materials_checked: materials.length,
     products_checked: products.length,
     material_mismatches: materialMismatches,
-    conversion_rules: conversionRules,
     recipe_unit_mismatches: recipeUnitMismatches,
     products_without_recipes: productsWithoutRecipes
   }, null, 2));

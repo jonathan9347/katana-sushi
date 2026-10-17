@@ -49,10 +49,28 @@ const emptyStockCountForm: StockCountForm = {
 const emptyMaterialForm: MaterialForm = {
   name: "",
   category: "Raw Material",
-  unit: "kg",
+  unit: "g",
   reorder_level: "0",
   cost_per_unit: "0"
 };
+
+function costDisplayFactor(unit: string) {
+  return ["g", "ml"].includes(unit.trim().toLowerCase()) ? 100 : 1;
+}
+
+function costDisplayUnit(unit: string) {
+  const normalized = unit.trim().toLowerCase();
+  if (normalized === "g") return "100 g";
+  if (normalized === "ml") return "100 ml";
+  return unit;
+}
+
+function formatCostPerDisplayUnit(costPerBaseUnit: string | number, unit: string) {
+  return `PHP ${(Number(costPerBaseUnit) * costDisplayFactor(unit)).toLocaleString(undefined, {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: costDisplayFactor(unit) === 100 ? 6 : 8
+  })}/${costDisplayUnit(unit)}`;
+}
 
 function formFromMaterial(material: RawMaterial): MaterialForm {
   return {
@@ -187,15 +205,19 @@ export default function MaterialsList({ role, onNavigateStockView, onOpenReserva
   });
 
   const stockCountMutation = useMutation({
-    mutationFn: async () =>
-      api.post<{ adjusted: boolean; difference: number }>("/api/inventory/stock-count", {
+    mutationFn: async () => {
+      const countedMaterial = materialsQuery.data?.find((material) => material.id === stockCountForm.raw_material_id);
+      return api.post<{ adjusted: boolean; difference: number }>("/api/inventory/stock-count", {
         raw_material_id: stockCountForm.raw_material_id,
         physical_count: Number(stockCountForm.physical_count),
         reason: stockCountForm.reason,
         batch_number: stockCountForm.batch_number || undefined,
         expiration_date: stockCountForm.expiration_date || undefined,
-        cost_per_unit: stockCountForm.cost_per_unit === "" ? undefined : Number(stockCountForm.cost_per_unit)
-      }),
+        cost_per_unit: stockCountForm.cost_per_unit === "" || !countedMaterial
+          ? undefined
+          : Number(stockCountForm.cost_per_unit) / costDisplayFactor(countedMaterial.unit)
+      });
+    },
     onSuccess: ({ data }) => {
       setStockCountOpen(false);
       setStockCountForm(emptyStockCountForm);
@@ -270,10 +292,6 @@ export default function MaterialsList({ role, onNavigateStockView, onOpenReserva
   const stockCountNeedsBatch =
     stockCountMaterial !== undefined &&
     Number(stockCountForm.physical_count) > Number(stockCountMaterial.current_stock);
-  const stockCountUsesWholeUnits = ["piece", "pieces", "pc", "pcs", "sheet", "sheets"].includes(
-    stockCountMaterial?.unit.trim().toLowerCase() ?? ""
-  );
-
   return (
     <Card>
       <CardHeader className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
@@ -360,7 +378,7 @@ export default function MaterialsList({ role, onNavigateStockView, onOpenReserva
                           <TableHead>Reserved</TableHead>
                           <TableHead>Available</TableHead>
                           <TableHead>Reorder Level</TableHead>
-                          <TableHead>Cost per Unit</TableHead>
+                          <TableHead>Cost per 100 g, 100 ml, or item</TableHead>
                           <TableHead>Status</TableHead>
                           <TableHead>Actions</TableHead>
                         </TableRow>
@@ -423,7 +441,7 @@ export default function MaterialsList({ role, onNavigateStockView, onOpenReserva
                                 {!batchMismatch && available >= 0 && isLowStock && <p className="mt-1 text-xs font-semibold">Below reorder level.</p>}
                               </TableCell>
                               <TableCell>{Number(material.reorder_level).toLocaleString()}</TableCell>
-                              <TableCell>PHP {Number(material.cost_per_unit).toLocaleString()}</TableCell>
+                              <TableCell>{formatCostPerDisplayUnit(material.cost_per_unit, material.unit)}</TableCell>
                               <TableCell><span className={`rounded-full px-2 py-1 text-xs font-semibold ${statusClass}`}>{status}</span></TableCell>
                               <TableCell>
                                 {isAdmin && (
@@ -590,7 +608,7 @@ export default function MaterialsList({ role, onNavigateStockView, onOpenReserva
             <input
               required
               min="0"
-              step={stockCountUsesWholeUnits ? "1" : "0.001"}
+              step="1"
               type="number"
               className="h-10 rounded-md border border-slate-300 px-3"
               value={stockCountForm.physical_count}
@@ -632,11 +650,11 @@ export default function MaterialsList({ role, onNavigateStockView, onOpenReserva
                 />
               </label>
               <label className="grid gap-1 text-sm">
-                Cost per unit
+                Cost per {stockCountMaterial ? costDisplayUnit(stockCountMaterial.unit) : "base unit"}
                 <input
                   required
                   min="0"
-                  step="0.01"
+                  step={stockCountMaterial && costDisplayFactor(stockCountMaterial.unit) === 100 ? "0.000001" : "0.00000001"}
                   type="number"
                   className="h-10 rounded-md border border-slate-300 bg-white px-3"
                   value={stockCountForm.cost_per_unit}
@@ -675,8 +693,8 @@ function MaterialFields({
     { key: "name", label: "Name", editable: true },
     { key: "category", label: "Category", editable: true },
     { key: "unit", label: "Unit", editable: true },
-    { key: "reorder_level", label: "Reorder Level", editable: true },
-    { key: "cost_per_unit", label: "Cost Per Unit", editable: true }
+    { key: "reorder_level", label: "Reorder Level (whole units)", editable: true },
+    { key: "cost_per_unit", label: `Cost per ${costDisplayUnit(form.unit)}`, editable: true }
   ];
 
   return (
@@ -701,23 +719,32 @@ function MaterialFields({
               value={form.unit}
               onChange={(event) => onChange({ ...form, unit: event.target.value })}
             >
-              <option value="kg">kg</option>
               <option value="g">g</option>
-              <option value="pieces">pieces</option>
+              <option value="ml">ml</option>
+              <option value="piece">piece</option>
               <option value="bottle">bottle</option>
               <option value="cup">cup</option>
-              <option value="sheets">sheets</option>
-              <option value="liters">liters</option>
+              <option value="sheet">sheet</option>
             </select>
           ) : (
             <input
               className="h-10 rounded-md border border-slate-300 px-3 text-sm outline-none focus:border-red-700 focus:ring-2 focus:ring-red-100 disabled:bg-slate-100"
               disabled={!field.editable}
               required
+              min={field.key === "name" ? undefined : "0"}
               type={field.key === "name" ? "text" : "number"}
-              step="0.001"
-              value={form[field.key]}
-              onChange={(event) => onChange({ ...form, [field.key]: event.target.value })}
+              step={field.key === "cost_per_unit"
+                ? costDisplayFactor(form.unit) === 100 ? "0.000001" : "0.00000001"
+                : "1"}
+              value={field.key === "cost_per_unit"
+                ? (Number(form.cost_per_unit) * costDisplayFactor(form.unit)).toFixed(costDisplayFactor(form.unit) === 100 ? 6 : 8)
+                : form[field.key]}
+              onChange={(event) => onChange({
+                ...form,
+                [field.key]: field.key === "cost_per_unit"
+                  ? String(Number(event.target.value) / costDisplayFactor(form.unit))
+                  : event.target.value
+              })}
             />
           )}
         </label>

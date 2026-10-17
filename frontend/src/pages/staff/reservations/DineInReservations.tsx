@@ -755,7 +755,7 @@ export default function DineInReservations() {
                       type="number"
                       min="0"
                       max={Number(lock.reserved_quantity)}
-                      step={["piece", "pieces", "pc", "pcs", "sheet", "sheets"].includes(lock.unit.toLowerCase()) ? "1" : "0.001"}
+                      step="1"
                       value={preparedQuantities[lock.raw_material.id] ?? "0"}
                       onChange={(event) => setPreparedQuantities((current) => ({
                         ...current,

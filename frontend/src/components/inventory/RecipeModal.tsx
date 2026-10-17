@@ -99,28 +99,7 @@ export default function RecipeModal({ productId, isAdmin, onClose }: RecipeModal
   });
 
   function calculateIngredientCost(quantity: number, ingredientUnit: string, materialUnit: string, costPerUnit: number) {
-    const normalizedIngredientUnit = ingredientUnit.toLowerCase();
-    const normalizedMaterialUnit = materialUnit.toLowerCase();
-
-    if (normalizedIngredientUnit === normalizedMaterialUnit) {
-      return quantity * costPerUnit;
-    }
-
-    if (
-      (normalizedIngredientUnit === "g" || normalizedIngredientUnit === "gram" || normalizedIngredientUnit === "grams") &&
-      normalizedMaterialUnit === "kg"
-    ) {
-      return (quantity / 1000) * costPerUnit;
-    }
-
-    if (
-      (normalizedIngredientUnit === "ml" || normalizedIngredientUnit === "milliliter" || normalizedIngredientUnit === "milliliters") &&
-      (normalizedMaterialUnit === "l" || normalizedMaterialUnit === "liter" || normalizedMaterialUnit === "liters")
-    ) {
-      return (quantity / 1000) * costPerUnit;
-    }
-
-    return quantity * costPerUnit;
+    return ingredientUnit === materialUnit ? quantity * costPerUnit : 0;
   }
 
   const totals = useMemo(() => {
@@ -159,6 +138,9 @@ export default function RecipeModal({ productId, isAdmin, onClose }: RecipeModal
       {recipeQuery.data && (
         <form className="grid gap-4" onSubmit={submit}>
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <span className="rounded-full bg-amber-100 px-3 py-1 text-xs font-bold text-amber-900">
+              {recipeQuery.data.status ?? "recipe not confirmed"}
+            </span>
             <div className="grid gap-1 text-sm font-medium text-slate-700 sm:w-56">
               <span>Selling Price</span>
               {isEditing ? (
@@ -203,8 +185,8 @@ export default function RecipeModal({ productId, isAdmin, onClose }: RecipeModal
                       {isEditing ? (
                         <input
                           className="h-9 w-32 rounded-md border border-slate-300 px-2 text-sm"
-                          min="0.001"
-                          step="0.001"
+                          min="1"
+                          step="1"
                           type="number"
                           value={drafts[ingredient.id]?.quantity ?? ingredient.quantity}
                           onChange={(event) =>
@@ -223,19 +205,7 @@ export default function RecipeModal({ productId, isAdmin, onClose }: RecipeModal
                     </TableCell>
                     <TableCell>
                       {isEditing ? (
-                        <input
-                          className="h-9 w-28 rounded-md border border-slate-300 px-2 text-sm"
-                          value={drafts[ingredient.id]?.unit ?? ingredient.unit}
-                          onChange={(event) =>
-                            setDrafts((current) => ({
-                              ...current,
-                              [ingredient.id]: {
-                                quantity: current[ingredient.id]?.quantity ?? String(ingredient.quantity),
-                                unit: event.target.value
-                              }
-                            }))
-                          }
-                        />
+                        ingredient.unit
                       ) : (
                         ingredient.unit
                       )}
@@ -243,23 +213,43 @@ export default function RecipeModal({ productId, isAdmin, onClose }: RecipeModal
                     <TableCell>
                       {isEditing ? (
                         <div className="flex items-center gap-2">
+                          {(() => {
+                            const factor = ["g", "ml"].includes(ingredient.rawMaterialUnit) ? 100 : 1;
+                            const displayUnit = ingredient.rawMaterialUnit === "g"
+                              ? "100 g"
+                              : ingredient.rawMaterialUnit === "ml"
+                                ? "100 ml"
+                                : ingredient.rawMaterialUnit;
+                            return (
+                              <>
                           <input
                             className="h-9 w-32 rounded-md border border-slate-300 px-2 text-sm"
                             min="0"
-                            step="0.01"
+                            step={factor === 100 ? "0.000001" : "0.00000001"}
                             type="number"
-                            value={costDrafts[ingredient.id] ?? ingredient.rawMaterialCostPerUnit}
+                            value={(Number(costDrafts[ingredient.id] ?? ingredient.rawMaterialCostPerUnit) * factor).toFixed(factor === 100 ? 6 : 8)}
                             onChange={(event) =>
                               setCostDrafts((current) => ({
                                 ...current,
-                                [ingredient.id]: event.target.value
+                                [ingredient.id]: String(Number(event.target.value) / factor)
                               }))
                             }
                           />
-                          <span className="text-xs text-slate-500">/ {ingredient.rawMaterialUnit}</span>
+                          <span className="text-xs text-slate-500">/ {displayUnit}</span>
+                              </>
+                            );
+                          })()}
                         </div>
                       ) : (
-                        `PHP ${Number(ingredient.rawMaterialCostPerUnit).toFixed(2)} / ${ingredient.rawMaterialUnit}`
+                        (() => {
+                          const factor = ["g", "ml"].includes(ingredient.rawMaterialUnit) ? 100 : 1;
+                          const unit = ingredient.rawMaterialUnit === "g"
+                            ? "100 g"
+                            : ingredient.rawMaterialUnit === "ml"
+                              ? "100 ml"
+                              : ingredient.rawMaterialUnit;
+                          return `PHP ${(Number(ingredient.rawMaterialCostPerUnit) * factor).toFixed(factor === 100 ? 6 : 8)} / ${unit}`;
+                        })()
                       )}
                     </TableCell>
                     <TableCell>

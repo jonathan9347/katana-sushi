@@ -20,10 +20,9 @@ import {
   assertEnoughAvailable,
   assertBatchQuantitiesMatchOnHand,
   assertReservationIngredientAvailability,
-  canConvertInventoryUnits,
+  inventoryUnitsMatch,
   calculateAvailableQuantity,
   consumeMaterialStock,
-  convertInventoryQuantity,
   createInventoryMovement,
   getActiveCateringReservationQuantity,
   getActiveCateringReservationQuantities,
@@ -32,7 +31,6 @@ import {
   isReservationInventoryHoldActive,
   isTerminalReservationStatus,
   lockMaterialForUpdate,
-  normalizeInventoryUnit,
   recordReservationMovement,
   validateInventoryCount,
   validateInventoryQuantity
@@ -83,6 +81,14 @@ initSupabase().catch((error) => {
 });
 
 const app = express();
+app.set("json replacer", (_key: string, value: unknown) => {
+  if (typeof value !== "bigint") return value;
+  const numericValue = Number(value);
+  if (!Number.isSafeInteger(numericValue)) {
+    throw new RangeError("Inventory quantity exceeds the safe JSON integer range.");
+  }
+  return numericValue;
+});
 const notificationService = new NotificationService();
 const paymentService = new PaymentService();
 
@@ -174,7 +180,7 @@ export async function ensureOperationalSchema() {
       "id" TEXT NOT NULL,
       "reservation_id" TEXT NOT NULL,
       "raw_material_id" TEXT NOT NULL,
-      "reserved_quantity" DECIMAL(12,3) NOT NULL,
+      "reserved_quantity" BIGINT NOT NULL,
       "unit" TEXT NOT NULL,
       "is_released" BOOLEAN NOT NULL DEFAULT false,
       "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -250,12 +256,12 @@ export async function ensureOperationalSchema() {
       "source_type" TEXT,
       "source_reference" TEXT,
       "action" TEXT NOT NULL,
-      "quantity" DECIMAL(12,3) NOT NULL,
+      "quantity" BIGINT NOT NULL,
       "unit" TEXT NOT NULL,
-      "quantity_before" DECIMAL(12,3),
-      "quantity_after" DECIMAL(12,3),
-      "reserved_before" DECIMAL(12,3),
-      "reserved_after" DECIMAL(12,3),
+      "quantity_before" BIGINT,
+      "quantity_after" BIGINT,
+      "reserved_before" BIGINT,
+      "reserved_after" BIGINT,
       "actor_id" TEXT,
       "note" TEXT,
       "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -1178,15 +1184,11 @@ function getReservationIngredientRequirements(
 
     for (const ingredient of recipeIngredients) {
       const material = ingredient.raw_material;
-      if (!canConvertInventoryUnits(ingredient.unit, material.unit)) {
+      if (!inventoryUnitsMatch(ingredient.unit, material.unit)) {
         warnings.push(`${product.name}: ${material.name} uses ${ingredient.unit} in its recipe but ${material.unit} in stock.`);
         continue;
       }
-      const required = convertQuantityToMaterialUnit(
-        Number(ingredient.quantity_per_yield) * quantity,
-        ingredient.unit,
-        material.unit
-      );
+      const required = Number(ingredient.quantity_per_yield) * quantity;
       const existing = totals.get(material.id);
       totals.set(material.id, existing
         ? { ...existing, quantity: existing.quantity + required }
@@ -1459,14 +1461,14 @@ async function wasteCateringReservationIngredients(
     if (remainingToRelease <= 0) break;
     const reserved = Number(lock.reserved_quantity);
     const released = Math.min(reserved, remainingToRelease);
-    const remainder = Number((reserved - released).toFixed(3));
+    const remainder = reserved - released;
     await tx.cateringIngredientLock.update({
       where: { id: lock.id },
       data: remainder <= 0
         ? { reserved_quantity: 0, is_released: true, released_at: new Date() }
         : { reserved_quantity: remainder }
     });
-    remainingToRelease = Number((remainingToRelease - released).toFixed(3));
+    remainingToRelease -= released;
   }
 
   return consumed;
@@ -1518,14 +1520,14 @@ async function wasteDineInReservationIngredients(
     if (remainingToRelease <= 0) break;
     const reserved = Number(lock.reserved_quantity);
     const released = Math.min(reserved, remainingToRelease);
-    const remainder = Number((reserved - released).toFixed(3));
+    const remainder = reserved - released;
     await tx.reservationIngredientLock.update({
       where: { id: lock.id },
       data: remainder <= 0
         ? { reserved_quantity: 0, is_released: true, released_at: new Date() }
         : { reserved_quantity: remainder }
     });
-    remainingToRelease = Number((remainingToRelease - released).toFixed(3));
+    remainingToRelease -= released;
   }
 
   return consumed;
@@ -1599,11 +1601,14 @@ async function createCateringIngredientLocks(
 
     for (const ingredient of recipeIngredients) {
       const material = ingredient.raw_material;
-      const reservedQuantity = convertQuantityToMaterialUnit(
-        Number(ingredient.quantity_per_yield) * headcount,
-        ingredient.unit,
-        material.unit
-      );
+      if (!inventoryUnitsMatch(ingredient.unit, material.unit)) {
+        throw new InventoryError(
+          `${product.name} recipe unit for ${material.name} does not match its stock unit.`,
+          "UNIT_MISMATCH",
+          409
+        );
+      }
+      const reservedQuantity = Number(ingredient.quantity_per_yield) * headcount;
       const existing = locksByMaterial.get(material.id);
 
       if (existing) {
@@ -2432,7 +2437,7 @@ app.put("/api/admin/settings/system", async (req, res, next) => {
         default_downpayment_percent: z.coerce.number().min(0).max(100),
         auto_lock_catering_ingredients: z.coerce.boolean(),
         release_catering_locks_on_completion: z.coerce.boolean(),
-        default_reorder_level: z.coerce.number().nonnegative(),
+        default_reorder_level: z.coerce.number().int().nonnegative(),
         low_stock_threshold_percent: z.coerce.number().min(0).max(500),
         auto_reorder_enabled: z.coerce.boolean(),
         email_notifications_enabled: z.coerce.boolean(),
@@ -3462,7 +3467,7 @@ app.put("/api/staff/catering/reservations/:id/cancel", async (req, res, next) =>
       cash_received: z.coerce.number().min(0).optional().nullable(),
       prepared_ingredients: z.array(z.object({
         raw_material_id: z.string().min(1),
-        quantity: z.coerce.number().positive()
+        quantity: z.coerce.number().int().positive()
       })).optional()
     }).parse(req.body);
 
@@ -4295,7 +4300,7 @@ app.put("/api/staff/reservations/:id/approve", async (req, res, next) => {
       const selectedItemsResult = z.array(z.object({
         product_id: z.string().min(1),
         name: z.string(),
-        quantity: z.coerce.number().positive()
+        quantity: z.coerce.number().int().positive()
       })).safeParse(current.selected_products);
       if (!selectedItemsResult.success || selectedItemsResult.data.length === 0) {
         throw new InventoryError("This booking has no menu items to reserve.", "BOOKING_ITEMS_MISSING", 409);
@@ -4441,7 +4446,7 @@ app.put("/api/staff/reservations/:id/cancel", async (req, res, next) => {
       cash_received: z.coerce.number().min(0).optional().nullable(),
       prepared_ingredients: z.array(z.object({
         raw_material_id: z.string().min(1),
-        quantity: z.coerce.number().positive()
+        quantity: z.coerce.number().int().positive()
       })).optional()
     }).parse(req.body);
 
@@ -4970,7 +4975,7 @@ async function releaseCateringLocks(
   const deductionsByMaterial = new Map<string, { quantity: number; unit: string }>();
   for (const lock of locks) {
     const deduction = deductionsByMaterial.get(lock.raw_material_id) ?? { quantity: 0, unit: lock.unit };
-    deduction.quantity += lock.reserved_quantity;
+    deduction.quantity += Number(lock.reserved_quantity);
     deductionsByMaterial.set(lock.raw_material_id, deduction);
   }
 
@@ -5154,20 +5159,21 @@ async function ensureBeverageStockMaterials() {
   });
 
   await Promise.all(
-    beverageProducts.map((product) =>
-      prisma.rawMaterial.upsert({
-        where: { name: product.name },
+    beverageProducts.map((product) => {
+      const materialName = product.name === "Softdrinks (Coke/Sprite/Royal)" ? "Softdrinks" : product.name;
+      return prisma.rawMaterial.upsert({
+        where: { name: materialName },
         update: { category: "Beverage", is_deleted: false },
         create: {
-          name: product.name,
+          name: materialName,
           category: "Beverage",
           unit: normalizedBeverageUnit(product.name),
           current_stock: 0,
           reorder_level: 0,
           cost_per_unit: 0
         }
-      })
-    )
+      });
+    })
   );
 }
 
@@ -5385,7 +5391,7 @@ app.get("/api/inventory/materials", async (_req, res, next) => {
         reserved_quantity,
         available_quantity: calculateAvailableQuantity(Number(material.current_stock), reserved_quantity),
         batch_total,
-        batch_mismatch: Math.abs(Number(material.current_stock) - batch_total) > 0.0005,
+        batch_mismatch: Number(material.current_stock) !== batch_total,
         expiring_within_7_days,
         reserved_for
       };
@@ -5635,9 +5641,9 @@ app.post("/api/inventory/materials", async (req, res, next) => {
       .object({
         name: z.string().min(1),
         category: z.enum(["Beverage", "Raw Material"]).default("Raw Material"),
-        unit: z.string().min(1),
-        reorder_level: z.coerce.number().nonnegative(),
-        cost_per_unit: z.coerce.number().nonnegative()
+        unit: z.enum(["g", "ml", "piece", "sheet", "bottle", "cup"]),
+        reorder_level: z.coerce.number().int().nonnegative(),
+        cost_per_unit: z.coerce.number().finite().nonnegative()
       })
       .parse(req.body);
 
@@ -5662,9 +5668,9 @@ app.put("/api/inventory/materials/:id", async (req, res, next) => {
       .object({
         name: z.string().min(1),
         category: z.enum(["Beverage", "Raw Material"]).default("Raw Material"),
-        unit: z.string().min(1),
-        reorder_level: z.coerce.number().nonnegative(),
-        cost_per_unit: z.coerce.number().nonnegative()
+        unit: z.enum(["g", "ml", "piece", "sheet", "bottle", "cup"]),
+        reorder_level: z.coerce.number().int().nonnegative(),
+        cost_per_unit: z.coerce.number().finite().nonnegative()
       })
       .parse(req.body);
     const material = await prisma.$transaction(async (tx) => {
@@ -5722,7 +5728,7 @@ app.put("/api/inventory/materials/:id/cost", async (req, res, next) => {
 
     const body = z
       .object({
-        cost_per_unit: z.coerce.number().nonnegative()
+        cost_per_unit: z.coerce.number().finite().nonnegative()
       })
       .parse(req.body);
     const material = await prisma.rawMaterial.update({
@@ -5766,7 +5772,7 @@ app.put("/api/inventory/materials/:id/stock", async (req, res, next) => {
     const body = z
       .object({
         type: z.enum(["add", "deduct"]),
-        quantity: z.coerce.number().positive(),
+        quantity: z.coerce.number().int().positive(),
         reference: z.string().optional(),
         reason: z.string().optional()
       })
@@ -5825,7 +5831,7 @@ app.post("/api/inventory/stock-count", async (req, res, next) => {
 
     const body = z.object({
       raw_material_id: z.string().min(1),
-      physical_count: z.coerce.number().finite().nonnegative(),
+      physical_count: z.coerce.number().int().finite().nonnegative(),
       reason: z.string().trim().min(1),
       batch_number: z.string().trim().min(1).optional(),
       expiration_date: z.string().optional(),
@@ -5843,7 +5849,7 @@ app.post("/api/inventory/stock-count", async (req, res, next) => {
 
       validateInventoryCount(body.physical_count, material.unit);
       const onHand = Number(material.current_stock);
-      const difference = Number((body.physical_count - onHand).toFixed(3));
+      const difference = body.physical_count - onHand;
 
       if (difference === 0) {
         return { material, adjusted: false, difference };
@@ -6263,9 +6269,9 @@ app.post("/api/inventory/batches", async (req, res, next) => {
       .object({
         raw_material_id: z.string().min(1),
         batch_number: z.string().min(1),
-        quantity: z.coerce.number().positive(),
+        quantity: z.coerce.number().int().positive(),
         expiration_date: z.string().min(1),
-        cost_per_unit: z.coerce.number().nonnegative(),
+        cost_per_unit: z.coerce.number().finite().nonnegative(),
         notes: z.string().optional()
       })
       .parse(req.body);
@@ -6393,7 +6399,7 @@ app.post("/api/inventory/waste", async (req, res, next) => {
     const body = z
       .object({
         raw_material_id: z.string().min(1),
-        quantity: z.coerce.number().positive(),
+        quantity: z.coerce.number().int().positive(),
         reason: z.enum(["spoilage", "expired", "prep_waste", "damaged", "other"]),
         notes: z.string().trim().min(1),
         batch_id: z.string().optional(),
@@ -6899,14 +6905,8 @@ app.get("/api/inventory/yield", async (_req, res, next) => {
       const calculations = ingredients.map((ingredient) => {
         const material = ingredient.raw_material;
         const currentStock = availableByMaterial.get(material.id) ?? 0;
-        const unitIsValid = canConvertInventoryUnits(ingredient.unit, material.unit);
-        const requiredPerPortion = unitIsValid
-          ? convertQuantityToMaterialUnit(
-              Number(ingredient.quantity_per_yield),
-              ingredient.unit,
-              material.unit
-            )
-          : Number(ingredient.quantity_per_yield);
+        const unitIsValid = inventoryUnitsMatch(ingredient.unit, material.unit);
+        const requiredPerPortion = Number(ingredient.quantity_per_yield);
 
         return {
           ingredient: material.name,
@@ -6982,43 +6982,6 @@ app.get("/api/inventory/yield", async (_req, res, next) => {
   }
 });
 
-app.get("/api/inventory/conversion-rules", async (_req, res, next) => {
-  try {
-    const rules = await prisma.conversionRule.findMany({ orderBy: { name: "asc" } });
-    res.json({ rules });
-  } catch (error) {
-    next(error);
-  }
-});
-
-app.put("/api/inventory/conversion-rules/:materialId", async (req, res, next) => {
-  try {
-    const user = requireRole(req, res, ["admin"]);
-
-    if (!user) {
-      return;
-    }
-
-    const body = z
-      .object({
-        name: z.string().min(1).optional(),
-        from_quantity: z.coerce.number().positive(),
-        from_unit: z.string().min(1),
-        to_quantity: z.coerce.number().positive(),
-        to_unit: z.string().min(1)
-      })
-      .parse(req.body);
-    const rule = await prisma.conversionRule.update({
-      where: { id: req.params.materialId },
-      data: body
-    });
-
-    return res.json({ rule });
-  } catch (error) {
-    return next(error);
-  }
-});
-
 type ProductStockSource = {
   name: string;
   category: string;
@@ -7068,7 +7031,7 @@ async function getAvailableProductStocks(products: ProductStockSource[]) {
     }
 
     if (ingredients.length === 0 || ingredients.some((ingredient) =>
-      !canConvertInventoryUnits(ingredient.unit, ingredient.raw_material.unit)
+      !inventoryUnitsMatch(ingredient.unit, ingredient.raw_material.unit)
     )) {
       return [product, 0];
     }
@@ -7076,11 +7039,7 @@ async function getAvailableProductStocks(products: ProductStockSource[]) {
     const requiredByMaterial = new Map<string, { currentStock: number; requiredPerProduct: number }>();
     for (const ingredient of ingredients) {
       const material = ingredient.raw_material;
-      const required = convertQuantityToMaterialUnit(
-        Number(ingredient.quantity_per_yield),
-        ingredient.unit,
-        material.unit
-      );
+      const required = Number(ingredient.quantity_per_yield);
       const existing = requiredByMaterial.get(material.id);
       requiredByMaterial.set(material.id, {
         currentStock: calculateAvailableQuantity(
@@ -7174,23 +7133,19 @@ async function getTakeoutRequirements(
           409
         );
       }
-      if (!canConvertInventoryUnits(ingredient.unit, material.unit)) {
+      if (!inventoryUnitsMatch(ingredient.unit, material.unit)) {
         throw new InventoryError(
           `${product.name} has an incompatible ingredient unit and cannot be sold online.`,
           "UNIT_MISMATCH",
           409
         );
       }
-      const quantity = convertInventoryQuantity(
-        Number(ingredient.quantity_per_yield) * item.quantity,
-        ingredient.unit,
-        material.unit
-      );
+      const quantity = Number(ingredient.quantity_per_yield) * item.quantity;
       const existing = needsByMaterial.get(material.id);
       needsByMaterial.set(material.id, {
         raw_material_id: material.id,
         material_name: material.name,
-        quantity: Number(((existing?.quantity ?? 0) + quantity).toFixed(3)),
+        quantity: (existing?.quantity ?? 0) + quantity,
         unit: material.unit
       });
     }
@@ -7831,15 +7786,11 @@ app.post("/api/reservations/dine-in/availability", async (req, res, next) => {
       for (const ingredient of ingredients) {
         const material = ingredient.raw_material;
         materialById.set(material.id, material);
-        if (!canConvertInventoryUnits(ingredient.unit, material.unit)) {
+        if (!inventoryUnitsMatch(ingredient.unit, material.unit)) {
           validRecipe = false;
           break;
         }
-        const quantity = convertInventoryQuantity(
-          Number(ingredient.quantity_per_yield),
-          ingredient.unit,
-          material.unit
-        );
+        const quantity = Number(ingredient.quantity_per_yield);
         needs.set(material.id, (needs.get(material.id) ?? 0) + quantity);
       }
       if (validRecipe && needs.size > 0) {
@@ -8223,10 +8174,6 @@ app.get("/api/tables", async (_req, res, next) => {
   }
 });
 
-function normalizeRecipeUnit(unit: string) {
-  return normalizeInventoryUnit(unit);
-}
-
 function normalizedBeverageUnit(name: string) {
   const normalizedName = name.toLowerCase();
 
@@ -8238,15 +8185,15 @@ function normalizedBeverageUnit(name: string) {
 }
 
 function calculateIngredientCost(quantity: number, ingredientUnit: string, material: { unit: string; cost_per_unit: unknown }) {
-  if (!canConvertInventoryUnits(ingredientUnit, material.unit)) {
-    return 0;
+  if (!inventoryUnitsMatch(ingredientUnit, material.unit)) {
+    throw new InventoryError(
+      `Recipe unit ${ingredientUnit} does not match ${material.unit} stock unit.`,
+      "UNIT_MISMATCH",
+      409
+    );
   }
 
-  return convertQuantityToMaterialUnit(quantity, ingredientUnit, material.unit) * Number(material.cost_per_unit);
-}
-
-function convertQuantityToMaterialUnit(quantity: number, ingredientUnit: string, materialUnit: string) {
-  return convertInventoryQuantity(quantity, ingredientUnit, materialUnit);
+  return quantity * Number(material.cost_per_unit);
 }
 
 function formatRecipeDetail(recipe: NonNullable<Awaited<ReturnType<typeof getRecipeWithDetails>>>) {
@@ -8270,6 +8217,7 @@ function formatRecipeDetail(recipe: NonNullable<Awaited<ReturnType<typeof getRec
   return {
     productId: recipe.selling_product.id,
     productName: recipe.selling_product.name,
+    status: recipe.status,
     sellingPrice,
     ingredients,
     totalIngredientCost,
@@ -8325,7 +8273,7 @@ app.post("/api/products/:id/recipe", async (req, res, next) => {
         ingredients: z.array(
           z.object({
             rawMaterialId: z.string().min(1),
-            quantity: z.coerce.number().positive(),
+            quantity: z.coerce.number().int().positive(),
             unit: z.string().min(1)
           })
         )
@@ -8357,6 +8305,13 @@ app.post("/api/products/:id/recipe", async (req, res, next) => {
 
     if (invalidIngredient) {
       return res.status(400).json({ message: "Selected recipe material no longer exists" });
+    }
+
+    const unitMismatch = body.ingredients.find((ingredient) =>
+      ingredient.unit !== materialsById.get(ingredient.rawMaterialId)?.unit
+    );
+    if (unitMismatch) {
+      return res.status(400).json({ message: "Recipe ingredient units must exactly match the material's base stock unit." });
     }
 
     const recipe = await prisma.$transaction(async (tx) => {
@@ -8412,8 +8367,8 @@ app.put("/api/products/:id/recipe", async (req, res, next) => {
           z.object({
             id: z.string().min(1).optional(),
             rawMaterialId: z.string().min(1).optional(),
-            quantity: z.coerce.number().positive().optional(),
-            quantity_per_yield: z.coerce.number().positive().optional(),
+            quantity: z.coerce.number().int().positive().optional(),
+            quantity_per_yield: z.coerce.number().int().positive().optional(),
             unit: z.string().min(1)
           })
             .refine((ingredient) => ingredient.id || ingredient.rawMaterialId, "Ingredient id or rawMaterialId is required")
@@ -8442,6 +8397,20 @@ app.put("/api/products/:id/recipe", async (req, res, next) => {
 
     if (invalidIngredient) {
       return res.status(400).json({ message: "Ingredient does not belong to this product recipe" });
+    }
+
+    const materialById = new Map((await prisma.rawMaterial.findMany({
+      where: { id: { in: [...recipeIngredientMaterialIds] } },
+      select: { id: true, unit: true }
+    })).map((material) => [material.id, material.unit]));
+    const unitMismatch = body.ingredients.find((ingredient) => {
+      const materialId = ingredient.id
+        ? recipe.recipe_ingredients.find((entry) => entry.id === ingredient.id)?.raw_material_id
+        : ingredient.rawMaterialId;
+      return !materialId || ingredient.unit !== materialById.get(materialId);
+    });
+    if (unitMismatch) {
+      return res.status(400).json({ message: "Recipe ingredient units must exactly match the material's base stock unit." });
     }
 
     await prisma.$transaction(
@@ -8598,11 +8567,14 @@ app.post("/api/pos/transaction", async (req, res, next) => {
 
         for (const ingredient of recipeIngredients) {
           const material = ingredient.raw_material;
-          const deduction = convertQuantityToMaterialUnit(
-            Number(ingredient.quantity_per_yield) * item.quantity,
-            ingredient.unit,
-            material.unit
-          );
+          if (!inventoryUnitsMatch(ingredient.unit, material.unit)) {
+            throw new InventoryError(
+              `Recipe unit for ${material.name} does not match its stock unit.`,
+              "UNIT_MISMATCH",
+              409
+            );
+          }
+          const deduction = Number(ingredient.quantity_per_yield) * item.quantity;
           const existing = deductionsByMaterialId.get(material.id);
           deductionsByMaterialId.set(material.id, {
             materialName: material.name,
@@ -9448,7 +9420,7 @@ async function ensureSystemSettingsRow() {
   await prisma.$executeRaw`ALTER TABLE system_settings ADD COLUMN IF NOT EXISTS default_downpayment_percent DOUBLE PRECISION DEFAULT 50`;
   await prisma.$executeRaw`ALTER TABLE system_settings ADD COLUMN IF NOT EXISTS auto_lock_catering_ingredients BOOLEAN DEFAULT TRUE`;
   await prisma.$executeRaw`ALTER TABLE system_settings ADD COLUMN IF NOT EXISTS release_catering_locks_on_completion BOOLEAN DEFAULT TRUE`;
-  await prisma.$executeRaw`ALTER TABLE system_settings ADD COLUMN IF NOT EXISTS default_reorder_level DOUBLE PRECISION DEFAULT 10`;
+  await prisma.$executeRaw`ALTER TABLE system_settings ADD COLUMN IF NOT EXISTS default_reorder_level INTEGER DEFAULT 10`;
   await prisma.$executeRaw`ALTER TABLE system_settings ADD COLUMN IF NOT EXISTS low_stock_threshold_percent DOUBLE PRECISION DEFAULT 100`;
   await prisma.$executeRaw`ALTER TABLE system_settings ADD COLUMN IF NOT EXISTS auto_reorder_enabled BOOLEAN DEFAULT FALSE`;
   await prisma.$executeRaw`ALTER TABLE system_settings ADD COLUMN IF NOT EXISTS email_notifications_enabled BOOLEAN DEFAULT TRUE`;
@@ -9614,11 +9586,14 @@ async function deductRecipeForProduct(
 
   for (const ingredient of recipeIngredients) {
     const material = ingredient.raw_material;
-    const deduction = convertQuantityToMaterialUnit(
-      Number(ingredient.quantity_per_yield) * quantity,
-      ingredient.unit,
-      material.unit
-    );
+    if (!inventoryUnitsMatch(ingredient.unit, material.unit)) {
+      throw new InventoryError(
+        `Recipe unit for ${material.id} does not match its stock unit.`,
+        "UNIT_MISMATCH",
+        409
+      );
+    }
+    const deduction = Number(ingredient.quantity_per_yield) * quantity;
     await consumeMaterialStock(tx, {
       raw_material_id: material.id,
       quantity: deduction,

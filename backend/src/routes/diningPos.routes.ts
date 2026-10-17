@@ -9,7 +9,7 @@ import {
   assertEnoughAvailable,
   calculateAvailableQuantity,
   consumeMaterialStock,
-  convertInventoryQuantity,
+  inventoryUnitsMatch,
   getActiveCateringReservationQuantity,
   lockMaterialForUpdate,
   recordReservationMovement,
@@ -99,7 +99,7 @@ async function findInventoryNeeds(
     category: string;
     recipes: Array<{
       recipe_ingredients: Array<{
-        quantity_per_yield: Prisma.Decimal;
+        quantity_per_yield: bigint;
         unit: string;
         raw_material: { id: string; name: string; unit: string };
       }>;
@@ -127,7 +127,7 @@ async function findInventoryNeeds(
       needs.set(material.id, {
         raw_material_id: material.id,
         material_name: material.name,
-        quantity: Number(((current?.quantity ?? 0) + item.quantity).toFixed(3)),
+        quantity: (current?.quantity ?? 0) + item.quantity,
         unit: material.unit
       });
       continue;
@@ -142,16 +142,19 @@ async function findInventoryNeeds(
 
     for (const ingredient of ingredients) {
       const material = ingredient.raw_material;
-      const quantity = convertInventoryQuantity(
-        Number(ingredient.quantity_per_yield) * item.quantity,
-        ingredient.unit,
-        material.unit
-      );
+      if (!inventoryUnitsMatch(ingredient.unit, material.unit)) {
+        throw new InventoryError(
+          `${product.name} recipe unit for ${material.name} does not match its stock unit.`,
+          "UNIT_MISMATCH",
+          409
+        );
+      }
+      const quantity = Number(ingredient.quantity_per_yield) * item.quantity;
       const current = needs.get(material.id);
       needs.set(material.id, {
         raw_material_id: material.id,
         material_name: material.name,
-        quantity: Number(((current?.quantity ?? 0) + quantity).toFixed(3)),
+        quantity: (current?.quantity ?? 0) + quantity,
         unit: material.unit
       });
     }

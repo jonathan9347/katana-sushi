@@ -37,9 +37,12 @@ model RawMaterial {
   name          String   @unique
   category      String   @default("Raw Material")
   unit          String
-  current_stock Decimal  @db.Decimal(12, 3)
-  reorder_level Decimal  @db.Decimal(12, 3)
-  cost_per_unit Decimal  @db.Decimal(12, 2)
+  current_stock        BigInt   @db.BigInt
+  reorder_level        BigInt   @db.BigInt
+  cost_per_unit        Decimal  @db.Decimal(18, 8)
+  cost_source_amount   Decimal? @db.Decimal(18, 8)
+  cost_source_quantity BigInt?  @db.BigInt
+  cost_source_unit     String?
   is_deleted    Boolean  @default(false)
   created_at    DateTime @default(now())
   updated_at    DateTime @updatedAt
@@ -61,11 +64,11 @@ model MaterialBatch {
   id                 String    @id @default(cuid())
   raw_material_id    String
   batch_number       String
-  quantity           Decimal   @db.Decimal(12, 3)
-  remaining_quantity Decimal   @db.Decimal(12, 3)
+  quantity           BigInt    @db.BigInt
+  remaining_quantity BigInt    @db.BigInt
   expiration_date    DateTime?
   received_at        DateTime  @default(now())
-  cost_per_unit      Decimal?  @db.Decimal(12, 2)
+  cost_per_unit      Decimal?  @db.Decimal(18, 8)
   notes              String?
   is_disposed        Boolean   @default(false)
   created_at         DateTime  @default(now())
@@ -83,15 +86,29 @@ model InventorySnapshot {
   id              String   @id @default(cuid())
   snapshot_date   DateTime @db.Date
   raw_material_id String
-  quantity        Decimal  @db.Decimal(12, 3)
+  quantity        BigInt   @db.BigInt
   unit            String
-  total_value     Decimal  @db.Decimal(12, 2)
+  total_value     Decimal  @db.Decimal(18, 2)
   created_at      DateTime @default(now())
 
   raw_material RawMaterial @relation(fields: [raw_material_id], references: [id])
 
   @@unique([snapshot_date, raw_material_id])
   @@map("inventory_snapshots")
+}
+
+model InventorySnapshotArchive {
+  snapshot_id     String   @id
+  snapshot_date   DateTime @db.Date
+  raw_material_id String
+  quantity        BigInt   @db.BigInt
+  unit            String
+  total_value     Decimal  @db.Decimal(18, 2)
+  created_at      DateTime
+  archived_at     DateTime @default(now())
+  archive_reason  String
+
+  @@map("inventory_snapshot_archives")
 }
 
 model SellingProduct {
@@ -120,8 +137,9 @@ model SellingProduct {
 model Recipe {
   id                   String  @id @default(cuid())
   selling_product_id   String
-  total_yield_quantity Decimal @db.Decimal(12, 3)
+  total_yield_quantity BigInt  @db.BigInt
   yield_unit           String
+  status               String  @default("recipe not confirmed")
 
   selling_product    SellingProduct     @relation(fields: [selling_product_id], references: [id], onDelete: Cascade)
   recipe_ingredients RecipeIngredient[]
@@ -133,7 +151,7 @@ model RecipeIngredient {
   id                 String  @id @default(cuid())
   recipe_id          String
   raw_material_id    String
-  quantity_per_yield Decimal @db.Decimal(12, 3)
+  quantity_per_yield BigInt  @db.BigInt
   unit               String
 
   recipe       Recipe      @relation(fields: [recipe_id], references: [id], onDelete: Cascade)
@@ -147,7 +165,7 @@ model InventoryTransaction {
   raw_material_id  String
   batch_id         String?
   transaction_type String
-  quantity         Decimal  @db.Decimal(12, 3)
+  quantity         BigInt   @db.BigInt
   unit             String
   reference        String?
   reason           String?
@@ -168,12 +186,12 @@ model InventoryMovement {
   source_type       String?
   source_reference  String?
   action            String
-  quantity          Decimal  @db.Decimal(12, 3)
+  quantity          BigInt   @db.BigInt
   unit              String
-  quantity_before   Decimal? @db.Decimal(12, 3)
-  quantity_after    Decimal? @db.Decimal(12, 3)
-  reserved_before   Decimal? @db.Decimal(12, 3)
-  reserved_after    Decimal? @db.Decimal(12, 3)
+  quantity_before   BigInt?  @db.BigInt
+  quantity_after    BigInt?  @db.BigInt
+  reserved_before   BigInt?  @db.BigInt
+  reserved_after    BigInt?  @db.BigInt
   actor_id          String?
   note              String?
   created_at        DateTime @default(now())
@@ -303,7 +321,7 @@ model TakeoutIngredientLock {
   id                String    @id @default(cuid())
   order_id          String
   raw_material_id   String
-  reserved_quantity Decimal   @db.Decimal(12, 3)
+  reserved_quantity BigInt    @db.BigInt
   unit              String
   is_released       Boolean   @default(false)
   created_at        DateTime  @default(now())
@@ -509,7 +527,7 @@ model DineInIngredientLock {
   id                String    @id @default(cuid())
   order_id          String
   raw_material_id   String
-  reserved_quantity Decimal   @db.Decimal(12, 3)
+  reserved_quantity BigInt    @db.BigInt
   unit              String
   is_released       Boolean   @default(false)
   created_at        DateTime  @default(now())
@@ -613,7 +631,7 @@ model SystemSetting {
   default_downpayment_percent Float @default(50)
   auto_lock_catering_ingredients Boolean @default(true)
   release_catering_locks_on_completion Boolean @default(true)
-  default_reorder_level Float @default(10)
+  default_reorder_level Int   @default(10)
   low_stock_threshold_percent Float @default(100)
   auto_reorder_enabled Boolean @default(false)
   email_notifications_enabled Boolean @default(true)
@@ -776,7 +794,7 @@ model ReservationIngredientLock {
   id                String   @id @default(cuid())
   reservation_id    String
   raw_material_id   String
-  reserved_quantity Decimal  @db.Decimal(12, 3)
+  reserved_quantity BigInt   @db.BigInt
   unit              String
   is_released       Boolean  @default(false)
   created_at        DateTime @default(now())
@@ -816,7 +834,7 @@ model CateringIngredientLock {
   id                      String    @id @default(cuid())
   catering_reservation_id String
   raw_material_id         String
-  reserved_quantity       Float
+  reserved_quantity       BigInt
   unit                    String
   is_released             Boolean   @default(false)
   created_at              DateTime  @default(now())

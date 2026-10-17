@@ -1,38 +1,51 @@
-# Phase 0A migration plan (proposal only)
+# Phase 0A migration report
 
-**Status:** Report-only proposal. No migration, database update, application-code change, or merge has been run. Target remains `katana_sushi_dev.public`; the older Supabase database is out of scope and must have its own backup and schema-specific migration before any live release.
+**Status: Applied to `katana_sushi_dev.public`.** The backend was stopped and port 5001 was clear before the migration. The pre-migration dump at `C:\Users\ASUS\katana-dumps\katana_sushi_dev_pre_phase0a_20261017.dump` was verified as a PostgreSQL archive and restored into the isolated restore database before proceeding. The older Supabase database was not touched.
 
-## Proposed migration sequence
+## Changes applied
 
-1. Confirm the development and live database targets without printing credentials. Export the development database and prove the dump restores into a separate empty database. Take a fresh pre-migration backup and verify it before touching the target.
-2. Require explicit go-ahead, verify branch `revision-phase-0` and a clean worktree, and confirm the backend/frontend state and terminals. No migration is authorized by this report.
-3. In a reviewed migration, change inventory stock, batch quantities, reorder levels, recipe quantities, snapshot/history quantities, and relevant lock quantities to whole-number base units (`BIGINT` in PostgreSQL / Prisma `BigInt`). Enforce whole-number input in service validation and staff screens. Do not round arbitrary fractional piece values silently.
-4. Convert weight and liquid quantities exactly: `kg × 1,000 = g`, `L × 1,000 = ml`. Keep counted items as whole pieces/sheets. Convert Avocado to weight only:
-   - Editable estimate: `AVOCADO_USABLE_GRAMS_PER_FRUIT = 150` g; this is not kitchen-confirmed.
-   - Reorder level `10 pieces × 150 g = 1,500 g`; recipe amount remains `20 g`.
-   - Cost basis `55 per fruit / 150 g = 0.366666… per g`, displayed as `36.666667 per 100 g`. A finite decimal cannot represent this ratio exactly. `DECIMAL(18,8)` is proposed for stored/displayed decimal costs, while the exact source basis (`55` per `150 g`) must remain available so conversion/display rounding is explicit rather than misrepresented as exact.
-5. Convert Crabstick mismatched recipe lines to whole pieces using the proposals in `phase0-recipe-review.csv`; the two Classic Platter Crabstick lines become 31 and 25 pieces as derived in `phase0c-platter-mapping-proposal.csv`. There is no legacy-kg exception. These platter flat lines stay flagged and are superseded only if/when the 0C composition is approved.
-6. Keep Kani tempura in pieces; the current mismatched line has a temporary estimate of 1 piece. Keep all unconfirmed recipe statuses visible as `recipe not confirmed`.
-7. Keep the proposed sauce/garnish amounts in one shared editable setting each (report proposals only): Spicy mayo 10 ml (owner-confirmed), Teriyaki 10 ml (estimate), Sriracha 5 ml (estimate/default only; add no recipe lines), Aonori 1 g (estimate), and Tempura flakes 20 g (estimate). All recipe lines remain `recipe not confirmed`.
-8. Do not merge the Softdrinks records in this migration without separate explicit approval. Proposed keeper is `cmv3t32dl00061da4l74v2ku0` (currently `Softdrinks (Coke/Sprite/Royal)`), to be renamed exactly `Softdrinks`; the trailing-space record `cmv6blwod028vn68q5g33s23u` is the proposed repoint source. Each currently has zero stock, reorder, and cost; both use bottles and have zero recipe, batch, transaction, movement, or hold references. Each has one zero-valued snapshot on `2026-10-14`. Repointing both snapshots would violate the existing unique key `(snapshot_date, raw_material_id)`. If approved later, retain one snapshot and archive/deduplicate the other deliberately; do not drop either record or snapshot before that decision.
-9. Update seeds, `defaultRoll`, unit-conversion paths, and staff validation only in the separately authorized code phase. Customer-facing catering may continue to display kg at the presentation boundary; staff inventory remains in base units.
-10. Keep the platter mapping in the report-only CSV for now. Phase 0C is a separate approval step; no Includes editor or runtime mapping has been built.
+1. Inventory and recipe quantities, stock counts, batches, snapshots, transactions, movements, locks, and system default reorder levels now use whole-number types (`BIGINT`, except `system_settings.default_reorder_level`, which is `INTEGER`). The server and staff screens reject fractional stock, batch, reorder, waste, reservation, and recipe quantities.
+2. Weight and liquid units were converted exactly (`kg` to `g`, `L` to `ml`). Counted items remain whole pieces or sheets. Recipe and inventory screens use base units directly; operational conversion-rule code and the staff Conversion Rules screen/endpoints were removed. The `conversion_rules` table and its three existing rows remain intact.
+3. Stored material and batch costs use `DECIMAL(18,8)` and are stored per base unit. Staff sees costs per 100 g, per 100 ml, or per piece/sheet/cup/bottle.
+4. Avocado is weight-only. The editable estimate is `INVENTORY_STANDARDS.estimatedAvocadoUsableGramsPerFruit = 150`; reorder level is 1,500 g, recipe quantity is 20 g, and stored cost is 0.36666667 per g. Its source basis remains recorded as 55 per 150 g. This is an estimate, not kitchen-confirmed.
+5. Every recipe is marked `recipe not confirmed`. The baked-sushi estimates differ as approved: Small is Crabstick 2 pieces, Ebiko 20 g, Nori 1 sheet, Rice 200 g; Medium is Crabstick 3 pieces, Ebiko 30 g, Nori 2 sheets, Rice 300 g.
+6. Crabstick stays in pieces. The Large and Medium Classic Platter flat recipe lines now use 31 and 25 pieces; the old flat lines remain in place and flagged for later Phase 0C composition work. Kani tempura stays in pieces. Aonori is 1 g.
+7. The shared editable seed standards are in `backend/src/config/inventoryStandards.ts`: owner-confirmed Spicy mayo 10 ml; estimated Teriyaki sauce 10 ml, Aonori 1 g, Tempura flakes 20 g, Sriracha 5 ml; and Avocado 150 g/fruit. Sriracha remains a default only and has no added recipe lines. A guarded follow-up migration corrected all six Spicy mayo recipe lines to 10 ml after verification found four lines at 20 ml.
+8. The approved Softdrinks merge was applied. Keeper `cmv3t32dl00061da4l74v2ku0` is now named exactly `Softdrinks`. References from duplicate `cmv6blwod028vn68q5g33s23u` were repointed; the old material row remains archived (`is_deleted = true`). Keeper snapshot `cmv96a4t600xsmbt88ki6vgne` remains. Duplicate zero snapshot `cmv96a4tc00xymbt8tf5o4626` (2026-10-14) was copied to `inventory_snapshot_archives` with its ID and archive reason, then removed from the live snapshot table.
+9. Seed and demo-seed paths now use base units, integer recipe amounts, the shared standards above, and `recipe not confirmed`. The beverage lookup maps the old Softdrinks product display name to the canonical stock material rather than recreating a duplicate.
+10. The Phase 0C platter Includes editor and mappings remain out of scope and were not built.
 
-## Reported development-data baseline
+## Verified development state after migration
 
-The actual development database report had 42 materials, 57 recipes, 161 recipe lines, and 42 inventory snapshots; stock was zero across the reported materials, and there were no batches, sales, inventory transactions, movements, reservations, or active holds. Reconfirm counts during preflight because they can change.
+| Check | Result |
+|---|---:|
+| Database/schema | `katana_sushi_dev.public` |
+| Material records | 42 total; 41 active and one archived duplicate |
+| Recipes / recipe lines | 57 / 161 |
+| Live snapshots / archived snapshots | 41 / 1 |
+| Sales / batches / inventory transactions / movements | 0 / 0 / 0 / 0 |
+| Active catering, reservation, takeout, and dine-in holds | 0 |
+| Active recipe/material unit mismatches | 0 |
+| Recipes not flagged `recipe not confirmed` | 0 |
+| Existing conversion-rule rows retained | 3 |
+| Prisma migrations | Up to date (15 migrations applied) |
 
-## Rollback plan
+All reported material on-hand quantities remained zero. The material-level pre-/post-migration values and Softdrinks archive actions are in [phase0a-dry-run-materials.csv](./phase0a-dry-run-materials.csv); recipe-line details remain in [phase0-recipe-review.csv](./phase0-recipe-review.csv) and standard totals in [phase0-standard-portions.csv](./phase0-standard-portions.csv).
 
-1. Before migration, create a fresh full development dump and restore it into a separate empty database. Do not proceed unless the restore is verified.
-2. Preserve exact pre-migration values for all affected material, recipe, batch, snapshot, transaction, movement, and lock rows (including IDs and units) in a migration backup. Apply schema and data changes in one database transaction where supported; validate integer constraints and row counts before commit.
-3. If validation fails before commit, roll back the transaction. If the migration has committed but no new operational writes have occurred, stop the app and restore the preserved values/schema using the reviewed down-migration, then verify counts and sample rows.
-4. If new writes occurred after migration, do not blindly restore the old dump or reverse rounded/estimated values. Stop affected operations, take another backup, reconcile post-migration writes, and only then restore or repair from the preserved pre-migration values.
-5. Verify the restored development database independently before reconnecting the app. Supabase is never part of this rollback or migration.
+The older Supabase database contains real data on an older schema. It needs its own separately backed-up, schema-specific migration before any live release; Phase 0A did not connect to or modify it.
 
-## Decisions summarized in the companion reports
+## Rollback
 
-- Futo California in `Fried Roll` (`cmv3t2qbh002z6uns2tgzllq3`, recipe `cmv3t2qbi00316unsiz4vtyqh`) and `Futo Maki` (`cmv3t2qbm00366uns4ayau22g`, recipe `cmv3t2qbo00386unsnf4ofwpy`) are distinct products with distinct product and recipe IDs, not duplicate recipe lines. Matching display names alone do not cause a double deduction; selling both deducts each product's own recipe. The stale “Duplicate recipe line retained” note is absent from the updated recipe review.
-- The platter product mapping, unconfirmed Kani/Tamago set-piece mappings, randomized Hoso/Futo selections, and computed ingredient totals are in `phase0c-platter-mapping-proposal.csv`. The Medium component quantities are scaled per product by `40/71`, rounded to nearest whole number with ties up and a minimum of 1 per included product. Set recipes are divided by the piece count; ingredient totals are rounded once per material, nearest whole unit, ties up.
-- The proposed computed totals (Large / Medium) are Crabstick 31 / 25 pieces, Cream cheese 20 / 20 g, Cucumber 120 / 90 g, Ebiko 40 / 30 g, Mango 210 / 170 g, Nori 9 / 8 sheets, Rice 1,800 / 1,520 g, Salmon 60 / 60 g, and Tamago 5 / 3 pieces. Set-recipe shares were included before each material total was rounded; these totals happened to already be whole numbers.
-- No merge, deletion, seed change, service/UI change, migration, or Supabase operation is included in this report update.
+The pre-migration dump is the rollback source; do not try to reverse estimated or converted values by arithmetic. The backend was restarted for a health check after migration; no operational writes have occurred since the migrations. If rollback is authorized now:
+
+1. Stop the backend with Ctrl+C in its existing terminal and verify port 5001 is clear with `netstat -ano | findstr :5001`.
+2. Restore the pre-migration dump into a separate empty database and verify its original counts first.
+3. Take and verify a post-migration dump of `katana_sushi_dev`.
+4. Only after explicit authorization, restore the verified pre-migration dump to `katana_sushi_dev`; this replaces the current development database. Do not use `pg_restore --clean` against the target without that approval.
+5. Recheck database identity, baseline counts, and migration history before reconnecting the application. If new operational writes occur, stop and reconcile them rather than restoring the old dump blindly.
+
+## Deferred approvals
+
+- Kitchen recipe confirmations and the planned post-week Stock Count/Movements review remain pending.
+- Phase 0C platter composition is separate and requires its own approval.
+- Do not proceed to the POS phase or use the system for real sales until real recipe confirmation is complete.

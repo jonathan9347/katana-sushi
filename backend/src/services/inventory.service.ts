@@ -33,43 +33,8 @@ const inventoryHoldingStatuses = new Set([
   "pending_final_payment"
 ]);
 
-const countableUnits = new Set(["piece", "pieces", "pc", "pcs", "sheet", "sheets"]);
-
-export function normalizeInventoryUnit(unit: string) {
-  const normalized = unit.trim().toLowerCase();
-
-  if (["gram", "grams"].includes(normalized)) return "g";
-  if (["kilogram", "kilograms"].includes(normalized)) return "kg";
-  if (["milliliter", "milliliters", "millilitre", "millilitres"].includes(normalized)) return "ml";
-  if (["l", "liter", "liters", "litre", "litres"].includes(normalized)) return "liters";
-  if (["piece", "pieces", "pc", "pcs"].includes(normalized)) return "pieces";
-  if (["sheet", "sheets"].includes(normalized)) return "sheets";
-  return normalized;
-}
-
-export function canConvertInventoryUnits(fromUnit: string, toUnit: string) {
-  const from = normalizeInventoryUnit(fromUnit);
-  const to = normalizeInventoryUnit(toUnit);
-
-  return from === to || (from === "g" && to === "kg") || (from === "kg" && to === "g")
-    || (from === "ml" && to === "liters") || (from === "liters" && to === "ml");
-}
-
-export function convertInventoryQuantity(quantity: number, fromUnit: string, toUnit: string) {
-  const from = normalizeInventoryUnit(fromUnit);
-  const to = normalizeInventoryUnit(toUnit);
-
-  if (from === to) return quantity;
-  if (from === "g" && to === "kg") return quantity / 1000;
-  if (from === "kg" && to === "g") return quantity * 1000;
-  if (from === "ml" && to === "liters") return quantity / 1000;
-  if (from === "liters" && to === "ml") return quantity * 1000;
-
-  throw new InventoryError(
-    `Cannot convert recipe quantity from ${fromUnit} to the material's base unit ${toUnit}.`,
-    "UNIT_MISMATCH",
-    400
-  );
+export function inventoryUnitsMatch(firstUnit: string, secondUnit: string) {
+  return firstUnit.trim().toLowerCase() === secondUnit.trim().toLowerCase();
 }
 
 export function isTerminalReservationStatus(status?: string | null) {
@@ -89,7 +54,7 @@ export class InventoryError extends Error {
 }
 
 export function calculateAvailableQuantity(onHand: number, reserved: number) {
-  if (!Number.isFinite(onHand) || !Number.isFinite(reserved) || onHand < 0 || reserved < 0) {
+  if (!Number.isSafeInteger(onHand) || !Number.isSafeInteger(reserved) || onHand < 0 || reserved < 0) {
     throw new InventoryError("Stock quantities must be finite and non-negative.", "INVALID_STOCK");
   }
 
@@ -101,8 +66,8 @@ export function validateInventoryQuantity(quantity: number, unit: string) {
     throw new InventoryError("Quantity must be greater than zero.", "INVALID_QUANTITY");
   }
 
-  if (countableUnits.has(unit.trim().toLowerCase()) && !Number.isInteger(quantity)) {
-    throw new InventoryError(`${unit} quantities must be whole numbers.`, "FRACTIONAL_COUNTABLE_QUANTITY");
+  if (!Number.isSafeInteger(quantity)) {
+    throw new InventoryError(`${unit} quantities must be whole numbers.`, "FRACTIONAL_QUANTITY");
   }
 }
 
@@ -111,8 +76,8 @@ export function validateInventoryCount(quantity: number, unit: string) {
     throw new InventoryError("Physical count must be zero or greater.", "INVALID_STOCK_COUNT");
   }
 
-  if (countableUnits.has(unit.trim().toLowerCase()) && !Number.isInteger(quantity)) {
-    throw new InventoryError(`${unit} counts must be whole numbers.`, "FRACTIONAL_COUNTABLE_QUANTITY");
+  if (!Number.isSafeInteger(quantity)) {
+    throw new InventoryError(`${unit} counts must be whole numbers.`, "FRACTIONAL_QUANTITY");
   }
 }
 
@@ -273,9 +238,7 @@ export async function createInventoryMovement(
     note?: string | null;
   }
 ) {
-  if (!Number.isFinite(input.quantity) || input.quantity <= 0) {
-    throw new InventoryError("Movement quantity must be greater than zero.", "INVALID_QUANTITY");
-  }
+  validateInventoryQuantity(input.quantity, input.unit);
 
   return tx.inventoryMovement.create({
     data: {
@@ -308,7 +271,7 @@ export async function assertBatchQuantitiesMatchOnHand(
   });
   const batchTotal = batches.reduce((total, batch) => total + Number(batch.remaining_quantity), 0);
 
-  if (Math.abs(batchTotal - onHand) > 0.0005) {
+  if (batchTotal !== onHand) {
     throw new InventoryError(
       `${materialName} has ${onHand} on hand but ${Number(batchTotal.toFixed(3))} assigned to batches. Reconcile batches before changing stock.`,
       "BATCH_RECONCILIATION_REQUIRED",
@@ -398,16 +361,19 @@ export async function getReservationIngredientNeeds(
 
     for (const ingredient of ingredients) {
       const material = ingredient.raw_material;
-      const quantity = convertInventoryQuantity(
-        Number(ingredient.quantity_per_yield) * item.quantity,
-        ingredient.unit,
-        material.unit
-      );
+      if (!inventoryUnitsMatch(ingredient.unit, material.unit)) {
+        throw new InventoryError(
+          `${product.name} recipe unit for ${material.name} does not match its stock unit.`,
+          "UNIT_MISMATCH",
+          409
+        );
+      }
+      const quantity = Number(ingredient.quantity_per_yield) * item.quantity;
       const current = needs.get(material.id);
       needs.set(material.id, {
         raw_material_id: material.id,
         material_name: material.name,
-        quantity: Number(((current?.quantity ?? 0) + quantity).toFixed(3)),
+        quantity: (current?.quantity ?? 0) + quantity,
         unit: material.unit
       });
     }
@@ -506,7 +472,7 @@ export async function consumeMaterialStock(
   });
   const batchTotal = allBatches.reduce((total, batch) => total + Number(batch.remaining_quantity), 0);
 
-  if (Math.abs(batchTotal - quantityBefore) > 0.0005) {
+  if (batchTotal !== quantityBefore) {
     throw new InventoryError(
       `${material.name} has ${quantityBefore} ${material.unit} on hand but ${Number(batchTotal.toFixed(3))} ${material.unit} assigned to batches. Reconcile batches before using stock.`,
       "BATCH_RECONCILIATION_REQUIRED",
@@ -519,7 +485,7 @@ export async function consumeMaterialStock(
     : allBatches;
   const selectedBatchTotal = batches.reduce((total, batch) => total + Number(batch.remaining_quantity), 0);
 
-  if (selectedBatchTotal + 0.0005 < input.quantity) {
+  if (selectedBatchTotal < input.quantity) {
     throw new InventoryError(
       `The selected batch has only ${Number(selectedBatchTotal.toFixed(3))} ${material.unit} available.`,
       "INSUFFICIENT_BATCH_STOCK",
@@ -539,7 +505,7 @@ export async function consumeMaterialStock(
 
     const batchBefore = Number(batch.remaining_quantity);
     const used = Math.min(batchBefore, remaining);
-    const batchAfter = Number((batchBefore - used).toFixed(3));
+    const batchAfter = batchBefore - used;
 
     await tx.materialBatch.update({
       where: { id: batch.id },
@@ -555,7 +521,7 @@ export async function consumeMaterialStock(
       quantity: used,
       unit: material.unit,
       quantity_before: currentOnHand,
-      quantity_after: Number((currentOnHand - used).toFixed(3)),
+      quantity_after: currentOnHand - used,
       reserved_before: reservedBefore,
       reserved_after: reservedAfter,
       actor_id: input.actor_id,
@@ -563,11 +529,11 @@ export async function consumeMaterialStock(
     });
 
     allocations.push({ batchId: batch.id, quantity: used });
-    currentOnHand = Number((currentOnHand - used).toFixed(3));
-    remaining = Number((remaining - used).toFixed(3));
+    currentOnHand -= used;
+    remaining -= used;
   }
 
-  if (remaining > 0.0005) {
+  if (remaining > 0) {
     throw new InventoryError(
       `${material.name} batch quantities changed during the stock operation. Retry after reconciling.`,
       "BATCH_STOCK_CHANGED",

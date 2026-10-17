@@ -3,7 +3,6 @@ import { Link } from "react-router-dom";
 import { Boxes, ClipboardList, Package, PackageSearch, ReceiptText, Settings2 } from "lucide-react";
 import SectionNav, { SectionNavTab } from "../../../components/layout/SectionNav";
 import BatchManagement from "./BatchManagement";
-import ConversionRulesEditor from "./ConversionRulesEditor";
 import InventoryMovements from "./InventoryMovements";
 import InventoryOverview from "./InventoryOverview";
 import InventoryReservations from "./InventoryReservations";
@@ -16,7 +15,7 @@ import { StaffRole } from "./types";
 type InventoryTab = "overview" | "stock" | "reservations" | "movements" | "setup";
 type StockView = "materials" | "batches" | "waste";
 type MaterialsStockFilter = "all" | "issues" | "low" | "negative" | "expiring";
-type SetupView = "menu-products" | "conversion-rules" | "yield";
+type SetupView = "menu-products" | "yield";
 
 const tabs: Array<SectionNavTab<InventoryTab>> = [
   { id: "overview", label: "Overview", icon: <Boxes className="h-4 w-4" /> },
@@ -125,7 +124,6 @@ export default function InventoryPage({ readOnly = false }: { readOnly?: boolean
                 <div className="flex flex-wrap gap-2">
                   {([
                     ["menu-products", "Menu Products"],
-                    ["conversion-rules", "Conversion Rules"],
                     ["yield", "Yield Estimator"]
                   ] as const).map(([view, label]) => (
                     <button
@@ -139,7 +137,6 @@ export default function InventoryPage({ readOnly = false }: { readOnly?: boolean
                   ))}
                 </div>
                 {setupView === "menu-products" && <SellingProductsList role={role} />}
-                {setupView === "conversion-rules" && role === "admin" && <ConversionRulesEditor />}
                 {setupView === "yield" && <YieldEstimator />}
               </div>
             )}

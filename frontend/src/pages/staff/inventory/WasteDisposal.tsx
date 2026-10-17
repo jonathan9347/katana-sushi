@@ -187,8 +187,8 @@ export default function WasteDisposal() {
               Quantity to dispose
               <input
                 required
-                min="0.001"
-                step="0.001"
+                min="1"
+                step="1"
                 type="number"
                 className="h-10 rounded-md border border-slate-300 px-3"
                 value={wasteForm.quantity}

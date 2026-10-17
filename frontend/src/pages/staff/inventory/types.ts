@@ -90,14 +90,6 @@ export type MaterialBatch = {
   };
 };
 
-export type ConversionRule = {
-  id: string;
-  name: string;
-  from_quantity: string | number;
-  from_unit: string;
-  to_quantity: string | number;
-  to_unit: string;
-};
 
 export type SellingProduct = {
   id: string;
@@ -126,6 +118,7 @@ export type RecipeDetailIngredient = {
 export type ProductRecipeDetail = {
   productId: string;
   productName: string;
+  status?: string;
   sellingPrice: number;
   ingredients: RecipeDetailIngredient[];
   totalIngredientCost: number;
