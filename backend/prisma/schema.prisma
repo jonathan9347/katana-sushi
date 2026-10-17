@@ -340,13 +340,45 @@ model Table {
   table_number Int      @unique
   capacity     Int
   status       String
+  is_archived  Boolean  @default(false)
+  archived_at  DateTime?
   created_at   DateTime @default(now())
 
-  reservations     Reservation[]
-  unlimited_sessions UnlimitedSession[]
-  dining_sessions DiningTableSession[]
+  reservations        Reservation[]
+  reservation_assignments ReservationTableAssignment[]
+  unlimited_sessions   UnlimitedSession[]
+  dining_sessions     DiningTableSession[]
+  table_memberships   TableCombinationMember[]
 
   @@map("tables")
+}
+
+model TableCombination {
+  id         String   @id @default(cuid())
+  name       String?
+  status     String   @default("active")
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  members                 TableCombinationMember[]
+  reservation_assignments ReservationTableAssignment[]
+
+  @@map("table_combinations")
+}
+
+model TableCombinationMember {
+  id                  String   @id @default(cuid())
+  table_combination_id String
+  table_id            String
+  order_index         Int      @default(0)
+  created_at          DateTime @default(now())
+
+  table_combination TableCombination @relation(fields: [table_combination_id], references: [id], onDelete: Cascade)
+  table            Table            @relation(fields: [table_id], references: [id], onDelete: Restrict)
+
+  @@unique([table_combination_id, table_id])
+  @@index([table_combination_id, order_index])
+  @@map("table_combination_members")
 }
 
 model Reservation {
@@ -395,8 +427,28 @@ model Reservation {
   ingredient_locks           ReservationIngredientLock[]
   activity                   ReservationActivity[]
   payment_claims              PaymentTransactionClaim[]
+  table_assignments          ReservationTableAssignment[]
 
   @@map("reservations")
+}
+
+model ReservationTableAssignment {
+  id                  String   @id @default(cuid())
+  reservation_id      String
+  table_id            String
+  table_combination_id String?
+  seat_count          Int      @default(0)
+  status              String   @default("assigned")
+  created_at          DateTime @default(now())
+  updated_at          DateTime @updatedAt
+
+  reservation      Reservation        @relation(fields: [reservation_id], references: [id], onDelete: Cascade)
+  table            Table              @relation(fields: [table_id], references: [id], onDelete: Restrict)
+  table_combination TableCombination?  @relation(fields: [table_combination_id], references: [id], onDelete: SetNull)
+
+  @@unique([reservation_id, table_id])
+  @@index([table_id, status])
+  @@map("reservation_table_assignments")
 }
 
 model ReservationSlotCapacity {
