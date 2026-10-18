@@ -14,6 +14,7 @@ import {
   type ManagedTableState
 } from "../services/tableManagement.service";
 import { roleGuard } from "../middleware/roleGuard";
+import { isDineInReservationLate } from "../config/reservationSettings";
 import {
   assertBatchQuantitiesMatchOnHand,
   assertEnoughAvailable,
@@ -289,6 +290,64 @@ router.get(
         unavailable_reason: table.unavailable_reason,
         active_session: table.dining_sessions[0] ?? null
       }))
+    });
+  })
+);
+
+router.get(
+  "/api/pos/dining/upcoming-reservations",
+  roleGuard(["admin", "cashier"]),
+  asyncRoute(async (_req, res) => {
+    const today = new Intl.DateTimeFormat("en-CA", {
+      timeZone: "Asia/Manila",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit"
+    }).format(new Date());
+    const dayStart = new Date(`${today}T00:00:00+08:00`);
+    const nextDayStart = new Date(dayStart.getTime() + 24 * 60 * 60 * 1000);
+    const reservations = await prisma.reservation.findMany({
+      where: {
+        date: { gte: dayStart, lt: nextDayStart },
+        status: { in: ["confirmed", "seated", "preparing", "in_progress", "pending_final_payment"] },
+        table_assignments: { some: { status: "assigned" } }
+      },
+      select: {
+        id: true,
+        customer_name: true,
+        date: true,
+        time: true,
+        party_size: true,
+        status: true,
+        activity: {
+          where: { event_type: "late_arrival_still_coming" },
+          select: { id: true },
+          take: 1
+        },
+        table_assignments: {
+          where: { status: "assigned" },
+          orderBy: { table: { table_number: "asc" } },
+          select: { table: { select: { table_number: true } } }
+        }
+      },
+      orderBy: [{ time: "asc" }, { id: "asc" }]
+    });
+
+    return res.json({
+      reservations: reservations.map((reservation) => {
+        const arrived = ["seated", "preparing", "in_progress", "pending_final_payment"].includes(reservation.status);
+        const lateAlert = !arrived &&
+          reservation.activity.length === 0 &&
+          isDineInReservationLate(reservation.date, reservation.time);
+        return {
+          id: reservation.id,
+          time: reservation.time,
+          customer_name: reservation.customer_name,
+          party_size: reservation.party_size,
+          table_numbers: reservation.table_assignments.map((assignment) => assignment.table.table_number),
+          state: arrived ? "arrived" as const : lateAlert ? "late" as const : "upcoming" as const
+        };
+      })
     });
   })
 );

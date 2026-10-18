@@ -43,7 +43,7 @@ import { PaymentService } from "./services/payment.service";
 import { prisma } from "./lib/prisma";
 import { checkDatabaseHealth, getDatabaseStatus, markDatabaseDown } from "./lib/database";
 import { getJwtSecret } from "./lib/jwt";
-import { reservationTimeError, RESERVATION_SETTINGS } from "./config/reservationSettings";
+import { isDineInReservationLate, reservationTimeError, RESERVATION_SETTINGS } from "./config/reservationSettings";
 import { normalizeTableStatus } from "./services/tableStatus.service";
 import {
   findBestTableCombination,
@@ -1249,13 +1249,6 @@ function manilaDateKey(date: Date) {
     month: "2-digit",
     day: "2-digit"
   }).format(date);
-}
-
-function isDineInReservationLate(date: Date, time: string, now = new Date()) {
-  if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(time)) return false;
-  const scheduledTime = Date.parse(`${manilaDateKey(date)}T${time}:00+08:00`);
-  return Number.isFinite(scheduledTime)
-    && now.getTime() >= scheduledTime + RESERVATION_SETTINGS.LATE_ALERT_MINUTES * 60_000;
 }
 
 function isWithinOperatingHours(time: string) {

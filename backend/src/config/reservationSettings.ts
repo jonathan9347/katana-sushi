@@ -11,6 +11,19 @@ export const RESERVATION_SETTINGS = {
   TIME_ZONE: "Asia/Manila"
 };
 
+export function isDineInReservationLate(date: Date, time: string, now = new Date()) {
+  if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(time)) return false;
+  const serviceDate = new Intl.DateTimeFormat("en-CA", {
+    timeZone: RESERVATION_SETTINGS.TIME_ZONE,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit"
+  }).format(date);
+  const scheduledTime = Date.parse(`${serviceDate}T${time}:00+08:00`);
+  return Number.isFinite(scheduledTime)
+    && now.getTime() >= scheduledTime + RESERVATION_SETTINGS.LATE_ALERT_MINUTES * 60_000;
+}
+
 export function reservationTimeError(date: string, time: string, now = new Date()) {
   const settings = RESERVATION_SETTINGS;
   const dateParts = /^(\d{4})-(\d{2})-(\d{2})$/.exec(date);

@@ -60,6 +60,15 @@ type DiningTable = {
   active_session: { id: string; guests: Array<{ id: string }> } | null;
 };
 
+type UpcomingReservation = {
+  id: string;
+  time: string;
+  customer_name: string;
+  party_size: number;
+  table_numbers: number[];
+  state: "upcoming" | "arrived" | "late";
+};
+
 type PosProduct = {
   id: string;
   name: string;
@@ -186,6 +195,15 @@ export default function DiningService({ mode = "service" }: Props) {
     enabled: !kitchenOnly,
     refetchInterval: 10000
   });
+  const upcomingReservationsQuery = useQuery({
+    queryKey: ["pos", "dining", "upcoming-reservations"],
+    queryFn: async () => (await api.get<{ reservations: UpcomingReservation[] }>(
+      "/api/pos/dining/upcoming-reservations"
+    )).data.reservations,
+    enabled: !kitchenOnly,
+    refetchInterval: 15000,
+    refetchOnWindowFocus: true
+  });
   const kitchenQuery = useQuery({
     queryKey: ["pos", "kitchen", "orders"],
     queryFn: async () => (await api.get<{ orders: KitchenOrder[] }>("/api/pos/kitchen/orders")).data.orders,
@@ -235,6 +253,7 @@ export default function DiningService({ mode = "service" }: Props) {
     await Promise.all([
       queryClient.invalidateQueries({ queryKey: ["pos", "dining", "tables"], exact: true }),
       queryClient.invalidateQueries({ queryKey: ["pos", "dining", "sessions"], exact: true }),
+      queryClient.invalidateQueries({ queryKey: ["pos", "dining", "upcoming-reservations"], exact: true }),
       queryClient.invalidateQueries({ queryKey: ["pos", "kitchen", "orders"], exact: true }),
       queryClient.invalidateQueries({ queryKey: ["inventory"] }),
       queryClient.invalidateQueries({ queryKey: ["products"] })
@@ -400,7 +419,7 @@ export default function DiningService({ mode = "service" }: Props) {
           </div>
         </header>
         <SectionNav orientation="horizontal" tabs={posTabs} />
-        {(tablesQuery.isError || sessionsQuery.isError) && <p className="rounded bg-red-50 p-3 text-sm text-red-800">Unable to load dining tables or sessions.</p>}
+        {(tablesQuery.isError || sessionsQuery.isError || upcomingReservationsQuery.isError) && <p className="rounded bg-red-50 p-3 text-sm text-red-800">Unable to load dining tables, sessions, or upcoming reservations.</p>}
         {completedTransaction && (
           <section className="rounded-xl border border-emerald-200 bg-emerald-50 p-4 shadow-sm">
             <div className="flex flex-wrap items-start justify-between gap-3">
@@ -421,6 +440,42 @@ export default function DiningService({ mode = "service" }: Props) {
 
         <div className="grid gap-5 xl:grid-cols-[0.85fr_1.4fr]">
           <section className="space-y-5">
+            <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+              <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                <h2 className="text-lg font-bold">Upcoming reservations</h2>
+                <span className="text-xs text-slate-500">Today · informational only</span>
+              </div>
+              {upcomingReservationsQuery.isLoading ? (
+                <p className="text-sm text-slate-500">Loading reservations...</p>
+              ) : (upcomingReservationsQuery.data ?? []).length === 0 ? (
+                <p className="text-sm text-slate-500">No upcoming reservations today.</p>
+              ) : (
+                <ul className="divide-y divide-slate-100">
+                  {upcomingReservationsQuery.data?.map((reservation) => (
+                    <li key={reservation.id} className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 py-2 first:pt-0 last:pb-0">
+                      <div className="min-w-0">
+                        <p className="font-semibold text-slate-900">
+                          {reservation.time} · {reservation.customer_name}
+                        </p>
+                        <p className="text-sm text-slate-600">
+                          {reservation.party_size} guests · Table{reservation.table_numbers.length === 1 ? "" : "s"} {reservation.table_numbers.join(", ")}
+                        </p>
+                      </div>
+                      <span className={`rounded-full px-2.5 py-1 text-xs font-bold ${
+                        reservation.state === "late"
+                          ? "bg-red-100 text-red-800"
+                          : reservation.state === "arrived"
+                            ? "bg-emerald-100 text-emerald-800"
+                            : "bg-slate-100 text-slate-700"
+                      }`}>
+                        {reservation.state === "late" ? "Late" : reservation.state === "arrived" ? "Arrived" : "Upcoming"}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </section>
+
             <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
               <h2 className="mb-3 text-lg font-bold">Open table session</h2>
               <div className="grid gap-3 sm:grid-cols-[1fr_110px_auto]">
