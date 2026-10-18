@@ -66,6 +66,7 @@ type UpcomingReservation = {
   customer_name: string;
   party_size: number;
   table_numbers: number[];
+  temporary_table_numbers: number[];
   state: "upcoming" | "arrived" | "late";
 };
 
@@ -116,7 +117,11 @@ type CheckoutTransaction = {
 type Props = { mode?: "service" | "kitchen" };
 type DraftItem = { productId: string; guestNumber: number; quantity: number };
 type DiningAction = { method: "post" | "patch"; url: string; body?: unknown };
-type DiningActionResult = { transaction?: CheckoutTransaction; replayed?: boolean };
+type DiningActionResult = {
+  transaction?: CheckoutTransaction;
+  replayed?: boolean;
+  session?: { id: string };
+};
 
 const posTabs: SectionNavTab[] = [
   { id: "sale", label: "Takeout Sale", icon: <ShoppingCart className="h-4 w-4" />, to: "/staff/pos", end: true },
@@ -154,13 +159,19 @@ function errorMessage(error: unknown) {
   return "The request could not be completed.";
 }
 
+function errorCode(error: unknown) {
+  if (typeof error === "object" && error && "response" in error) {
+    const response = (error as { response?: { data?: { code?: string } } }).response;
+    return response?.data?.code;
+  }
+  return undefined;
+}
+
 export default function DiningService({ mode = "service" }: Props) {
   const role = (localStorage.getItem("katana_role") ?? "").toLowerCase();
   const isAdmin = role === "admin";
   const kitchenOnly = mode === "kitchen";
   const [selectedSessionId, setSelectedSessionId] = useState("");
-  const [newSessionTableId, setNewSessionTableId] = useState("");
-  const [guestCount, setGuestCount] = useState(1);
   const [orderType, setOrderType] = useState<"ala_carte" | "unlimited">("ala_carte");
   const [productId, setProductId] = useState("");
   const [guestNumber, setGuestNumber] = useState(1);
@@ -170,7 +181,6 @@ export default function DiningService({ mode = "service" }: Props) {
   const [packageCovers, setPackageCovers] = useState(1);
   const [leftoverProductId, setLeftoverProductId] = useState("");
   const [leftoverQuantity, setLeftoverQuantity] = useState(0);
-  const [transferTableId, setTransferTableId] = useState("");
   const [cashReceived, setCashReceived] = useState("");
   const [paymentMethod, setPaymentMethod] = useState<"cash" | "gcash" | "bank_transfer">("cash");
   const [showCheckout, setShowCheckout] = useState(false);
@@ -179,6 +189,7 @@ export default function DiningService({ mode = "service" }: Props) {
   const [seatDrafts, setSeatDrafts] = useState<Record<string, string>>({});
   const [tableReasons, setTableReasons] = useState<Record<string, string>>({});
   const [linkTargets, setLinkTargets] = useState<Record<string, string>>({});
+  const [temporaryTableReservationId, setTemporaryTableReservationId] = useState<string | null>(null);
   const [completedTransaction, setCompletedTransaction] = useState<CheckoutTransaction | null>(null);
   const queryClient = useQueryClient();
   const { toast } = useToast();
@@ -230,16 +241,29 @@ export default function DiningService({ mode = "service" }: Props) {
   const coveredGuests = orderType === "unlimited" && activeUnlimited
     ? session?.guests.filter((guest) => guest.guest_number <= activeUnlimited.pax_count) ?? []
     : session?.guests ?? [];
-  const availableTables = (tablesQuery.data ?? []).filter((table) =>
-    !table.active_session &&
-    !table.linked_to_table_id &&
-    normalizeTableStatus(table.status) === "available"
-  );
   const seatedTables = (tablesQuery.data ?? []).filter((table) =>
     Boolean(table.active_session?.guests.length) &&
     !table.linked_to_table_id &&
     normalizeTableStatus(table.status) === "occupied"
   );
+  const orderedReservations = [...(upcomingReservationsQuery.data ?? [])].sort((left, right) => {
+    const priority = (state: UpcomingReservation["state"]) =>
+      state === "arrived" || state === "late" ? 0 : 1;
+    return priority(left.state) - priority(right.state) || left.time.localeCompare(right.time);
+  });
+  const reservationsByTableNumber = new Map<number, UpcomingReservation>();
+  for (const reservation of orderedReservations) {
+    for (const tableNumber of [...reservation.table_numbers, ...reservation.temporary_table_numbers]) {
+      reservationsByTableNumber.set(tableNumber, reservation);
+    }
+  }
+  const activeUnlimitedTableIds = new Set((sessionsQuery.data ?? [])
+    .filter((item) => item.unlimited_sessions.some((unlimited) =>
+      unlimited.status === "active" &&
+      Boolean(unlimited.first_round_at) &&
+      new Date(unlimited.ends_at).getTime() > Date.now()
+    ))
+    .map((item) => item.table_id));
   const availableProducts = useMemo(
     () => (orderType === "unlimited" ? unlimitedProductsQuery.data : productsQuery.data) ?? [],
     [orderType, productsQuery.data, unlimitedProductsQuery.data]
@@ -265,6 +289,7 @@ export default function DiningService({ mode = "service" }: Props) {
         return (await api.post<{
           transaction?: CheckoutTransaction;
           replayed?: boolean;
+          session?: { id: string };
         }>(action.url, action.body)).data;
       }
       await api.patch(action.url, action.body);
@@ -278,8 +303,24 @@ export default function DiningService({ mode = "service" }: Props) {
         setShowCheckout(false);
         setCashReceived("");
       }
+      if (result.session && (
+        action.url === "/api/pos/dining/sessions" ||
+        action.url.endsWith("/seat") ||
+        action.url.endsWith("/temporary-table")
+      )) {
+        setSelectedSessionId(result.session.id);
+        setTemporaryTableReservationId(null);
+        setShowCheckout(false);
+      }
     },
-    onError: (error) => toast(errorMessage(error))
+    onError: (error, action) => {
+      if (action.url.endsWith("/seat") && errorCode(error) === "RESERVATION_TABLE_UNAVAILABLE") {
+        setTemporaryTableReservationId(action.url.split("/")[5] ?? null);
+        toast("An assigned table is busy or unavailable. Add a temporary table for this reservation.");
+        return;
+      }
+      toast(errorMessage(error));
+    }
   });
   const checkoutPreviewQuery = useQuery({
     queryKey: ["pos", "dining", "checkout-preview", selectedSessionId],
@@ -443,7 +484,7 @@ export default function DiningService({ mode = "service" }: Props) {
             <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
               <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
                 <h2 className="text-lg font-bold">Upcoming reservations</h2>
-                <span className="text-xs text-slate-500">Today · informational only</span>
+                <span className="text-xs text-slate-500">Today · select a reservation to seat</span>
               </div>
               {upcomingReservationsQuery.isLoading ? (
                 <p className="text-sm text-slate-500">Loading reservations...</p>
@@ -451,60 +492,61 @@ export default function DiningService({ mode = "service" }: Props) {
                 <p className="text-sm text-slate-500">No upcoming reservations today.</p>
               ) : (
                 <ul className="divide-y divide-slate-100">
-                  {upcomingReservationsQuery.data?.map((reservation) => (
-                    <li key={reservation.id} className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 py-2 first:pt-0 last:pb-0">
+                  {orderedReservations.map((reservation) => (
+                    <li key={reservation.id} className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 py-3 first:pt-0 last:pb-0">
                       <div className="min-w-0">
                         <p className="font-semibold text-slate-900">
                           {reservation.time} · {reservation.customer_name}
                         </p>
                         <p className="text-sm text-slate-600">
-                          {reservation.party_size} guests · Table{reservation.table_numbers.length === 1 ? "" : "s"} {reservation.table_numbers.join(", ")}
+                          {reservation.party_size} guests
+                          {reservation.table_numbers.length > 0 && ` · Table${reservation.table_numbers.length === 1 ? "" : "s"} ${reservation.table_numbers.join(", ")}`}
+                          {reservation.temporary_table_numbers.length > 0 && ` · Temp ${reservation.temporary_table_numbers.join(", ")}`}
                         </p>
                       </div>
-                      <span className={`rounded-full px-2.5 py-1 text-xs font-bold ${
-                        reservation.state === "late"
-                          ? "bg-red-100 text-red-800"
-                          : reservation.state === "arrived"
-                            ? "bg-emerald-100 text-emerald-800"
-                            : "bg-slate-100 text-slate-700"
-                      }`}>
-                        {reservation.state === "late" ? "Late" : reservation.state === "arrived" ? "Arrived" : "Upcoming"}
-                      </span>
+                      <div className="flex items-center gap-2">
+                        <span className={`rounded-full px-2.5 py-1 text-xs font-bold ${
+                          reservation.state === "late"
+                            ? "bg-red-100 text-red-800"
+                            : reservation.state === "arrived"
+                              ? "bg-emerald-100 text-emerald-800"
+                              : "bg-slate-100 text-slate-700"
+                        }`}>
+                          {reservation.state === "late" ? "Late" : reservation.state === "arrived" ? "Arrived" : "Upcoming"}
+                        </span>
+                        {reservation.state !== "arrived" && (
+                          <ActionButton
+                            disabled={runMutation.isPending}
+                            onClick={() => {
+                              if (window.confirm(`Seat ${reservation.customer_name} at the assigned table${reservation.table_numbers.length === 1 ? "" : "s"}?`)) {
+                                runAction("post", `/api/pos/dining/reservations/${reservation.id}/seat`, {});
+                              }
+                            }}
+                          >
+                            Seat
+                          </ActionButton>
+                        )}
+                      </div>
+                      {temporaryTableReservationId === reservation.id && (
+                        <div className="w-full rounded-lg bg-amber-50 p-3 text-sm text-amber-900">
+                          An assigned table is busy or unavailable. Add a temporary table for this reservation.
+                          <button
+                            className="ml-3 rounded bg-amber-800 px-3 py-1.5 font-bold text-white hover:bg-amber-900 disabled:opacity-50"
+                            disabled={runMutation.isPending}
+                            onClick={() => {
+                              if (window.confirm(`Add a temporary table for ${reservation.customer_name} (${reservation.party_size} guests)?`)) {
+                                runAction("post", `/api/pos/dining/reservations/${reservation.id}/temporary-table`, {});
+                              }
+                            }}
+                          >
+                            Add temporary table
+                          </button>
+                        </div>
+                      )}
                     </li>
                   ))}
                 </ul>
               )}
-            </section>
-
-            <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-              <h2 className="mb-3 text-lg font-bold">Open table session</h2>
-              <div className="grid gap-3 sm:grid-cols-[1fr_110px_auto]">
-                <label className="grid gap-1 text-sm font-medium text-slate-700">
-                  Table
-                  <select className="h-10 rounded border border-slate-300 px-2" value={newSessionTableId} onChange={(event) => setNewSessionTableId(event.target.value)}>
-                    <option value="">Choose table</option>
-                    {availableTables.map((table) => <option key={table.id} value={table.id}>Table {table.table_number} · {table.capacity} seats</option>)}
-                  </select>
-                </label>
-                <label className="grid gap-1 text-sm font-medium text-slate-700">
-                  Guests
-                  <input className="h-10 rounded border border-slate-300 px-2" type="number" min={1} max={100} value={guestCount} onChange={(event) => setGuestCount(Number(event.target.value))} />
-                </label>
-                <button
-                  className="mt-auto h-10 rounded bg-red-700 px-4 font-bold text-white disabled:opacity-50"
-                  disabled={runMutation.isPending || !newSessionTableId}
-                  onClick={() => {
-                    const table = availableTables.find((item) => item.id === newSessionTableId);
-                    if (!table) return toast("Choose an available table.");
-                    if (guestCount > table.capacity) return toast(`Table ${table.table_number} seats up to ${table.capacity} guests.`);
-                    runAction("post", "/api/pos/dining/sessions", { tableId: table.id, guestCount });
-                    setNewSessionTableId("");
-                  }}
-                >
-                  Start session
-                </button>
-              </div>
-              {availableTables.length === 0 && <p className="mt-2 text-xs text-slate-500">No available tables at the moment.</p>}
             </section>
 
             <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
@@ -539,6 +581,88 @@ export default function DiningService({ mode = "service" }: Props) {
           </section>
 
           <section className="space-y-5">
+            <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+              <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <h2 className="text-lg font-bold">Table board</h2>
+                  <p className="text-xs text-slate-500">Choose a free table for a walk-in. Reservations hold their assigned tables.</p>
+                </div>
+                <div className="flex flex-wrap gap-2 text-xs font-semibold">
+                  <span className="rounded bg-emerald-100 px-2 py-1 text-emerald-900">Free</span>
+                  <span className="rounded bg-red-100 px-2 py-1 text-red-900">Occupied</span>
+                  <span className="rounded bg-amber-100 px-2 py-1 text-amber-900">Reserved / held</span>
+                  <span className="rounded bg-slate-200 px-2 py-1 text-slate-800">Unavailable</span>
+                </div>
+              </div>
+              <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+                {(tablesQuery.data ?? []).map((table) => {
+                  const status = normalizeTableStatus(table.status);
+                  const linkedTable = (tablesQuery.data ?? []).find((candidate) => candidate.id === table.linked_to_table_id);
+                  const reservation = reservationsByTableNumber.get(table.table_number);
+                  const isHeld = Boolean(reservation && ["upcoming", "late"].includes(reservation.state));
+                  const isOccupied = Boolean(table.active_session) || status === "occupied";
+                  const state = table.linked_to_table_id || (status !== "available" && status !== "occupied")
+                    ? "unavailable"
+                    : isOccupied
+                      ? "occupied"
+                      : isHeld
+                        ? "reserved"
+                        : "free";
+                  const stateStyle = state === "free"
+                    ? "border-emerald-300 bg-emerald-50 text-emerald-950"
+                    : state === "occupied"
+                      ? "border-red-300 bg-red-50 text-red-950"
+                      : state === "reserved"
+                        ? "border-amber-300 bg-amber-50 text-amber-950"
+                        : "border-slate-300 bg-slate-100 text-slate-800";
+                  const stateLabel = state === "reserved"
+                    ? "Reserved / held"
+                    : state === "free"
+                      ? "Free"
+                      : state === "occupied"
+                        ? "Occupied"
+                        : table.linked_to_table_id
+                          ? `Unavailable · linked to Table ${linkedTable?.table_number ?? "—"}`
+                          : "Unavailable";
+
+                  return (
+                    <article key={table.id} className={`rounded-lg border p-3 ${stateStyle}`}>
+                      <div className="flex items-start justify-between gap-2">
+                        <div>
+                          <h3 className="font-bold">
+                            Table {table.table_number}
+                            {reservation?.temporary_table_numbers.includes(table.table_number) && (
+                              <span className="ml-2 rounded bg-slate-800 px-1.5 py-0.5 text-xs text-white">Temp</span>
+                            )}
+                          </h3>
+                          <p className="text-sm">{table.capacity} seats · {stateLabel}</p>
+                          {reservation && (
+                            <p className="mt-1 text-xs">
+                              {reservation.customer_name} · {reservation.time} · {reservation.state === "late" ? "Late" : reservation.state === "arrived" ? "Arrived" : "Upcoming"}
+                            </p>
+                          )}
+                        </div>
+                        {activeUnlimitedTableIds.has(table.id) && (
+                          <span className="whitespace-nowrap rounded bg-violet-800 px-2 py-1 text-xs font-bold text-white">Unlimited running</span>
+                        )}
+                      </div>
+                      {state === "free" && (
+                        <button
+                          className="mt-3 rounded bg-emerald-800 px-3 py-1.5 text-sm font-bold text-white hover:bg-emerald-900 disabled:opacity-50"
+                          disabled={runMutation.isPending}
+                          onClick={() => runAction("post", "/api/pos/dining/sessions", { tableId: table.id })}
+                        >
+                          Seat walk-in
+                        </button>
+                      )}
+                    </article>
+                  );
+                })}
+                {!tablesQuery.isLoading && (tablesQuery.data ?? []).length === 0 && (
+                  <p className="rounded border border-dashed p-5 text-sm text-slate-500 sm:col-span-2 xl:col-span-3">No active tables are configured.</p>
+                )}
+              </div>
+            </section>
             {!session ? (
               <section className="grid min-h-64 place-items-center rounded-xl border border-dashed border-slate-300 bg-white p-6 text-center text-slate-500">
                 Select an active table to assign guest numbers, send kitchen tickets, and check out.
@@ -551,33 +675,6 @@ export default function DiningService({ mode = "service" }: Props) {
                       <p className="text-sm font-bold uppercase text-red-700">Active dining session</p>
                       <h2 className="text-2xl font-black">Table {session.table.table_number}</h2>
                       <p className="text-sm text-slate-500">{session.guests.length} guests · session {session.id.slice(-8)}</p>
-                    </div>
-                    <div className="flex flex-wrap gap-2">
-                      <select
-                        className="h-10 max-w-48 rounded border border-slate-300 px-2 text-sm"
-                        value={transferTableId}
-                        onChange={(event) => setTransferTableId(event.target.value)}
-                      >
-                        <option value="">Transfer table...</option>
-                        {availableTables.filter((item) => item.id !== session.table_id).map((item) => (
-                          <option key={item.id} value={item.id}>Table {item.table_number} · {item.capacity} seats</option>
-                        ))}
-                      </select>
-                      <ActionButton
-                        tone="muted"
-                        disabled={!transferTableId || runMutation.isPending}
-                        onClick={() => {
-                          const destination = availableTables.find((item) => item.id === transferTableId);
-                          if (destination && session.guests.length > destination.capacity) {
-                            toast(`Table ${destination.table_number} seats up to ${destination.capacity} guests.`);
-                            return;
-                          }
-                          runAction("patch", `/api/pos/dining/sessions/${session.id}/table`, { tableId: transferTableId });
-                          setTransferTableId("");
-                        }}
-                      >
-                        Transfer
-                      </ActionButton>
                     </div>
                   </div>
                   <div className="mt-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
@@ -598,6 +695,12 @@ export default function DiningService({ mode = "service" }: Props) {
                   </div>
                 </section>
 
+                {session.guests.length === 0 ? (
+                  <section className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-950 shadow-sm">
+                    This table is seated without guest records. Additional orders will be available in Phase 2 Step 4.
+                  </section>
+                ) : (
+                <>
                 <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
                   <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
                     <h2 className="text-lg font-bold">Create kitchen ticket</h2>
@@ -714,6 +817,8 @@ export default function DiningService({ mode = "service" }: Props) {
                     <p className="text-sm text-slate-600">Checkout after all kitchen tickets are released or cancelled and all Unlimited packages are ended.</p>
                     <ActionButton disabled={runMutation.isPending} onClick={() => setShowCheckout(true)}>Review bill</ActionButton>
                   </div>
+                )}
+                </>
                 )}
               </>
             )}
