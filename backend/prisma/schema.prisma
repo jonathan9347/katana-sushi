@@ -112,16 +112,17 @@ model InventorySnapshotArchive {
 }
 
 model SellingProduct {
-  id           String   @id @default(cuid())
-  name         String
-  category     String
-  price        Decimal  @db.Decimal(12, 2)
-  is_available Boolean  @default(true)
-  is_deleted   Boolean  @default(false)
-  description  String?
-  image_url    String?
-  created_at   DateTime @default(now())
-  updated_at   DateTime @updatedAt
+  id                 String   @id @default(cuid())
+  name               String
+  category           String
+  price              Decimal  @db.Decimal(12, 2)
+  is_available       Boolean  @default(true)
+  is_deleted         Boolean  @default(false)
+  is_sold_a_la_carte Boolean  @default(true)
+  description        String?
+  image_url          String?
+  created_at         DateTime @default(now())
+  updated_at         DateTime @updatedAt
 
   recipes                     Recipe[]
   pos_items                   PosItem[]
@@ -336,13 +337,14 @@ model TakeoutIngredientLock {
 }
 
 model Table {
-  id           String    @id @default(cuid())
-  table_number Int       @unique
-  capacity     Int
-  status       String
-  is_archived  Boolean   @default(false)
-  archived_at  DateTime?
-  created_at   DateTime  @default(now())
+  id                 String    @id @default(cuid())
+  table_number       Int       @unique
+  capacity           Int
+  status             String
+  is_archived        Boolean   @default(false)
+  archived_at        DateTime?
+  created_at         DateTime  @default(now())
+  is_temporary       Boolean   @default(false)
   linked_to_table_id String?
   unavailable_reason String?
 
@@ -351,11 +353,10 @@ model Table {
   unlimited_sessions      UnlimitedSession[]
   dining_sessions         DiningTableSession[]
   table_memberships       TableCombinationMember[]
-  linked_to_table         Table?     @relation("TableLink", fields: [linked_to_table_id], references: [id], onDelete: Restrict, onUpdate: Cascade)
-  linked_tables           Table[]    @relation("TableLink")
+  linked_to_table         Table?                       @relation("TableLink", fields: [linked_to_table_id], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  linked_tables           Table[]                      @relation("TableLink")
 
   @@index([linked_to_table_id])
-
   @@map("tables")
 }
 
