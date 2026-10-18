@@ -16,10 +16,7 @@ import {
 import "./ReservationForm.css";
 
 type SlotAvailability = {
-  available_pax: number;
-  walk_in_pax: number;
-  booked_pax: number;
-  total_table_capacity: number;
+  availability: "available" | "full";
   checked_at: string;
 };
 
@@ -58,10 +55,10 @@ export default function TableReservationForm() {
   const period = hour24 >= 12 ? "PM" : "AM";
 
   const availabilityQuery = useQuery({
-    queryKey: ["table-reservation-availability", date, time],
+    queryKey: ["table-reservation-availability", date, time, partySize],
     queryFn: async () => (await api.get<SlotAvailability>(
       "/api/reservations/table-availability",
-      { params: { date, time } }
+      { params: { date, time, party_size: partySize } }
     )).data,
     enabled: timeIsValid,
     retry: 1,
@@ -70,11 +67,11 @@ export default function TableReservationForm() {
     refetchOnWindowFocus: true
   });
   const availability = availabilityQuery.data;
-  const noSeats = Boolean(availability && partySize > availability.available_pax);
+  const isFull = availability?.availability === "full";
   const canContinue = timeIsValid &&
     availabilityQuery.isSuccess &&
     Boolean(availability) &&
-    !noSeats &&
+    !isFull &&
     !isSubmitting;
   const timeLabel = useMemo(() => time ? formatTime12(time) : "Choose a time", [time]);
 
@@ -114,8 +111,8 @@ export default function TableReservationForm() {
       setMessage("Confirming seat availability. Please try again shortly.");
       return;
     }
-    if (partySize > availability.available_pax) {
-      setMessage("There are not enough seats available for that party size. Choose another time or fewer guests.");
+    if (availability.availability === "full") {
+      setMessage("This time is full for your party size. Choose another time or fewer guests.");
       return;
     }
     setContactOpen(true);
@@ -130,10 +127,10 @@ export default function TableReservationForm() {
     try {
       const latestAvailability = await api.get<SlotAvailability>(
         "/api/reservations/table-availability",
-        { params: { date, time } }
+        { params: { date, time, party_size: partySize } }
       );
-      if (partySize > latestAvailability.data.available_pax) {
-        throw new Error("This time slot no longer has enough seats. Choose another time or fewer guests.");
+      if (latestAvailability.data.availability === "full") {
+        throw new Error("This time is now full for your party size. Choose another time or fewer guests.");
       }
       const response = await api.post<BookingResult>("/api/reservations/table", {
         customer_name: customerName.trim(),
@@ -375,8 +372,8 @@ export default function TableReservationForm() {
               ) : availabilityQuery.isError ? (
                 <p className="text-katana-red">Seat availability could not be checked. Please retry.</p>
               ) : availability ? (
-                <p className={noSeats ? "font-semibold text-katana-red" : "font-semibold text-emerald-500"}>
-                  {noSeats ? "Not enough seats available for this party." : "Seats are available for this time slot."}
+                <p className={isFull ? "font-semibold text-katana-red" : "font-semibold text-emerald-500"}>
+                  {isFull ? "Full" : "Available"}
                 </p>
               ) : null}
             </div>

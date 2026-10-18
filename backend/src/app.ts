@@ -2240,7 +2240,7 @@ async function getReservationSlotSummary(
   };
 }
 
-const ACTIVE_DINE_IN_RESERVATION_STATUSES = [
+const ACTIVE_TABLE_RESERVATION_STATUSES = [
   "pending",
   "pending_approval",
   "confirmed",
@@ -2252,7 +2252,7 @@ const ACTIVE_DINE_IN_RESERVATION_STATUSES = [
 ];
 
 async function allocateReservationTables(
-  tx: Prisma.TransactionClient,
+  tx: Prisma.TransactionClient | typeof prisma,
   dateKey: string,
   time: string,
   partySize: number
@@ -2283,8 +2283,7 @@ async function allocateReservationTables(
         status: { notIn: ["released", "cancelled"] },
         reservation: {
           is: {
-            reservation_type: "dine_in",
-            status: { in: ACTIVE_DINE_IN_RESERVATION_STATUSES }
+            status: { in: ACTIVE_TABLE_RESERVATION_STATUSES }
           }
         }
       },
@@ -2351,11 +2350,7 @@ async function allocateReservationTables(
   );
 
   if (!result) {
-    throw new InventoryError(
-      "No suitable tables are available for this party at the selected time. Choose another time or a smaller party.",
-      "TABLE_ASSIGNMENT_CONFLICT",
-      409
-    );
+    return null;
   }
 
   const selectedTableIds = new Set(result.tableIds);
@@ -2476,7 +2471,8 @@ app.get("/api/reservations/table-availability", async (req, res, next) => {
   try {
     const query = z.object({
       date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
-      time: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/)
+      time: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/),
+      party_size: z.coerce.number().int().min(1).max(RESERVATION_SETTINGS.MAX_GUESTS)
     }).parse(req.query);
     const date = manilaDateToUtc(query.date);
     if (manilaDateKey(date) !== query.date) {
@@ -2487,8 +2483,16 @@ app.get("/api/reservations/table-availability", async (req, res, next) => {
       return res.status(400).json({ message: timeError });
     }
 
-    const summary = await getReservationSlotSummary(prisma, query.date, query.time);
-    return res.json({ ...summary, checked_at: new Date().toISOString() });
+    const assignments = await allocateReservationTables(
+      prisma,
+      query.date,
+      query.time,
+      query.party_size
+    );
+    return res.json({
+      availability: assignments ? "available" : "full",
+      checked_at: new Date().toISOString()
+    });
   } catch (error) {
     return next(error);
   }
@@ -2582,6 +2586,7 @@ app.put("/api/admin/settings/system", async (req, res, next) => {
         receipt_footer: z.string().min(1).max(240),
         max_party_size: z.coerce.number().int().min(1).max(500),
         reservation_duration_minutes: z.coerce.number().int().min(15).max(480),
+        estimated_dining_duration_minutes: z.coerce.number().int().min(15).max(480),
         reservation_grace_period_minutes: z.coerce.number().int().min(0).max(120),
         minimum_catering_pax: z.coerce.number().int().min(1).max(1000),
         default_downpayment_percent: z.coerce.number().min(0).max(100),
@@ -3908,21 +3913,6 @@ app.post("/api/reservations/table", async (req, res, next) => {
       ? Number(unlimitedSettings?.price_per_person ?? 0) * body.party_size
       : 0;
     const reservation = await prisma.$transaction(async (tx) => {
-      const slotStart = getReservationSlotStart(
-        body.time,
-        RESERVATION_SETTINGS.OPENING_TIME,
-        RESERVATION_SETTINGS.SLOT_DURATION_MINUTES
-      );
-      await tx.reservationSlotCapacity.createMany({
-        data: [{ service_date: body.date, slot_start: slotStart, walk_in_pax: 0 }],
-        skipDuplicates: true
-      });
-      await tx.$queryRaw`
-        SELECT "id" FROM "reservation_slot_capacities"
-        WHERE "service_date" = ${body.date} AND "slot_start" = ${slotStart}
-        FOR UPDATE
-      `;
-
       const duplicate = await tx.reservation.findFirst({
         where: {
           date: { gte: startOfDay(date), lte: endOfDay(date) },
@@ -3947,21 +3937,19 @@ app.post("/api/reservations/table", async (req, res, next) => {
         SELECT id FROM tables ORDER BY id FOR UPDATE
       `;
 
-      const capacity = await getReservationSlotSummary(tx, body.date, body.time);
-      if (body.party_size > capacity.available_pax) {
-        throw new InventoryError(
-          `Only ${capacity.available_pax} guest${capacity.available_pax === 1 ? "" : "s"} can be booked for this time slot.`,
-          "RESERVATION_SLOT_FULL",
-          409
-        );
-      }
-
       const tableAssignments = await allocateReservationTables(
         tx,
         body.date,
         body.time,
         body.party_size
       );
+      if (!tableAssignments) {
+        throw new InventoryError(
+          "No suitable tables are available for this party at the selected time. Choose another time or a smaller party.",
+          "TABLE_ASSIGNMENT_CONFLICT",
+          409
+        );
+      }
       const bookingId = await generateReadableId(
         body.reservation_type === "unlimited" ? "KTN-UNL" : "KTN-DINE",
         date,
@@ -9524,6 +9512,7 @@ type SystemSettingsRecord = {
   receipt_footer: string;
   max_party_size: number;
   reservation_duration_minutes: number;
+  estimated_dining_duration_minutes: number;
   reservation_grace_period_minutes: number;
   minimum_catering_pax: number;
   default_downpayment_percent: number;
@@ -9548,6 +9537,7 @@ type SystemSettingsInput = Pick<
   | "receipt_footer"
   | "max_party_size"
   | "reservation_duration_minutes"
+  | "estimated_dining_duration_minutes"
   | "reservation_grace_period_minutes"
   | "minimum_catering_pax"
   | "default_downpayment_percent"
@@ -9570,6 +9560,7 @@ const defaultSystemSettings: SystemSettingsInput = {
   receipt_footer: "Thank you for dining with us!",
   max_party_size: 30,
   reservation_duration_minutes: 90,
+  estimated_dining_duration_minutes: 120,
   reservation_grace_period_minutes: 15,
   minimum_catering_pax: 10,
   default_downpayment_percent: 50,
@@ -9615,6 +9606,7 @@ async function ensureSystemSettingsRow() {
       receipt_footer,
       max_party_size,
       reservation_duration_minutes,
+      estimated_dining_duration_minutes,
       reservation_grace_period_minutes,
       minimum_catering_pax,
       default_downpayment_percent,
@@ -9639,6 +9631,7 @@ async function ensureSystemSettingsRow() {
       ${defaultSystemSettings.receipt_footer},
       ${defaultSystemSettings.max_party_size},
       ${defaultSystemSettings.reservation_duration_minutes},
+      ${defaultSystemSettings.estimated_dining_duration_minutes},
       ${defaultSystemSettings.reservation_grace_period_minutes},
       ${defaultSystemSettings.minimum_catering_pax},
       ${defaultSystemSettings.default_downpayment_percent},
@@ -9669,6 +9662,7 @@ async function getSystemSettings() {
       receipt_footer,
       max_party_size,
       reservation_duration_minutes,
+      estimated_dining_duration_minutes,
       reservation_grace_period_minutes,
       minimum_catering_pax,
       default_downpayment_percent,
@@ -9701,6 +9695,7 @@ async function updateSystemSettings(settings: SystemSettingsInput) {
       receipt_footer = ${settings.receipt_footer},
       max_party_size = ${settings.max_party_size},
       reservation_duration_minutes = ${settings.reservation_duration_minutes},
+      estimated_dining_duration_minutes = ${settings.estimated_dining_duration_minutes},
       reservation_grace_period_minutes = ${settings.reservation_grace_period_minutes},
       minimum_catering_pax = ${settings.minimum_catering_pax},
       default_downpayment_percent = ${settings.default_downpayment_percent},
@@ -9725,6 +9720,7 @@ async function updateSystemSettings(settings: SystemSettingsInput) {
       receipt_footer,
       max_party_size,
       reservation_duration_minutes,
+      estimated_dining_duration_minutes,
       reservation_grace_period_minutes,
       minimum_catering_pax,
       default_downpayment_percent,
