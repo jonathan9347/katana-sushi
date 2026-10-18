@@ -46,6 +46,11 @@ import { getJwtSecret } from "./lib/jwt";
 import { reservationTimeError, RESERVATION_SETTINGS } from "./config/reservationSettings";
 import { normalizeTableStatus } from "./services/tableStatus.service";
 import {
+  findBestTableCombination,
+  getTablesUnavailableForSlot,
+  type TablePlanningWindow
+} from "./services/tableAllocation.service";
+import {
   calculateAvailableReservationPax,
   getReservationSlotStart
 } from "./services/reservationCapacity.service";
@@ -2124,14 +2129,19 @@ async function captureInventorySnapshot(snapshotDate?: Date) {
   }
 }
 
-async function generateReadableId(prefix: string, date: Date, field: "booking_id" | "inquiry_id" | "reservation_id") {
+async function generateReadableId(
+  prefix: string,
+  date: Date,
+  field: "booking_id" | "inquiry_id" | "reservation_id",
+  tx: Prisma.TransactionClient | typeof prisma = prisma
+) {
   const stamp = manilaDateKey(date).replace(/-/g, "");
   const count =
     field === "booking_id"
-      ? await prisma.reservation.count({ where: { booking_id: { startsWith: `${prefix}-${stamp}` } } })
+      ? await tx.reservation.count({ where: { booking_id: { startsWith: `${prefix}-${stamp}` } } })
       : field === "inquiry_id"
-      ? await prisma.cateringInquiry.count({ where: { inquiry_id: { startsWith: `${prefix}-${stamp}` } } })
-      : await prisma.cateringReservation.count({ where: { reservation_id: { startsWith: `${prefix}-${stamp}` } } });
+      ? await tx.cateringInquiry.count({ where: { inquiry_id: { startsWith: `${prefix}-${stamp}` } } })
+      : await tx.cateringReservation.count({ where: { reservation_id: { startsWith: `${prefix}-${stamp}` } } });
 
   return `${prefix}-${stamp}-${String(count + 1).padStart(4, "0")}`;
 }
@@ -2228,6 +2238,141 @@ async function getReservationSlotSummary(
       RESERVATION_SETTINGS.MAX_PAX_PER_SLOT
     )
   };
+}
+
+const ACTIVE_DINE_IN_RESERVATION_STATUSES = [
+  "pending",
+  "pending_approval",
+  "confirmed",
+  "approved",
+  "seated",
+  "preparing",
+  "in_progress",
+  "pending_final_payment"
+];
+
+async function allocateReservationTables(
+  tx: Prisma.TransactionClient,
+  dateKey: string,
+  time: string,
+  partySize: number
+) {
+  const settings = await tx.$queryRaw<Array<{ estimated_dining_duration_minutes: number }>>`
+    SELECT estimated_dining_duration_minutes
+    FROM system_settings
+    WHERE singleton_key = 'default'
+    LIMIT 1
+  `;
+  const estimatedDurationMinutes = Number(settings[0]?.estimated_dining_duration_minutes);
+  if (!Number.isInteger(estimatedDurationMinutes) || estimatedDurationMinutes <= 0) {
+    throw new InventoryError(
+      "The estimated dining duration setting is missing or invalid. Contact an administrator.",
+      "INVALID_DINING_DURATION_SETTING",
+      503
+    );
+  }
+
+  const [tables, assignments, sessions] = await Promise.all([
+    tx.table.findMany({
+      where: { is_archived: false },
+      orderBy: [{ table_number: "asc" }, { id: "asc" }],
+      select: { id: true, table_number: true, capacity: true, status: true, linked_to_table_id: true }
+    }),
+    tx.reservationTableAssignment.findMany({
+      where: {
+        status: { notIn: ["released", "cancelled"] },
+        reservation: {
+          is: {
+            reservation_type: "dine_in",
+            status: { in: ACTIVE_DINE_IN_RESERVATION_STATUSES }
+          }
+        }
+      },
+      include: { reservation: { select: { date: true, time: true } } }
+    }),
+    tx.diningTableSession.findMany({
+      where: { status: "active" },
+      select: {
+        table_id: true,
+        opened_at: true,
+        table_combination: {
+          select: { members: { select: { table_id: true } } }
+        }
+      }
+    })
+  ]);
+
+  const activeSessionTableIds = new Set(sessions.flatMap((session) => [
+    session.table_id,
+    ...(session.table_combination?.members.map((member) => member.table_id) ?? [])
+  ]));
+  const unavailableTableIds = tables
+    .filter((table) => {
+      const status = normalizeTableStatus(table.status);
+      return Boolean(table.linked_to_table_id) ||
+        (status !== "available" && status !== "occupied") ||
+        (status === "occupied" && !activeSessionTableIds.has(table.id));
+    })
+    .map((table) => table.id);
+
+  const reservationWindows: TablePlanningWindow[] = assignments.map((assignment) => ({
+    serviceDate: manilaDateKey(assignment.reservation.date),
+    startTime: assignment.reservation.time,
+    tableIds: [assignment.table_id]
+  }));
+  const activeDiningSessions: TablePlanningWindow[] = sessions.map((session) => ({
+    serviceDate: manilaDateKey(session.opened_at),
+    startTime: session.opened_at.toLocaleTimeString("en-GB", {
+      timeZone: RESERVATION_SETTINGS.TIME_ZONE,
+      hour: "2-digit",
+      minute: "2-digit",
+      hourCycle: "h23"
+    }),
+    tableIds: [
+      session.table_id,
+      ...(session.table_combination?.members.map((member) => member.table_id) ?? [])
+    ]
+  }));
+  const unavailableForSlot = getTablesUnavailableForSlot(
+    dateKey,
+    time,
+    estimatedDurationMinutes,
+    reservationWindows,
+    activeDiningSessions
+  );
+  const result = findBestTableCombination(
+    partySize,
+    tables.map((table) => ({
+      id: table.id,
+      table_number: table.table_number,
+      capacity: table.capacity
+    })),
+    { unavailableTableIds: [...unavailableTableIds, ...unavailableForSlot] }
+  );
+
+  if (!result) {
+    throw new InventoryError(
+      "No suitable tables are available for this party at the selected time. Choose another time or a smaller party.",
+      "TABLE_ASSIGNMENT_CONFLICT",
+      409
+    );
+  }
+
+  const selectedTableIds = new Set(result.tableIds);
+  const selectedTables = tables.filter((table) => selectedTableIds.has(table.id));
+  if (selectedTables.length !== result.tableIds.length) {
+    throw new InventoryError(
+      "Table availability changed while the booking was being confirmed. Please retry.",
+      "TABLE_ALLOCATION_CHANGED",
+      409
+    );
+  }
+  let remainingSeats = partySize;
+  return selectedTables.map((table) => {
+    const seatCount = Math.min(table.capacity, remainingSeats);
+    remainingSeats -= seatCount;
+    return { table_id: table.id, seat_count: seatCount };
+  });
 }
 
 async function getAvailableCapacity(date: Date, time: string) {
@@ -3762,22 +3907,15 @@ app.post("/api/reservations/table", async (req, res, next) => {
     const totalPrice = body.reservation_type === "unlimited"
       ? Number(unlimitedSettings?.price_per_person ?? 0) * body.party_size
       : 0;
-    const bookingId = await generateReadableId(
-      body.reservation_type === "unlimited" ? "KTN-UNL" : "KTN-DINE",
-      date,
-      "booking_id"
-    );
-
     const reservation = await prisma.$transaction(async (tx) => {
       const slotStart = getReservationSlotStart(
         body.time,
         RESERVATION_SETTINGS.OPENING_TIME,
         RESERVATION_SETTINGS.SLOT_DURATION_MINUTES
       );
-      await tx.reservationSlotCapacity.upsert({
-        where: { service_date_slot_start: { service_date: body.date, slot_start: slotStart } },
-        update: {},
-        create: { service_date: body.date, slot_start: slotStart, walk_in_pax: 0 }
+      await tx.reservationSlotCapacity.createMany({
+        data: [{ service_date: body.date, slot_start: slotStart, walk_in_pax: 0 }],
+        skipDuplicates: true
       });
       await tx.$queryRaw`
         SELECT "id" FROM "reservation_slot_capacities"
@@ -3805,6 +3943,10 @@ app.post("/api/reservations/table", async (req, res, next) => {
         );
       }
 
+      await tx.$queryRaw<Array<{ id: string }>>`
+        SELECT id FROM tables ORDER BY id FOR UPDATE
+      `;
+
       const capacity = await getReservationSlotSummary(tx, body.date, body.time);
       if (body.party_size > capacity.available_pax) {
         throw new InventoryError(
@@ -3813,6 +3955,19 @@ app.post("/api/reservations/table", async (req, res, next) => {
           409
         );
       }
+
+      const tableAssignments = await allocateReservationTables(
+        tx,
+        body.date,
+        body.time,
+        body.party_size
+      );
+      const bookingId = await generateReadableId(
+        body.reservation_type === "unlimited" ? "KTN-UNL" : "KTN-DINE",
+        date,
+        "booking_id",
+        tx
+      );
 
       const created = await tx.reservation.create({
         data: {
@@ -3840,6 +3995,14 @@ app.post("/api/reservations/table", async (req, res, next) => {
           special_requests: null,
           created_by: body.customer_name
         }
+      });
+      await tx.reservationTableAssignment.createMany({
+        data: tableAssignments.map((assignment) => ({
+          reservation_id: created.id,
+          table_id: assignment.table_id,
+          seat_count: assignment.seat_count,
+          status: "assigned"
+        }))
       });
       await addReservationActivity(tx, {
         reservationId: created.id,
