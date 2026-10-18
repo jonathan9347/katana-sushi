@@ -67,4 +67,8 @@ test("allows linking an unavailable table only to a seated active table that is 
     /not itself linked/
   );
   assert.throws(() => assertCanLinkUnavailableTable(source, table({ id: "table-1" })), /itself/);
+  assert.throws(
+    () => assertCanLinkUnavailableTable({ ...source, linked_to_table_id: "table-3" }, seatedTarget),
+    /already linked/
+  );
 });
