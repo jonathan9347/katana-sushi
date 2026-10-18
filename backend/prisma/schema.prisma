@@ -539,20 +539,21 @@ model DiningGuest {
 }
 
 model DiningOrder {
-  id                   String    @id @default(cuid())
-  order_number         String    @unique
-  idempotency_key      String    @unique
-  dining_session_id    String
-  unlimited_session_id String?
-  order_type           String
-  status               String    @default("reserved")
-  created_by           String
-  prepared_at          DateTime?
-  ready_at             DateTime?
-  released_at          DateTime?
-  cancelled_at         DateTime?
-  created_at           DateTime  @default(now())
-  updated_at           DateTime  @updatedAt
+  id                    String    @id @default(cuid())
+  order_number          String    @unique
+  idempotency_key       String    @unique
+  dining_session_id     String
+  table_number_snapshot Int?
+  unlimited_session_id  String?
+  order_type            String
+  status                String    @default("reserved")
+  created_by            String
+  prepared_at           DateTime?
+  ready_at              DateTime?
+  released_at           DateTime?
+  cancelled_at          DateTime?
+  created_at            DateTime  @default(now())
+  updated_at            DateTime  @updatedAt
 
   dining_session    DiningTableSession     @relation(fields: [dining_session_id], references: [id], onDelete: Restrict)
   unlimited_session UnlimitedSession?      @relation(fields: [unlimited_session_id], references: [id], onDelete: SetNull)
@@ -569,7 +570,7 @@ model DiningOrder {
 model DiningOrderItem {
   id                 String   @id @default(cuid())
   order_id           String
-  guest_id           String
+  guest_id           String?
   selling_product_id String?
   name_snapshot      String
   quantity           Int
@@ -578,7 +579,7 @@ model DiningOrderItem {
   created_at         DateTime @default(now())
 
   order           DiningOrder     @relation(fields: [order_id], references: [id], onDelete: Cascade)
-  guest           DiningGuest     @relation(fields: [guest_id], references: [id], onDelete: Restrict)
+  guest           DiningGuest?    @relation(fields: [guest_id], references: [id], onDelete: Restrict, onUpdate: Cascade)
   selling_product SellingProduct? @relation(fields: [selling_product_id], references: [id], onDelete: SetNull)
 
   @@index([order_id])
