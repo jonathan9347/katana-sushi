@@ -43,7 +43,12 @@ import { PaymentService } from "./services/payment.service";
 import { prisma } from "./lib/prisma";
 import { checkDatabaseHealth, getDatabaseStatus, markDatabaseDown } from "./lib/database";
 import { getJwtSecret } from "./lib/jwt";
-import { isDineInReservationLate, reservationTimeError, RESERVATION_SETTINGS } from "./config/reservationSettings";
+import {
+  isDineInReservationLate,
+  isDineInReservationLateAlert,
+  reservationTimeError,
+  RESERVATION_SETTINGS
+} from "./config/reservationSettings";
 import { normalizeTableStatus } from "./services/tableStatus.service";
 import {
   findBestTableCombination,
@@ -4111,7 +4116,12 @@ app.get("/api/staff/reservations/approved", async (req, res, next) => {
     return res.json({
       reservations: reservations.map((reservation) => ({
         ...reservation,
-        late_alert: isDineInReservationLate(reservation.date, reservation.time) && reservation.activity.length === 0
+        late_alert: isDineInReservationLateAlert(
+          reservation.date,
+          reservation.time,
+          reservation.status,
+          reservation.activity.length > 0
+        )
       }))
     });
   } catch (error) {
@@ -4339,7 +4349,12 @@ app.get("/api/staff/reservations/all", async (req, res, next) => {
         selected_products: reservation.selected_products ?? [],
         ingredient_locks: reservation.ingredient_locks,
         status: reservation.status,
-        late_alert: isDineInReservationLate(reservation.date, reservation.time) && reservation.activity.length === 0,
+        late_alert: isDineInReservationLateAlert(
+          reservation.date,
+          reservation.time,
+          reservation.status,
+          reservation.activity.length > 0
+        ),
         late_acknowledged: reservation.activity.length > 0,
         payment_plan: reservation.payment_plan,
         downpayment_amount: reservation.downpayment_amount,

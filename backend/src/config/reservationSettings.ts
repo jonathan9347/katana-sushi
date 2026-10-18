@@ -24,6 +24,19 @@ export function isDineInReservationLate(date: Date, time: string, now = new Date
     && now.getTime() >= scheduledTime + RESERVATION_SETTINGS.LATE_ALERT_MINUTES * 60_000;
 }
 
+export function isDineInReservationLateAlert(
+  date: Date,
+  time: string,
+  status: string,
+  lateArrivalAcknowledged: boolean,
+  now = new Date()
+) {
+  if (lateArrivalAcknowledged || !["confirmed", "approved"].includes(status.toLowerCase())) {
+    return false;
+  }
+  return isDineInReservationLate(date, time, now);
+}
+
 export function reservationTimeError(date: string, time: string, now = new Date()) {
   const settings = RESERVATION_SETTINGS;
   const dateParts = /^(\d{4})-(\d{2})-(\d{2})$/.exec(date);
