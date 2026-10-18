@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ChefHat, Printer, ShoppingCart, Table2 } from "lucide-react";
 import { Link } from "react-router-dom";
 import SectionNav, { SectionNavTab } from "../../../components/layout/SectionNav";
+import { Dialog } from "../../../components/ui/dialog";
 import { api } from "../../../lib/api";
 import { useToast } from "../../../hooks/useToast";
 
@@ -54,7 +55,9 @@ type DiningTable = {
   table_number: number;
   capacity: number;
   status: string;
-  active_session: { id: string } | null;
+  linked_to_table_id: string | null;
+  unavailable_reason: string | null;
+  active_session: { id: string; guests: Array<{ id: string }> } | null;
 };
 
 type PosProduct = {
@@ -162,6 +165,11 @@ export default function DiningService({ mode = "service" }: Props) {
   const [cashReceived, setCashReceived] = useState("");
   const [paymentMethod, setPaymentMethod] = useState<"cash" | "gcash" | "bank_transfer">("cash");
   const [showCheckout, setShowCheckout] = useState(false);
+  const [manageTablesOpen, setManageTablesOpen] = useState(false);
+  const [newTableCapacity, setNewTableCapacity] = useState("2");
+  const [seatDrafts, setSeatDrafts] = useState<Record<string, string>>({});
+  const [tableReasons, setTableReasons] = useState<Record<string, string>>({});
+  const [linkTargets, setLinkTargets] = useState<Record<string, string>>({});
   const [completedTransaction, setCompletedTransaction] = useState<CheckoutTransaction | null>(null);
   const queryClient = useQueryClient();
   const { toast } = useToast();
@@ -205,7 +213,14 @@ export default function DiningService({ mode = "service" }: Props) {
     ? session?.guests.filter((guest) => guest.guest_number <= activeUnlimited.pax_count) ?? []
     : session?.guests ?? [];
   const availableTables = (tablesQuery.data ?? []).filter((table) =>
-    !table.active_session && normalizeTableStatus(table.status) !== "occupied"
+    !table.active_session &&
+    !table.linked_to_table_id &&
+    normalizeTableStatus(table.status) === "available"
+  );
+  const seatedTables = (tablesQuery.data ?? []).filter((table) =>
+    Boolean(table.active_session?.guests.length) &&
+    !table.linked_to_table_id &&
+    normalizeTableStatus(table.status) === "occupied"
   );
   const availableProducts = useMemo(
     () => (orderType === "unlimited" ? unlimitedProductsQuery.data : productsQuery.data) ?? [],
@@ -379,7 +394,10 @@ export default function DiningService({ mode = "service" }: Props) {
             <p className="text-sm font-bold uppercase text-red-700">Point of sale</p>
             <h1 className="text-3xl font-black text-slate-950">Table service</h1>
           </div>
-          <p className="text-sm text-slate-500">Kitchen deductions happen only when an order is released.</p>
+          <div className="flex flex-wrap items-center gap-3">
+            <p className="text-sm text-slate-500">Kitchen deductions happen only when an order is released.</p>
+            <ActionButton tone="muted" onClick={() => setManageTablesOpen(true)}>Manage tables</ActionButton>
+          </div>
         </header>
         <SectionNav orientation="horizontal" tabs={posTabs} />
         {(tablesQuery.isError || sessionsQuery.isError) && <p className="rounded bg-red-50 p-3 text-sm text-red-800">Unable to load dining tables or sessions.</p>}
@@ -646,6 +664,185 @@ export default function DiningService({ mode = "service" }: Props) {
             )}
           </section>
         </div>
+        <Dialog
+          open={manageTablesOpen}
+          title="Manage tables"
+          onClose={() => setManageTablesOpen(false)}
+          panelClassName="max-w-4xl"
+        >
+          <div className="space-y-5">
+            {isAdmin && (
+              <form
+                className="flex flex-wrap items-end gap-3 rounded-lg border border-slate-200 p-3"
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  runAction("post", "/api/pos/dining/tables", { capacity: Number(newTableCapacity) });
+                }}
+              >
+                <label className="grid gap-1 text-sm font-semibold text-slate-700">
+                  New table seats
+                  <input
+                    className="h-10 w-28 rounded border border-slate-300 px-3"
+                    type="number"
+                    min={1}
+                    max={100}
+                    value={newTableCapacity}
+                    onChange={(event) => setNewTableCapacity(event.target.value)}
+                  />
+                </label>
+                <ActionButton type="submit" disabled={runMutation.isPending || !newTableCapacity}>Add table</ActionButton>
+                <p className="text-xs text-slate-500">The next unused table number is assigned automatically; archived numbers are never reused.</p>
+              </form>
+            )}
+
+            <div className="space-y-3">
+              {(tablesQuery.data ?? []).map((table) => {
+                const status = normalizeTableStatus(table.status);
+                const linkTarget = (tablesQuery.data ?? []).find((candidate) => candidate.id === table.linked_to_table_id);
+                const hasSession = Boolean(table.active_session);
+                const linked = Boolean(table.linked_to_table_id);
+                const reason = tableReasons[table.id] ?? table.unavailable_reason ?? "";
+                const linkTargetId = linkTargets[table.id] ?? "";
+                const canEditSeats = isAdmin && !hasSession && status !== "occupied" && !linked;
+                const canChangeAvailability = !hasSession && status !== "occupied" && !linked && (status === "available" || status === "unavailable");
+
+                return (
+                  <article key={table.id} className="space-y-3 rounded-lg border border-slate-200 p-3">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div>
+                        <h3 className="font-bold text-slate-900">Table {table.table_number} · {table.capacity} seats</h3>
+                        <p className="text-xs font-semibold uppercase text-slate-500">{status}</p>
+                      </div>
+                      {linked && (
+                        <p className="text-sm text-amber-800">
+                          Linked to Table {linkTarget?.table_number ?? "—"}; it becomes available at that table's checkout.
+                        </p>
+                      )}
+                      {status === "occupied" && <p className="text-sm text-slate-600">Occupied tables are released at checkout.</p>}
+                    </div>
+
+                    <div className="flex flex-wrap items-end gap-2">
+                      {isAdmin && (
+                        <>
+                          <label className="grid gap-1 text-xs font-semibold text-slate-600">
+                            Seats
+                            <input
+                              className="h-9 w-24 rounded border border-slate-300 px-2 text-sm"
+                              type="number"
+                              min={1}
+                              max={100}
+                              disabled={!canEditSeats}
+                              value={seatDrafts[table.id] ?? String(table.capacity)}
+                              onChange={(event) => setSeatDrafts((current) => ({ ...current, [table.id]: event.target.value }))}
+                            />
+                          </label>
+                          <ActionButton
+                            tone="muted"
+                            disabled={!canEditSeats || runMutation.isPending || Number(seatDrafts[table.id] ?? table.capacity) === table.capacity}
+                            onClick={() => runAction("patch", `/api/pos/dining/tables/${table.id}/seats`, {
+                              capacity: Number(seatDrafts[table.id] ?? table.capacity)
+                            })}
+                          >
+                            Save seats
+                          </ActionButton>
+                        </>
+                      )}
+
+                      {canChangeAvailability && (
+                        <>
+                          <label className="grid min-w-48 flex-1 gap-1 text-xs font-semibold text-slate-600">
+                            Reason (optional)
+                            <input
+                              className="h-9 rounded border border-slate-300 px-2 text-sm"
+                              maxLength={120}
+                              placeholder="For example, broken"
+                              value={reason}
+                              onChange={(event) => setTableReasons((current) => ({ ...current, [table.id]: event.target.value }))}
+                            />
+                          </label>
+                          <label className="grid min-w-52 gap-1 text-xs font-semibold text-slate-600">
+                            Link to existing table (seated customer)
+                            <select
+                              className="h-9 rounded border border-slate-300 px-2 text-sm"
+                              value={linkTargetId}
+                              onChange={(event) => setLinkTargets((current) => ({ ...current, [table.id]: event.target.value }))}
+                            >
+                              <option value="">No link</option>
+                              {seatedTables.filter((candidate) => candidate.id !== table.id).map((candidate) => (
+                                <option key={candidate.id} value={candidate.id}>
+                                  Table {candidate.table_number} · {candidate.active_session?.guests.length ?? 0} guests
+                                </option>
+                              ))}
+                            </select>
+                          </label>
+                          {status === "available" && (
+                            <ActionButton
+                              tone="muted"
+                              disabled={runMutation.isPending}
+                              onClick={() => runAction("patch", `/api/pos/dining/tables/${table.id}/availability`, {
+                                status: "unavailable",
+                                reason,
+                                linkToTableId: linkTargetId || null
+                              })}
+                            >
+                              {linkTargetId ? "Mark unavailable & link" : "Mark unavailable"}
+                            </ActionButton>
+                          )}
+                          {status === "unavailable" && (
+                            <>
+                              <ActionButton
+                                tone="muted"
+                                disabled={runMutation.isPending}
+                                onClick={() => runAction("patch", `/api/pos/dining/tables/${table.id}/availability`, {
+                                  status: "available"
+                                })}
+                              >
+                                Mark available
+                              </ActionButton>
+                              {linkTargetId && (
+                                <ActionButton
+                                  tone="muted"
+                                  disabled={runMutation.isPending}
+                                  onClick={() => runAction("patch", `/api/pos/dining/tables/${table.id}/availability`, {
+                                    status: "unavailable",
+                                    reason,
+                                    linkToTableId: linkTargetId
+                                  })}
+                                >
+                                  Link to seated table
+                                </ActionButton>
+                              )}
+                            </>
+                          )}
+                        </>
+                      )}
+
+                      {isAdmin && (
+                        <ActionButton
+                          tone="muted"
+                          disabled={hasSession || status === "occupied" || linked || runMutation.isPending}
+                          onClick={() => {
+                            if (window.confirm(`Archive Table ${table.table_number}? It will disappear from the POS board, but its history will remain.`)) {
+                              runAction("post", `/api/pos/dining/tables/${table.id}/archive`);
+                            }
+                          }}
+                        >
+                          Archive
+                        </ActionButton>
+                      )}
+                    </div>
+                    {table.unavailable_reason && !tableReasons[table.id] && (
+                      <p className="text-xs text-slate-500">Current note: {table.unavailable_reason}</p>
+                    )}
+                  </article>
+                );
+              })}
+              {!tablesQuery.isLoading && (tablesQuery.data ?? []).length === 0 && (
+                <p className="rounded border border-dashed border-slate-300 p-5 text-center text-sm text-slate-500">No live tables.</p>
+              )}
+            </div>
+          </div>
+        </Dialog>
       </div>
     </main>
   );
@@ -760,19 +957,21 @@ function printCheckoutReceipt(transaction: CheckoutTransaction) {
 function ActionButton({
   children,
   onClick,
+  type = "button",
   disabled = false,
   tone = "primary",
   className = ""
 }: {
   children: React.ReactNode;
-  onClick: () => void;
+  onClick?: () => void;
+  type?: "button" | "submit";
   disabled?: boolean;
   tone?: "primary" | "muted";
   className?: string;
 }) {
   const toneClass = tone === "primary" ? "bg-red-700 text-white hover:bg-red-800" : "border border-slate-300 bg-white text-slate-800 hover:bg-slate-50";
   return (
-    <button className={`min-h-10 rounded px-3 text-sm font-bold disabled:cursor-not-allowed disabled:opacity-50 ${toneClass} ${className}`} disabled={disabled} onClick={onClick}>
+    <button type={type} className={`min-h-10 rounded px-3 text-sm font-bold disabled:cursor-not-allowed disabled:opacity-50 ${toneClass} ${className}`} disabled={disabled} onClick={onClick}>
       {children}
     </button>
   );

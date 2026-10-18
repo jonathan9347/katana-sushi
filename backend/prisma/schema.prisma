@@ -343,12 +343,18 @@ model Table {
   is_archived  Boolean   @default(false)
   archived_at  DateTime?
   created_at   DateTime  @default(now())
+  linked_to_table_id String?
+  unavailable_reason String?
 
   reservations            Reservation[]
   reservation_assignments ReservationTableAssignment[]
   unlimited_sessions      UnlimitedSession[]
   dining_sessions         DiningTableSession[]
   table_memberships       TableCombinationMember[]
+  linked_to_table         Table?     @relation("TableLink", fields: [linked_to_table_id], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  linked_tables           Table[]    @relation("TableLink")
+
+  @@index([linked_to_table_id])
 
   @@map("tables")
 }

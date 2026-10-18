@@ -5,6 +5,14 @@ import { z } from "zod";
 import { prisma } from "../lib/prisma";
 import { getBeverageStockMaterialName } from "../lib/beverageStock";
 import { normalizeTableStatus } from "../services/tableStatus.service";
+import {
+  assertCanArchiveTable,
+  assertCanChangeTableAvailability,
+  assertCanEditTableSeats,
+  assertCanLinkUnavailableTable,
+  getNextTableNumber,
+  type ManagedTableState
+} from "../services/tableManagement.service";
 import { roleGuard } from "../middleware/roleGuard";
 import {
   assertBatchQuantitiesMatchOnHand,
@@ -90,6 +98,43 @@ async function getDiningSession(tx: Prisma.TransactionClient, sessionId: string)
       }
     }
   });
+}
+
+async function lockTablesInStableOrder(tx: Prisma.TransactionClient) {
+  await tx.$queryRaw<Array<{ id: string }>>`
+    SELECT id FROM tables ORDER BY id FOR UPDATE
+  `;
+}
+
+async function getManagedTable(tx: Prisma.TransactionClient, tableId: string) {
+  return tx.table.findUnique({
+    where: { id: tableId },
+    include: {
+      dining_sessions: {
+        where: { status: "active" },
+        take: 1,
+        include: { guests: { select: { id: true } } }
+      },
+      linked_tables: {
+        where: { is_archived: false },
+        take: 1,
+        select: { id: true }
+      }
+    }
+  });
+}
+
+function getManagedTableState(table: NonNullable<Awaited<ReturnType<typeof getManagedTable>>>): ManagedTableState {
+  const activeSession = table.dining_sessions[0];
+  return {
+    id: table.id,
+    status: table.status,
+    is_archived: table.is_archived,
+    linked_to_table_id: table.linked_to_table_id,
+    has_active_session: Boolean(activeSession),
+    has_linked_tables: table.linked_tables.length > 0,
+    has_seated_customer: (activeSession?.guests.length ?? 0) > 0
+  };
 }
 
 async function findInventoryNeeds(
@@ -224,6 +269,7 @@ router.get(
   roleGuard(["admin", "cashier"]),
   asyncRoute(async (_req, res) => {
     const tables = await prisma.table.findMany({
+      where: { is_archived: false },
       orderBy: { table_number: "asc" },
       include: {
         dining_sessions: {
@@ -239,9 +285,114 @@ router.get(
         table_number: table.table_number,
         capacity: table.capacity,
         status: normalizeTableStatus(table.status),
+        linked_to_table_id: table.linked_to_table_id,
+        unavailable_reason: table.unavailable_reason,
         active_session: table.dining_sessions[0] ?? null
       }))
     });
+  })
+);
+
+router.post(
+  "/api/pos/dining/tables",
+  roleGuard(["admin"]),
+  asyncRoute(async (req, res) => {
+    const body = z.object({ capacity: z.coerce.number().int().min(1).max(100) }).parse(req.body);
+    const table = await prisma.$transaction(async (tx) => {
+      await lockTablesInStableOrder(tx);
+      const existing = await tx.table.findMany({ select: { table_number: true } });
+      const tableNumber = getNextTableNumber(existing.map((item) => item.table_number));
+      return tx.table.create({
+        data: { table_number: tableNumber, capacity: body.capacity, status: "available" }
+      });
+    });
+    return res.status(201).json({ table });
+  })
+);
+
+router.patch(
+  "/api/pos/dining/tables/:id/seats",
+  roleGuard(["admin"]),
+  asyncRoute(async (req, res) => {
+    const tableId = z.string().min(1).parse(req.params.id);
+    const body = z.object({ capacity: z.coerce.number().int().min(1).max(100) }).parse(req.body);
+    const table = await prisma.$transaction(async (tx) => {
+      await lockTablesInStableOrder(tx);
+      const current = await getManagedTable(tx, tableId);
+      if (!current) throw new InventoryError("Table not found.", "TABLE_NOT_FOUND", 404);
+      assertCanEditTableSeats(getManagedTableState(current));
+      return tx.table.update({ where: { id: current.id }, data: { capacity: body.capacity } });
+    });
+    return res.json({ table });
+  })
+);
+
+router.post(
+  "/api/pos/dining/tables/:id/archive",
+  roleGuard(["admin"]),
+  asyncRoute(async (req, res) => {
+    const tableId = z.string().min(1).parse(req.params.id);
+    const table = await prisma.$transaction(async (tx) => {
+      await lockTablesInStableOrder(tx);
+      const current = await getManagedTable(tx, tableId);
+      if (!current) throw new InventoryError("Table not found.", "TABLE_NOT_FOUND", 404);
+      assertCanArchiveTable(getManagedTableState(current));
+      return tx.table.update({
+        where: { id: current.id },
+        data: { is_archived: true, archived_at: new Date(), status: "unavailable", unavailable_reason: null }
+      });
+    });
+    return res.json({ table });
+  })
+);
+
+router.patch(
+  "/api/pos/dining/tables/:id/availability",
+  roleGuard(["admin", "cashier"]),
+  asyncRoute(async (req, res) => {
+    const tableId = z.string().min(1).parse(req.params.id);
+    const body = z.object({
+      status: z.enum(["available", "unavailable"]),
+      reason: z.preprocess(
+        (value) => typeof value === "string" && value.trim() === "" ? null : value,
+        z.string().trim().max(120).nullable().optional()
+      ),
+      linkToTableId: z.string().min(1).nullable().optional()
+    }).parse(req.body);
+    if (body.status === "available" && body.linkToTableId) {
+      throw new InventoryError("A table can be linked only while it is marked unavailable.", "INVALID_TABLE_LINK", 400);
+    }
+    const table = await prisma.$transaction(async (tx) => {
+      await lockTablesInStableOrder(tx);
+      const current = await getManagedTable(tx, tableId);
+      if (!current) throw new InventoryError("Table not found.", "TABLE_NOT_FOUND", 404);
+      const currentState = getManagedTableState(current);
+
+      if (body.linkToTableId) {
+        const target = await getManagedTable(tx, body.linkToTableId);
+        if (!target) throw new InventoryError("Link target table not found.", "TABLE_NOT_FOUND", 404);
+        assertCanLinkUnavailableTable(currentState, getManagedTableState(target));
+        return tx.table.update({
+          where: { id: current.id },
+          data: {
+            status: "unavailable",
+            linked_to_table_id: target.id,
+            unavailable_reason: body.reason ?? null
+          }
+        });
+      }
+
+      assertCanChangeTableAvailability(currentState, body.status);
+      return tx.table.update({
+        where: { id: current.id },
+        data: {
+          status: body.status,
+          linked_to_table_id: null,
+          unavailable_reason: body.status === "unavailable" ? body.reason ?? null : null
+        }
+      });
+    });
+    return res.json({ table });
   })
 );
 
@@ -285,6 +436,9 @@ router.post(
       `;
       const table = await tx.table.findUnique({ where: { id: body.tableId } });
       if (!table) throw new InventoryError("Table not found.", "TABLE_NOT_FOUND", 404);
+      if (table.is_archived || normalizeTableStatus(table.status) !== "available" || table.linked_to_table_id) {
+        throw new InventoryError("Choose a live table marked available.", "TABLE_NOT_AVAILABLE", 409);
+      }
       if (body.guestCount > table.capacity) {
         throw new InventoryError(`This table seats up to ${table.capacity} guests.`, "TABLE_CAPACITY_EXCEEDED", 409);
       }
@@ -335,11 +489,15 @@ router.patch(
       }
       const destination = await tx.table.findUnique({ where: { id: body.tableId } });
       if (!destination) throw new InventoryError("Destination table not found.", "TABLE_NOT_FOUND", 404);
-      if (normalizeTableStatus(destination.status) === "occupied" || await tx.diningTableSession.findFirst({
+      if (
+        destination.is_archived ||
+        destination.linked_to_table_id ||
+        normalizeTableStatus(destination.status) !== "available" ||
+        await tx.diningTableSession.findFirst({
         where: { table_id: body.tableId, status: "active" },
         select: { id: true }
       })) {
-        throw new InventoryError("Destination table is occupied.", "TABLE_OCCUPIED", 409);
+        throw new InventoryError("Destination table is not available.", "TABLE_NOT_AVAILABLE", 409);
       }
       const guestCount = await tx.diningGuest.count({ where: { dining_session_id: current.id } });
       if (guestCount > destination.capacity) {
@@ -911,6 +1069,7 @@ router.post(
       await tx.$queryRaw<Array<{ id: string }>>`
         SELECT id FROM dining_table_sessions WHERE id = ${sessionId} FOR UPDATE
       `;
+      await lockTablesInStableOrder(tx);
       const existingTransaction = await tx.posTransaction.findUnique({
         where: { dining_session_id: sessionId },
         include: {
@@ -989,7 +1148,14 @@ router.post(
         where: { id: session.id },
         data: { status: "closed", closed_at: new Date() }
       });
-      await tx.table.update({ where: { id: session.table_id }, data: { status: "available" } });
+      await tx.table.update({
+        where: { id: session.table_id },
+        data: { status: "available", unavailable_reason: null }
+      });
+      await tx.table.updateMany({
+        where: { linked_to_table_id: session.table_id, is_archived: false },
+        data: { status: "available", linked_to_table_id: null, unavailable_reason: null }
+      });
       for (const unlimited of session.unlimited_sessions.filter((item) => item.status === "completed")) {
         const packageAmount = unlimited.pax_count * Number(unlimited.price_per_pax);
         await tx.unlimitedSession.update({

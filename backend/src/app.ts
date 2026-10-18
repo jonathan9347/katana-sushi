@@ -2197,7 +2197,7 @@ async function getReservationSlotSummary(
   const slotEnd = addMinutesToTime(slotStart, RESERVATION_SETTINGS.SLOT_DURATION_MINUTES);
   const date = manilaDateToUtc(dateKey);
   const [tableCapacity, slot, bookedReservations] = await Promise.all([
-    tx.table.aggregate({ _sum: { capacity: true } }),
+    tx.table.aggregate({ where: { is_archived: false }, _sum: { capacity: true } }),
     tx.reservationSlotCapacity.findUnique({
       where: { service_date_slot_start: { service_date: dateKey, slot_start: slotStart } }
     }),
@@ -4722,7 +4722,7 @@ app.get("/api/staff/tables", async (req, res, next) => {
       return;
     }
 
-    const tables = await prisma.table.findMany({ orderBy: { table_number: "asc" } });
+    const tables = await prisma.table.findMany({ where: { is_archived: false }, orderBy: { table_number: "asc" } });
     const normalizedTables = tables.map((table) => ({ ...table, status: normalizeTableStatus(table.status) }));
     return res.json({ tables: normalizedTables });
   } catch (error) {
@@ -8180,7 +8180,7 @@ app.get("/api/products/grouped", async (_req, res, next) => {
 
 app.get("/api/tables", async (_req, res, next) => {
   try {
-    const tables = await prisma.table.findMany({ orderBy: { table_number: "asc" } });
+    const tables = await prisma.table.findMany({ where: { is_archived: false }, orderBy: { table_number: "asc" } });
     res.json({ tables: tables.map((table) => ({ ...table, status: normalizeTableStatus(table.status) })) });
   } catch (error) {
     next(error);
