@@ -327,7 +327,7 @@ router.get(
         table_assignments: {
           where: { status: { in: ["assigned", "seated"] } },
           orderBy: { table: { table_number: "asc" } },
-          select: { table: { select: { table_number: true } } }
+          select: { table: { select: { table_number: true, is_temporary: true } } }
         }
       },
       orderBy: [{ time: "asc" }, { id: "asc" }]
@@ -347,11 +347,158 @@ router.get(
           time: reservation.time,
           customer_name: reservation.customer_name,
           party_size: reservation.party_size,
-          table_numbers: reservation.table_assignments.map((assignment) => assignment.table.table_number),
+          table_numbers: reservation.table_assignments
+            .filter((assignment) => !assignment.table.is_temporary)
+            .map((assignment) => assignment.table.table_number),
+          temporary_table_numbers: reservation.table_assignments
+            .filter((assignment) => assignment.table.is_temporary)
+            .map((assignment) => assignment.table.table_number),
           state: arrived ? "arrived" as const : lateAlert ? "late" as const : "upcoming" as const
         };
       })
     });
+  })
+);
+
+router.post(
+  "/api/pos/dining/reservations/:id/temporary-table",
+  roleGuard(["admin", "cashier"]),
+  asyncRoute(async (req, res) => {
+    const reservationId = z.string().min(1).parse(req.params.id);
+    const cashierId = actorId(req);
+    const result = await prisma.$transaction(async (tx) => {
+      await lockTablesInStableOrder(tx);
+      await tx.$queryRaw<Array<{ id: string }>>`
+        SELECT id FROM reservations WHERE id = ${reservationId} FOR UPDATE
+      `;
+
+      const reservation = await tx.reservation.findUnique({
+        where: { id: reservationId },
+        include: {
+          table_assignments: {
+            where: { status: "assigned" },
+            orderBy: [{ table: { table_number: "asc" } }, { table_id: "asc" }],
+            include: {
+              table: {
+                include: {
+                  dining_sessions: {
+                    where: { status: "active" },
+                    take: 1,
+                    select: { id: true }
+                  }
+                }
+              }
+            }
+          }
+        }
+      });
+
+      if (!reservation) {
+        throw new InventoryError("Reservation not found.", "BOOKING_NOT_FOUND", 404);
+      }
+      if (!["confirmed", "approved"].includes(reservation.status)) {
+        throw new InventoryError(
+          reservation.status === "seated"
+            ? "This reservation has already been seated."
+            : `This reservation cannot use a temporary table while it is ${reservation.status}.`,
+          "BOOKING_NOT_READY_TO_SEAT",
+          409
+        );
+      }
+      const today = new Intl.DateTimeFormat("en-CA", {
+        timeZone: "Asia/Manila",
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit"
+      }).format(new Date());
+      const reservationDate = new Intl.DateTimeFormat("en-CA", {
+        timeZone: "Asia/Manila",
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit"
+      }).format(reservation.date);
+      if (reservationDate !== today) {
+        throw new InventoryError(
+          "Only today's reservations can use a temporary table from the POS.",
+          "BOOKING_NOT_TODAY",
+          409
+        );
+      }
+
+      const assignments = reservation.table_assignments;
+      if (assignments.length === 0) {
+        throw new InventoryError(
+          "This reservation has no active table assignments.",
+          "BOOKING_TABLE_ASSIGNMENTS_MISSING",
+          409
+        );
+      }
+      const blockedAssignments = assignments.filter(({ table }) =>
+        table.is_archived ||
+        normalizeTableStatus(table.status) !== "available" ||
+        Boolean(table.linked_to_table_id) ||
+        table.dining_sessions.length > 0
+      );
+      if (blockedAssignments.length === 0) {
+        throw new InventoryError(
+          "The assigned tables are available. Seat this reservation at its assigned table instead.",
+          "RESERVATION_TABLES_AVAILABLE",
+          409
+        );
+      }
+
+      const releasedAssignments = await tx.reservationTableAssignment.updateMany({
+        where: { reservation_id: reservation.id, status: "assigned" },
+        data: { status: "released" }
+      });
+      if (releasedAssignments.count !== assignments.length) {
+        throw new InventoryError(
+          "The reservation's table assignments changed while creating a temporary table. Refresh and try again.",
+          "RESERVATION_ASSIGNMENTS_CHANGED",
+          409
+        );
+      }
+
+      const existingTables = await tx.table.findMany({ select: { table_number: true } });
+      const table = await tx.table.create({
+        data: {
+          table_number: getNextTableNumber(existingTables.map((item) => item.table_number)),
+          capacity: reservation.party_size,
+          status: "occupied",
+          is_temporary: true
+        }
+      });
+      const session = await tx.diningTableSession.create({
+        data: { table_id: table.id, cashier_id: cashierId },
+        include: { table: true, guests: { orderBy: { guest_number: "asc" } } }
+      });
+      await tx.reservationTableAssignment.create({
+        data: {
+          reservation_id: reservation.id,
+          table_id: table.id,
+          seat_count: reservation.party_size,
+          status: "seated"
+        }
+      });
+      await tx.reservation.update({
+        where: { id: reservation.id },
+        data: { status: "seated" }
+      });
+      await tx.reservationActivity.create({
+        data: {
+          reservation_id: reservation.id,
+          event_type: "status_changed",
+          from_status: reservation.status,
+          to_status: "seated",
+          actor_type: "staff",
+          actor_id: cashierId,
+          reason: `Guests seated at temporary table ${table.table_number}`
+        }
+      });
+
+      return { session, table };
+    });
+    return res.status(201).json(result);
   })
 );
 
@@ -1341,7 +1488,15 @@ router.post(
       });
       await tx.table.update({
         where: { id: session.table_id },
-        data: { status: "available", unavailable_reason: null }
+        data: session.table.is_temporary
+          ? {
+              status: "unavailable",
+              is_archived: true,
+              archived_at: new Date(),
+              linked_to_table_id: null,
+              unavailable_reason: null
+            }
+          : { status: "available", unavailable_reason: null }
       });
       await tx.table.updateMany({
         where: { linked_to_table_id: session.table_id, is_archived: false },

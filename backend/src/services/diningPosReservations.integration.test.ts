@@ -25,6 +25,7 @@ type ReservationStripItem = {
   customer_name: string;
   party_size: number;
   table_numbers: number[];
+  temporary_table_numbers: number[];
   state: "upcoming" | "arrived" | "late";
 };
 
@@ -213,12 +214,14 @@ test("lists upcoming, late, arrived and multi-table reservations in time order w
   );
   const multiTable = payload.reservations.find((reservation) => reservation.customer_name === "Multi Table Customer");
   assert.deepEqual(multiTable?.table_numbers, [3, 4]);
+  assert.deepEqual(multiTable?.temporary_table_numbers, []);
   assert.deepEqual(Object.keys(payload.reservations[0]).sort(), [
     "customer_name",
     "id",
     "party_size",
     "state",
     "table_numbers",
+    "temporary_table_numbers",
     "time"
   ]);
   assert.ok(payload.reservations.every((reservation) => !("customer_phone" in reservation)));

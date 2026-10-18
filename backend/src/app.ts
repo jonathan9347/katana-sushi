@@ -2272,9 +2272,16 @@ async function allocateReservationTables(
 
   const [tables, assignments, sessions] = await Promise.all([
     tx.table.findMany({
-      where: { is_archived: false },
+      where: { is_archived: false, is_temporary: false },
       orderBy: [{ table_number: "asc" }, { id: "asc" }],
-      select: { id: true, table_number: true, capacity: true, status: true, linked_to_table_id: true }
+      select: {
+        id: true,
+        table_number: true,
+        capacity: true,
+        status: true,
+        linked_to_table_id: true,
+        is_temporary: true
+      }
     }),
     tx.reservationTableAssignment.findMany({
       where: {
@@ -2342,7 +2349,8 @@ async function allocateReservationTables(
     tables.map((table) => ({
       id: table.id,
       table_number: table.table_number,
-      capacity: table.capacity
+      capacity: table.capacity,
+      is_temporary: table.is_temporary
     })),
     { unavailableTableIds: [...unavailableTableIds, ...unavailableForSlot] }
   );

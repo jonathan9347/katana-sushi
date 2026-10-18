@@ -63,6 +63,26 @@ test("excludes archived and already allocated tables", () => {
   });
 });
 
+test("excludes temporary tables from customer reservation allocation", () => {
+  const result = findBestTableCombination(4, [
+    { id: "temporary", table_number: 1, capacity: 4, is_temporary: true },
+    { id: "regular", table_number: 2, capacity: 4 }
+  ]);
+
+  assert.deepEqual(result, {
+    tableIds: ["regular"],
+    totalCapacity: 4,
+    unusedSeats: 0,
+    tableCount: 1
+  });
+  assert.equal(
+    findBestTableCombination(4, [
+      { id: "temporary", table_number: 1, capacity: 4, is_temporary: true }
+    ]),
+    null
+  );
+});
+
 test("reservation assignments block a slot only when estimated intervals overlap", () => {
   const reservations: TablePlanningWindow[] = [
     { serviceDate: "2026-10-17", startTime: "18:00", tableIds: ["t1"] }

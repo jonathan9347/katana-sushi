@@ -3,6 +3,7 @@ export type TableSeatCandidate = {
   table_number: number;
   capacity: number;
   is_archived?: boolean | null;
+  is_temporary?: boolean | null;
 };
 
 export type AllocationResult = {
@@ -27,7 +28,8 @@ function normalizeTable(table: TableSeatCandidate) {
     ...table,
     capacity: Number(table.capacity),
     table_number: Number(table.table_number),
-    is_archived: Boolean(table.is_archived)
+    is_archived: Boolean(table.is_archived),
+    is_temporary: Boolean(table.is_temporary)
   };
 }
 
@@ -66,6 +68,7 @@ export function findBestTableCombination(
     .map(normalizeTable)
     .filter((table) =>
       !table.is_archived &&
+      !table.is_temporary &&
       table.capacity > 0 &&
       !unavailableTableIds.has(table.id)
     )
