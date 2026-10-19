@@ -47,6 +47,8 @@ type CommittedDiningOrder = {
 type ReviewedOrder = {
   sessionId: string;
   tableNumber: number;
+  orderType: "ala_carte" | "unlimited";
+  unlimitedSessionId?: string;
   idempotencyKey: string;
   items: Array<{
     productId: string;
@@ -107,6 +109,12 @@ type PosProduct = {
   category: string;
   price: string | number;
   is_available: boolean;
+  is_included: boolean;
+  is_sold_a_la_carte: boolean;
+  cart_compatibility: {
+    a_la_carte: { allowed: boolean; classification: string; message?: string };
+    unlimited: { allowed: boolean; classification: string; message?: string };
+  };
   available_stock?: number | null;
 };
 
@@ -114,7 +122,8 @@ type CheckoutPreview = {
   session_id: string;
   table_number: number;
   guest_count: number;
-  a_la_carte_lines: Array<{ name: string; guest_number: number; quantity: number; unit_price: number; total_price: number }>;
+  a_la_carte_lines: Array<{ name: string; guest_number: number | null; quantity: number; unit_price: number; total_price: number }>;
+  unlimited_order_lines: Array<{ name: string; quantity: number; unit_price: number; total_price: number }>;
   unlimited_lines: Array<{ name: string; quantity: number; unit_price: number; total_price: number }>;
   leftover_lines: Array<{ name: string; quantity: number; total: number }>;
   subtotal: number;
@@ -254,8 +263,12 @@ export default function DiningService({ mode = "service" }: Props) {
   const [orderType, setOrderType] = useState<"ala_carte" | "unlimited">("ala_carte");
   const [productId, setProductId] = useState("");
   const [quantity, setQuantity] = useState(1);
-  const [draftItems, setDraftItems] = useState<DraftItem[]>([]);
-  const [draftKey, setDraftKey] = useState(() => crypto.randomUUID());
+  const [aLaCarteDraftItems, setALaCarteDraftItems] = useState<DraftItem[]>([]);
+  const [unlimitedDraftItems, setUnlimitedDraftItems] = useState<DraftItem[]>([]);
+  const [draftKeys, setDraftKeys] = useState({
+    ala_carte: crypto.randomUUID(),
+    unlimited: crypto.randomUUID()
+  });
   const [orderReview, setOrderReview] = useState<ReviewedOrder | null>(null);
   const [lastCommittedOrderId, setLastCommittedOrderId] = useState(
     () => sessionStorage.getItem(LAST_COMMITTED_ORDER_STORAGE_KEY) ?? ""
@@ -277,6 +290,10 @@ export default function DiningService({ mode = "service" }: Props) {
   const [completedTransaction, setCompletedTransaction] = useState<CheckoutTransaction | null>(null);
   const queryClient = useQueryClient();
   const { toast } = useToast();
+  const draftItems = orderType === "ala_carte" ? aLaCarteDraftItems : unlimitedDraftItems;
+  const setDraftItems = orderType === "ala_carte" ? setALaCarteDraftItems : setUnlimitedDraftItems;
+  const draftKey = draftKeys[orderType];
+  const hasDraftItems = aLaCarteDraftItems.length > 0 || unlimitedDraftItems.length > 0;
 
   const tablesQuery = useQuery({
     queryKey: ["pos", "dining", "tables"],
@@ -308,11 +325,6 @@ export default function DiningService({ mode = "service" }: Props) {
     queryKey: ["products"],
     queryFn: async () => (await api.get<{ products: PosProduct[] }>("/api/products")).data.products,
     enabled: !kitchenOnly
-  });
-  const unlimitedProductsQuery = useQuery({
-    queryKey: ["pos", "unlimited", "products"],
-    queryFn: async () => (await api.get<{ products: PosProduct[] }>("/api/pos/unlimited/included-products")).data.products,
-    enabled: !kitchenOnly && orderType === "unlimited"
   });
   const unlimitedSettingsQuery = useQuery({
     queryKey: ["admin", "unlimited", "settings"],
@@ -355,13 +367,17 @@ export default function DiningService({ mode = "service" }: Props) {
       new Date(unlimited.ends_at).getTime() > Date.now()
     ))
     .map((item) => item.table_id));
+  const compatibilityForCart = (product: PosProduct, cartType: "ala_carte" | "unlimited") =>
+    cartType === "ala_carte"
+      ? product.cart_compatibility.a_la_carte
+      : product.cart_compatibility.unlimited;
   const availableProducts = useMemo(
-    () => (orderType === "unlimited" ? unlimitedProductsQuery.data : productsQuery.data) ?? [],
-    [orderType, productsQuery.data, unlimitedProductsQuery.data]
+    () => (productsQuery.data ?? []).filter((item) => item.is_available && compatibilityForCart(item, orderType).allowed),
+    [orderType, productsQuery.data]
   );
   const productsById = useMemo(
-    () => new Map([...(productsQuery.data ?? []), ...(unlimitedProductsQuery.data ?? [])].map((item) => [item.id, item])),
-    [productsQuery.data, unlimitedProductsQuery.data]
+    () => new Map((productsQuery.data ?? []).map((item) => [item.id, item])),
+    [productsQuery.data]
   );
 
   const refreshQueries = async () => {
@@ -430,7 +446,8 @@ export default function DiningService({ mode = "service" }: Props) {
         `/api/pos/dining/sessions/${review.sessionId}/orders`,
         {
           idempotencyKey: review.idempotencyKey,
-          orderType: "ala_carte",
+          orderType: review.orderType,
+          ...(review.unlimitedSessionId ? { unlimitedSessionId: review.unlimitedSessionId } : {}),
           items: review.items.map(({ productId, quantity, expectedUnitPrice }) => ({
             productId,
             quantity,
@@ -440,10 +457,15 @@ export default function DiningService({ mode = "service" }: Props) {
       )
     ).data,
     onSuccess: async (result, input) => {
+      const cartType = input.review.orderType;
       sessionStorage.setItem(LAST_COMMITTED_ORDER_STORAGE_KEY, result.order.id);
       setLastCommittedOrderId(result.order.id);
-      setDraftItems([]);
-      setDraftKey(crypto.randomUUID());
+      if (cartType === "ala_carte") {
+        setALaCarteDraftItems([]);
+      } else {
+        setUnlimitedDraftItems([]);
+      }
+      setDraftKeys((current) => ({ ...current, [cartType]: crypto.randomUUID() }));
       setOrderReview(null);
       setPrintError("");
       confirmClickLocked.current = false;
@@ -496,7 +518,7 @@ export default function DiningService({ mode = "service" }: Props) {
         toast("Wait for the current order to finish before seating another table.");
         return;
       }
-      if (draftItems.length > 0 && !window.confirm("Starting another table session will discard this unconfirmed cart. Continue?")) {
+      if (hasDraftItems && !window.confirm("Starting another table session will discard both unconfirmed carts. Continue?")) {
         return;
       }
     }
@@ -504,12 +526,35 @@ export default function DiningService({ mode = "service" }: Props) {
   }
 
   function resetDraftForSessionChange() {
-    setDraftItems([]);
-    setDraftKey(crypto.randomUUID());
+    setALaCarteDraftItems([]);
+    setUnlimitedDraftItems([]);
+    setDraftKeys({ ala_carte: crypto.randomUUID(), unlimited: crypto.randomUUID() });
     setOrderReview(null);
     setProductId("");
     setQuantity(1);
     setOrderType("ala_carte");
+  }
+
+  function canConvertDraftToUnlimited(items: DraftItem[]) {
+    let hasIncludedProduct = false;
+    for (const item of items) {
+      const classification = productsById.get(item.productId)?.cart_compatibility.a_la_carte.classification;
+      if (classification === "included_in_unlimited") {
+        hasIncludedProduct = true;
+      } else if (classification !== "beverage_add_on") {
+        return false;
+      }
+    }
+    return items.length > 0 && hasIncludedProduct;
+  }
+
+  function cartUnitPrice(product: PosProduct, cartType: "ala_carte" | "unlimited") {
+    const classification = compatibilityForCart(product, cartType).classification;
+    return cartType === "unlimited" && (
+      classification === "included_in_unlimited" || classification === "unlimited_only"
+    )
+      ? 0
+      : Number(product.price);
   }
 
   function addDraftItem() {
@@ -517,11 +562,30 @@ export default function DiningService({ mode = "service" }: Props) {
       toast("Choose a product and a whole-number quantity.");
       return;
     }
-    setDraftItems((items) => [...items, { productId, quantity }]);
+    const selectedProduct = productsById.get(productId);
+    const compatibility = selectedProduct ? compatibilityForCart(selectedProduct, orderType) : undefined;
+    if (!selectedProduct || !compatibility?.allowed) {
+      toast(compatibility?.message ?? "This product is not available in the selected cart.");
+      return;
+    }
+    const nextItems = [...draftItems, { productId, quantity }];
+    const shouldOfferConversion = orderType === "ala_carte"
+      && !canConvertDraftToUnlimited(draftItems)
+      && canConvertDraftToUnlimited(nextItems);
+    setDraftItems(nextItems);
     setOrderReview(null);
     setShowCheckout(false);
     setProductId("");
     setQuantity(1);
+    if (shouldOfferConversion && window.confirm(
+      "These items are included in Unlimited or are beverage add-ons. Convert this cart to the Unlimited cart? Included items are free; beverage add-ons are charged at menu price. Start an Unlimited package before confirming."
+    )) {
+      setALaCarteDraftItems([]);
+      setUnlimitedDraftItems((items) => [...items, ...nextItems]);
+      setDraftKeys((keys) => ({ ...keys, ala_carte: crypto.randomUUID() }));
+      setOrderType("unlimited");
+      setOrderReview(null);
+    }
   }
 
   function reviewDraftOrder() {
@@ -529,11 +593,16 @@ export default function DiningService({ mode = "service" }: Props) {
       toast("Add at least one item before reviewing the order.");
       return;
     }
+    if (orderType === "unlimited" && !activeUnlimited) {
+      toast("Start an Unlimited package for this table before reviewing its order.");
+      return;
+    }
     const items: ReviewedOrder["items"] = [];
     for (const item of draftItems) {
       const product = productsById.get(item.productId);
-      const price = Number(product?.price);
-      if (!product || !product.is_available || !Number.isFinite(price) || price < 0) {
+      const compatibility = product ? compatibilityForCart(product, orderType) : undefined;
+      const price = product ? cartUnitPrice(product, orderType) : Number.NaN;
+      if (!product || !product.is_available || !compatibility?.allowed || !Number.isFinite(price) || price < 0) {
         toast("A selected product is no longer available or has an invalid price. Review the cart again.");
         return;
       }
@@ -547,6 +616,8 @@ export default function DiningService({ mode = "service" }: Props) {
     setOrderReview({
       sessionId: session.id,
       tableNumber: session.table.table_number,
+      orderType,
+      ...(orderType === "unlimited" && activeUnlimited ? { unlimitedSessionId: activeUnlimited.id } : {}),
       idempotencyKey: draftKey,
       items
     });
@@ -780,7 +851,7 @@ export default function DiningService({ mode = "service" }: Props) {
                     onClick={() => {
                       if (
                         item.id !== selectedSessionId &&
-                        draftItems.length > 0 &&
+                        hasDraftItems &&
                         !window.confirm("Switching tables will discard this unconfirmed cart. Continue?")
                       ) {
                         return;
@@ -892,7 +963,7 @@ export default function DiningService({ mode = "service" }: Props) {
             </section>
             {!session ? (
               <section className="grid min-h-64 place-items-center rounded-xl border border-dashed border-slate-300 bg-white p-6 text-center text-slate-500">
-                Select an active table to prepare and confirm an a-la-carte order or check out.
+                Select an active table to prepare and confirm orders or check out.
               </section>
             ) : (
               <>
@@ -925,14 +996,32 @@ export default function DiningService({ mode = "service" }: Props) {
                 <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
                   <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
                     <h2 className="text-lg font-bold">Dine-in order</h2>
-                    <select className="h-10 rounded border border-slate-300 px-2" value={orderType} disabled={orderControlsDisabled} onChange={(event) => {
-                      setOrderType(event.target.value as "ala_carte" | "unlimited");
-                      setProductId("");
-                      setOrderReview(null);
-                    }}>
-                      <option value="ala_carte">A la carte</option>
-                      <option value="unlimited">Unlimited session</option>
-                    </select>
+                    <div aria-label="Order carts" className="flex flex-wrap gap-2" role="group">
+                      <button
+                        aria-pressed={orderType === "ala_carte"}
+                        className={`rounded border px-3 py-2 text-sm font-bold ${orderType === "ala_carte" ? "border-slate-900 bg-slate-900 text-white" : "border-slate-300 bg-white"}`}
+                        disabled={orderControlsDisabled}
+                        onClick={() => {
+                          setOrderType("ala_carte");
+                          setProductId("");
+                          setOrderReview(null);
+                        }}
+                      >
+                        A la carte ({aLaCarteDraftItems.length})
+                      </button>
+                      <button
+                        aria-pressed={orderType === "unlimited"}
+                        className={`rounded border px-3 py-2 text-sm font-bold ${orderType === "unlimited" ? "border-violet-900 bg-violet-900 text-white" : "border-slate-300 bg-white"}`}
+                        disabled={orderControlsDisabled}
+                        onClick={() => {
+                          setOrderType("unlimited");
+                          setProductId("");
+                          setOrderReview(null);
+                        }}
+                      >
+                        Unlimited ({unlimitedDraftItems.length})
+                      </button>
+                    </div>
                   </div>
                   {orderType === "unlimited" && (
                     <div className="mb-3 flex flex-wrap items-end gap-2">
@@ -959,7 +1048,7 @@ export default function DiningService({ mode = "service" }: Props) {
                           </div>
                           <select className="h-9 rounded border border-slate-300 px-2" value={leftoverProductId} onChange={(event) => setLeftoverProductId(event.target.value)}>
                             <option value="">Leftover item (optional)</option>
-                            {(unlimitedProductsQuery.data ?? []).map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
+                            {(productsQuery.data ?? []).filter((item) => item.is_available && item.is_included).map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
                           </select>
                           <input className="h-9 w-20 rounded border border-slate-300 px-2" type="number" min={0} value={leftoverQuantity} onChange={(event) => setLeftoverQuantity(Number(event.target.value))} />
                           <ActionButton tone="muted" disabled={runMutation.isPending} onClick={() => {
@@ -993,21 +1082,18 @@ export default function DiningService({ mode = "service" }: Props) {
                       )}
                     </div>
                   )}
-                  {orderType === "ala_carte" && productsQuery.isError && (
-                    <p role="alert" className="mb-3 text-sm text-red-700">Current product prices could not be loaded. Reload products before preparing this order.</p>
+                  {productsQuery.isError && (
+                    <p role="alert" className="mb-3 text-sm text-red-700">Current product prices and cart rules could not be loaded. Reload products before preparing this order.</p>
                   )}
-                  {orderType === "unlimited" ? (
-                    <p className="rounded bg-amber-50 p-3 text-sm text-amber-900">
-                      Unlimited item ordering is not available yet. Existing package controls above are unchanged.
-                    </p>
-                  ) : (
-                    <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_120px_auto]">
+                  <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_120px_auto]">
                       <label className="grid gap-1 text-sm font-medium text-slate-700">
                         Product
                         <select className="h-10 min-w-0 rounded border border-slate-300 px-2" value={productId} disabled={orderControlsDisabled} onChange={(event) => setProductId(event.target.value)}>
                           <option value="">Select product</option>
-                          {availableProducts.filter((item) => item.is_available).map((item) => (
-                            <option key={item.id} value={item.id}>{item.name} · {money(Number(item.price))}</option>
+                          {availableProducts.map((item) => (
+                            <option key={item.id} value={item.id}>
+                              {item.name} · {orderType === "unlimited" && cartUnitPrice(item, orderType) === 0 ? "Included" : money(cartUnitPrice(item, orderType))}
+                            </option>
                           ))}
                         </select>
                       </label>
@@ -1016,16 +1102,19 @@ export default function DiningService({ mode = "service" }: Props) {
                         <input className="h-10 rounded border border-slate-300 px-2" type="number" min={1} step={1} value={quantity} disabled={orderControlsDisabled} onChange={(event) => setQuantity(Number(event.target.value))} />
                       </label>
                       <button className="mt-auto h-10 rounded border border-slate-300 px-3 font-bold hover:bg-slate-50 disabled:opacity-50" disabled={orderControlsDisabled} onClick={addDraftItem}>Add item</button>
-                    </div>
-                  )}
-                  {draftItems.length > 0 && orderType === "ala_carte" && (
+                  </div>
+                  {draftItems.length > 0 && (
                     <div className="mt-4 rounded-lg bg-slate-50 p-3">
                       <ul className="space-y-2 text-sm">
                         {draftItems.map((item, index) => (
                           <li key={`${item.productId}-${index}`} className="flex items-center justify-between gap-2">
                             <span>
                               {item.quantity} × {productsById.get(item.productId)?.name ?? item.productId}
-                              {productsById.get(item.productId) && ` · ${money(Number(productsById.get(item.productId)?.price))} each`}
+                              {productsById.get(item.productId) && (
+                                orderType === "unlimited" && cartUnitPrice(productsById.get(item.productId)!, orderType) === 0
+                                  ? " · Included"
+                                  : ` · ${money(cartUnitPrice(productsById.get(item.productId)!, orderType))} each`
+                              )}
                             </span>
                             <button className="text-red-700 underline disabled:opacity-50" disabled={orderControlsDisabled} onClick={() => {
                               setDraftItems((items) => items.filter((_, itemIndex) => itemIndex !== index));
@@ -1043,14 +1132,14 @@ export default function DiningService({ mode = "service" }: Props) {
                       </ActionButton>
                     </div>
                   )}
-                  {orderReview && orderType === "ala_carte" && (
+                  {orderReview && (
                     <section aria-label="Order confirmation" className="mt-4 rounded-lg border-2 border-slate-300 bg-white p-4" data-testid="order-review">
-                      <h3 className="text-lg font-bold">Confirm order · Table {orderReview.tableNumber}</h3>
+                      <h3 className="text-lg font-bold">Confirm {orderReview.orderType === "unlimited" ? "Unlimited" : "a la carte"} order · Table {orderReview.tableNumber}</h3>
                       <p className="mb-3 text-sm text-slate-600">Check the complete item and price list. Stock is deducted once when you confirm and print.</p>
                       <ul className="divide-y divide-slate-200">
                         {orderReview.items.map((item, index) => (
                           <li key={`${item.productId}-${index}`} className="flex justify-between gap-3 py-2 text-sm">
-                            <span>{item.quantity} × {item.name} at {money(item.expectedUnitPrice)}</span>
+                            <span>{item.quantity} × {item.name} at {orderReview.orderType === "unlimited" && item.expectedUnitPrice === 0 ? "Included" : money(item.expectedUnitPrice)}</span>
                             <span className="font-semibold">{money(item.quantity * item.expectedUnitPrice)}</span>
                           </li>
                         ))}
@@ -1093,8 +1182,8 @@ export default function DiningService({ mode = "service" }: Props) {
                   <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
                     <p className="text-sm text-slate-600">Legacy kitchen tickets must be released or cancelled. Committed orders are included automatically; end all Unlimited packages before checkout.</p>
                     <div className="flex flex-col items-end gap-1">
-                      {draftItems.length > 0 && <p className="text-xs text-amber-800">Confirm or remove the draft cart before checkout.</p>}
-                      <ActionButton disabled={runMutation.isPending || draftItems.length > 0} onClick={() => setShowCheckout(true)}>Review bill</ActionButton>
+                      {hasDraftItems && <p className="text-xs text-amber-800">Confirm or remove both draft carts before checkout.</p>}
+                      <ActionButton disabled={runMutation.isPending || hasDraftItems} onClick={() => setShowCheckout(true)}>Review bill</ActionButton>
                     </div>
                   </div>
                 )}
@@ -1306,7 +1395,14 @@ function CheckoutBill({
   return (
     <div className="mt-3 space-y-2 text-sm">
       {preview.a_la_carte_lines.map((line, index) => (
-        <BillLine key={`ala-${index}`} label={`Guest ${line.guest_number} · ${line.quantity} × ${line.name}`} amount={line.total_price} />
+        <BillLine
+          key={`ala-${index}`}
+          label={`${line.guest_number === null ? "" : `Guest ${line.guest_number} · `}${line.quantity} × ${line.name}`}
+          amount={line.total_price}
+        />
+      ))}
+      {preview.unlimited_order_lines.map((line, index) => (
+        <BillLine key={`unlimited-order-${index}`} label={`Unlimited order · ${line.quantity} × ${line.name}`} amount={line.total_price} />
       ))}
       {preview.unlimited_lines.map((line, index) => (
         <BillLine key={`unlimited-${index}`} label={`${line.name} · ${line.quantity} covers × ${money(line.unit_price)}`} amount={line.total_price} />

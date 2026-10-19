@@ -16,6 +16,10 @@ import {
 import { roleGuard, ROLES } from "../middleware/roleGuard";
 import { isDineInReservationLateAlert } from "../config/reservationSettings";
 import {
+  getProductCartCompatibility,
+  type DiningCartType
+} from "../services/productCartCompatibility.service";
+import {
   consumeMaterialStock,
   inventoryUnitsMatch,
   getActiveCateringReservationQuantity,
@@ -133,8 +137,7 @@ async function getDiningSession(tx: Prisma.TransactionClient, sessionId: string)
 
 function getCommittedTableNumberSnapshot(session: NonNullable<Awaited<ReturnType<typeof getDiningSession>>>) {
   return session.orders.find((order) =>
-    order.order_type === "ala_carte"
-    && order.status === "committed"
+    order.status === "committed"
     && order.table_number_snapshot !== null
   )?.table_number_snapshot ?? null;
 }
@@ -272,6 +275,10 @@ async function buildCheckout(session: NonNullable<Awaited<ReturnType<typeof getD
     )
     .flatMap((order) => order.items);
   const aLaCarteAmount = aLaCarteItems.reduce((total, item) => total + Number(item.total_price), 0);
+  const unlimitedOrderItems = session.orders
+    .filter((order) => order.order_type === "unlimited" && order.status === "committed")
+    .flatMap((order) => order.items);
+  const unlimitedOrderAmount = unlimitedOrderItems.reduce((total, item) => total + Number(item.total_price), 0);
   const unlimitedPackages = session.unlimited_sessions
     .filter((unlimited) => unlimited.status === "completed")
     .map((unlimited) => ({
@@ -289,7 +296,7 @@ async function buildCheckout(session: NonNullable<Awaited<ReturnType<typeof getD
     }))
   );
   const leftoverAmount = leftoverLines.reduce((total, item) => total + item.total, 0);
-  const subtotal = money(aLaCarteAmount + unlimitedAmount + leftoverAmount);
+  const subtotal = money(aLaCarteAmount + unlimitedOrderAmount + unlimitedAmount + leftoverAmount);
   const guestCount = session.guests.length;
   const discountedGuestCount = session.guests.filter((guest) => guest.discount_type !== "none").length;
   const perGuestShare = guestCount > 0 ? money(subtotal / guestCount) : 0;
@@ -299,6 +306,8 @@ async function buildCheckout(session: NonNullable<Awaited<ReturnType<typeof getD
   return {
     aLaCarteItems,
     aLaCarteAmount: money(aLaCarteAmount),
+    unlimitedOrderItems,
+    unlimitedOrderAmount: money(unlimitedOrderAmount),
     unlimitedPackages,
     unlimitedAmount: money(unlimitedAmount),
     leftoverLines,
@@ -984,9 +993,6 @@ router.post(
         context.addIssue({ code: z.ZodIssueCode.custom, path: ["unlimitedSessionId"], message: "A la carte tickets cannot use an Unlimited package." });
       }
     }).parse(req.body);
-    if (body.orderType !== "ala_carte") {
-      throw new InventoryError("Unlimited order commits are not available yet.", "ORDER_TYPE_NOT_ENABLED", 409);
-    }
     if (!(await isCommittedOrderStatusAllowed())) {
       throw new InventoryError(
         "Order commit is not available until the pending database migration is deployed",
@@ -1020,6 +1026,26 @@ router.post(
         if (!session || session.status !== "active") {
           throw new InventoryError("Active dining session not found.", "SESSION_NOT_FOUND", 404);
         }
+        if (body.orderType === "unlimited") {
+          await tx.$queryRaw<Array<{ id: string }>>`
+            SELECT id FROM unlimited_sessions WHERE id = ${body.unlimitedSessionId!} FOR UPDATE
+          `;
+          const unlimitedSession = await tx.unlimitedSession.findFirst({
+            where: {
+              id: body.unlimitedSessionId,
+              dining_session_id: sessionId,
+              status: "active"
+            },
+            select: { id: true }
+          });
+          if (!unlimitedSession) {
+            throw new InventoryError(
+              "Start an active Unlimited package for this table before confirming the Unlimited cart.",
+              "UNLIMITED_SESSION_NOT_ACTIVE",
+              409
+            );
+          }
+        }
 
         const racedOrder = await tx.diningOrder.findUnique({
           where: { idempotency_key: body.idempotencyKey },
@@ -1042,7 +1068,10 @@ router.post(
             id: { in: body.items.map((item) => item.productId) },
             is_deleted: false
           },
-          include: { recipes: { include: { recipe_ingredients: { include: { raw_material: true } } } } }
+          include: {
+            unlimited_included_products: true,
+            recipes: { include: { recipe_ingredients: { include: { raw_material: true } } } }
+          }
         });
         const productsById = new Map(products.map((product) => [product.id, product]));
         for (const item of body.items) {
@@ -1050,10 +1079,26 @@ router.post(
           if (!product || !product.is_available) {
             throw new InventoryError("A selected product is unavailable.", "PRODUCT_UNAVAILABLE", 409);
           }
-          if (!product.is_sold_a_la_carte) {
-            throw new InventoryError(`${product.name} is only available in the Unlimited cart.`, "PRODUCT_NOT_SOLD_A_LA_CARTE", 409);
+          const isIncluded = product.unlimited_included_products.some((entry) => entry.is_included);
+          const cartType: DiningCartType = body.orderType === "ala_carte" ? "a_la_carte" : "unlimited";
+          const compatibility = getProductCartCompatibility({
+            name: product.name,
+            category: product.category,
+            is_included: isIncluded,
+            is_sold_a_la_carte: product.is_sold_a_la_carte
+          }, cartType);
+          if (!compatibility.allowed) {
+            const code = compatibility.classification === "unlimited_only"
+              ? "PRODUCT_NOT_SOLD_A_LA_CARTE"
+              : compatibility.classification === "a_la_carte_only"
+                ? "PRODUCT_NOT_INCLUDED_IN_UNLIMITED"
+                : "PRODUCT_NOT_SELLABLE";
+            throw new InventoryError(compatibility.message ?? "This product is not available in the selected cart.", code, 409);
           }
-          if (money(Number(product.price)) !== money(item.expectedUnitPrice)) {
+          const expectedPrice = body.orderType === "unlimited" && isIncluded
+            ? 0
+            : money(Number(product.price));
+          if (expectedPrice !== money(item.expectedUnitPrice)) {
             throw new InventoryError(
               `${product.name}'s price has changed. Review the order again before confirming.`,
               "PRODUCT_PRICE_CHANGED",
@@ -1074,13 +1119,17 @@ router.post(
             idempotency_key: body.idempotencyKey,
             dining_session_id: sessionId,
             table_number_snapshot: session.table.table_number,
-            order_type: "ala_carte",
+            unlimited_session_id: body.orderType === "unlimited" ? body.unlimitedSessionId : null,
+            order_type: body.orderType,
             status: "committed",
             created_by: creatorId,
             items: {
               create: body.items.map((item) => {
                 const product = productsById.get(item.productId)!;
-                const price = money(Number(product.price));
+                const isIncluded = product.unlimited_included_products.some((entry) => entry.is_included);
+                const price = body.orderType === "unlimited" && isIncluded
+                  ? 0
+                  : money(Number(product.price));
                 return {
                   guest_id: item.guestNumber === undefined ? null : guestByNumber.get(item.guestNumber)!.id,
                   selling_product_id: product.id,
@@ -1366,7 +1415,12 @@ router.post(
       `;
       const session = await tx.unlimitedSession.findUnique({
         where: { id: unlimitedId },
-        include: { dining_orders: { where: { status: "released" }, include: { items: true } } }
+        include: {
+          dining_orders: {
+            where: { order_type: "unlimited", status: { in: ["committed", "released"] } },
+            include: { items: true }
+          }
+        }
       });
       if (!session || session.status !== "active" || !session.dining_session_id) {
         throw new InventoryError("Active table Unlimited session not found.", "UNLIMITED_SESSION_NOT_FOUND", 404);
@@ -1438,6 +1492,12 @@ router.get(
       a_la_carte_lines: totals.aLaCarteItems.map((item) => ({
         name: item.name_snapshot,
         guest_number: item.guest?.guest_number ?? null,
+        quantity: item.quantity,
+        unit_price: Number(item.unit_price),
+        total_price: Number(item.total_price)
+      })),
+      unlimited_order_lines: totals.unlimitedOrderItems.map((item) => ({
+        name: item.name_snapshot,
         quantity: item.quantity,
         unit_price: Number(item.unit_price),
         total_price: Number(item.total_price)
@@ -1518,7 +1578,7 @@ router.post(
           status: "paid",
           cashier_id: cashierId,
           items: {
-            create: totals.aLaCarteItems.map((item) => ({
+            create: [...totals.aLaCarteItems, ...totals.unlimitedOrderItems].map((item) => ({
               selling_product_id: item.selling_product_id!,
               name_snapshot: item.name_snapshot,
               quantity: item.quantity,

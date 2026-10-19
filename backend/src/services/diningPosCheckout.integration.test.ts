@@ -8,8 +8,8 @@ if (!testDatabaseUrl) {
 }
 
 const testDatabaseName = new URL(testDatabaseUrl).pathname.slice(1);
-if (!testDatabaseName.startsWith("katana_sushi_dev_step4_3_")) {
-  throw new Error("Dining checkout integration tests only run on a dedicated restored Step 4.3 test copy.");
+if (!/^katana_sushi_dev_step4_(3|5|6)_/.test(testDatabaseName)) {
+  throw new Error("Dining checkout integration tests only run on a dedicated restored Step 4.3, 4.5, or 4.6 test copy.");
 }
 
 process.env.DATABASE_URL = testDatabaseUrl;
@@ -354,6 +354,85 @@ test("checkout totals committed and legacy released orders from their saved pric
       { name: "Legacy saved item", unitPrice: 7, total: 21, quantity: 3 }
     ]
   );
+});
+
+test("checkout includes saved Unlimited beverage add-ons separately from the Unlimited package", async () => {
+  const fixture = await createFixture({ price: 17.25 });
+  await prisma.sellingProduct.update({
+    where: { id: fixture.productId },
+    data: { category: "Beverage" }
+  });
+  const packageResponse = await request(
+    `/api/pos/dining/sessions/${fixture.sessionId}/unlimited-sessions`,
+    { paxCount: 2 }
+  );
+  const packageText = await packageResponse.text();
+  assert.equal(packageResponse.status, 201, packageText);
+  const packageId = (JSON.parse(packageText) as { unlimited_session: { id: string } }).unlimited_session.id;
+  const orderResponse = await request(`/api/pos/dining/sessions/${fixture.sessionId}/orders`, {
+    idempotencyKey: `step45-unlimited-addon-${testRunKey}`,
+    orderType: "unlimited",
+    unlimitedSessionId: packageId,
+    items: [{ productId: fixture.productId, quantity: 2, expectedUnitPrice: fixture.price }]
+  });
+  const orderText = await orderResponse.text();
+  assert.equal(orderResponse.status, 201, orderText);
+
+  const endResponse = await request(`/api/pos/dining/unlimited-sessions/${packageId}/end`, {});
+  const endText = await endResponse.text();
+  assert.equal(endResponse.status, 200, endText);
+  const settings = await prisma.unlimitedSetting.findFirstOrThrow();
+  const previewResponse = await request(
+    `/api/pos/dining/sessions/${fixture.sessionId}/checkout-preview`,
+    undefined,
+    "GET"
+  );
+  const previewText = await previewResponse.text();
+  assert.equal(previewResponse.status, 200, previewText);
+  const preview = JSON.parse(previewText) as {
+    unlimited_order_lines: Array<{ name: string; quantity: number; unit_price: number; total_price: number }>;
+    unlimited_amount: number;
+    subtotal: number;
+  };
+  assert.deepEqual(preview.unlimited_order_lines.map((line) => ({
+    name: line.name,
+    quantity: line.quantity,
+    unit_price: line.unit_price,
+    total_price: line.total_price
+  })), [{
+    name: fixture.productName,
+    quantity: 2,
+    unit_price: fixture.price,
+    total_price: fixture.price * 2
+  }]);
+  assert.equal(preview.unlimited_amount, 2 * Number(settings.price_per_person));
+  assert.equal(preview.subtotal, 2 * fixture.price + preview.unlimited_amount);
+
+  const stockAndMovementsBeforeCheckout = await readStockAndMovements(fixture);
+  const checkoutResponse = await checkout(fixture);
+  const checkoutText = await checkoutResponse.text();
+  assert.equal(checkoutResponse.status, 201, checkoutText);
+  const checkoutResult = JSON.parse(checkoutText) as {
+    transaction: {
+      total: number;
+      items: Array<{ name_snapshot: string | null; quantity: number; unit_price: number; total_price: number }>;
+      charges: Array<{ line_type: string; total_price: number }>;
+    };
+  };
+  assert.equal(checkoutResult.transaction.total, preview.subtotal);
+  assert.deepEqual(checkoutResult.transaction.items.map((item) => ({
+    name: item.name_snapshot,
+    quantity: item.quantity,
+    unit_price: item.unit_price,
+    total_price: item.total_price
+  })), [{
+    name: fixture.productName,
+    quantity: 2,
+    unit_price: fixture.price,
+    total_price: fixture.price * 2
+  }]);
+  assert.equal(checkoutResult.transaction.charges.some((charge) => charge.line_type === "unlimited_package"), true);
+  assert.deepEqual(await readStockAndMovements(fixture), stockAndMovementsBeforeCheckout);
 });
 
 test("legacy sale-history rows with null snapshots fall back to live product and table values", async () => {

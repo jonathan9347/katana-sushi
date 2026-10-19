@@ -20,10 +20,25 @@ const orderResponse = {
   replayed: false
 };
 
+type MockMenuProduct = {
+  id: string;
+  name: string;
+  category: string;
+  price: number;
+  is_available: boolean;
+  is_included: boolean;
+  is_sold_a_la_carte: boolean;
+  cart_compatibility: {
+    a_la_carte: { allowed: boolean; classification: string; message?: string };
+    unlimited: { allowed: boolean; classification: string; message?: string };
+  };
+};
+
 async function openDiningService(
   page: Page,
   postOrder: (route: Route) => Promise<void>,
-  getProductPrice: () => number = () => 100
+  getProductPrice: () => number = () => 100,
+  menuProducts?: MockMenuProduct[]
 ) {
   await page.context().addInitScript(() => {
     localStorage.setItem("katana_token", "playwright-token");
@@ -66,17 +81,48 @@ async function openDiningService(
       await route.fulfill({ json: { reservations: [] } });
       return;
     }
+    if (url.pathname === "/api/pos/dining/sessions/session-1/checkout-preview") {
+      await route.fulfill({ json: {
+        session_id: "session-1",
+        table_number: 4,
+        guest_count: 0,
+        a_la_carte_lines: [{
+          name: "California Roll",
+          guest_number: null,
+          quantity: 2,
+          unit_price: 100,
+          total_price: 200
+        }],
+        unlimited_order_lines: [],
+        unlimited_lines: [],
+        leftover_lines: [],
+        subtotal: 200,
+        unlimited_amount: 0,
+        leftover_amount: 0,
+        discounted_guest_count: 0,
+        per_guest_share: 0,
+        discount_amount: 0,
+        total: 200
+      } });
+      return;
+    }
     if (url.pathname === "/api/pos/kitchen/orders") {
       await route.fulfill({ json: { orders: [] } });
       return;
     }
     if (url.pathname === "/api/products") {
-      await route.fulfill({ json: { products: [{
+      await route.fulfill({ json: { products: menuProducts ?? [{
         id: "product-1",
         name: "California Roll",
         category: "Sushi",
         price: getProductPrice(),
-        is_available: true
+        is_available: true,
+        is_included: false,
+        is_sold_a_la_carte: true,
+        cart_compatibility: {
+          a_la_carte: { allowed: true, classification: "a_la_carte_only" },
+          unlimited: { allowed: false, classification: "a_la_carte_only", message: "Not included in Unlimited." }
+        }
       }] } });
       return;
     }
@@ -104,7 +150,7 @@ async function addOneOrderLine(page: Page) {
   await page.getByLabel("Qty").fill("2");
   await page.getByRole("button", { name: "Add item" }).click();
   await page.getByRole("button", { name: "Review order" }).click();
-  await expect(page.getByTestId("order-review")).toContainText("Confirm order · Table 4");
+  await expect(page.getByTestId("order-review")).toContainText("Confirm a la carte order · Table 4");
   await expect(page.getByTestId("order-review")).toContainText("2 × California Roll at PHP 100.00");
   await expect(page.getByTestId("order-review")).toContainText("Total: PHP 200.00");
 }
@@ -172,6 +218,91 @@ test("reload fetches the tab's saved order ID and reprints without committing ag
   await expect(reprintedSlip.locator("body")).toContainText("REPRINT");
   await expect(reprintedSlip.locator("body")).toContainText("DO-PRINT-001");
   expect(postCount).toBe(1);
+});
+
+test("keeps separate a-la-carte and Unlimited carts while using one menu", async ({ page }) => {
+  await openDiningService(page, async (route) => {
+    await route.fulfill({ json: orderResponse, status: 201 });
+  }, () => 100, [
+    {
+      id: "regular-product",
+      name: "Regular Roll",
+      category: "Sushi",
+      price: 100,
+      is_available: true,
+      is_included: false,
+      is_sold_a_la_carte: true,
+      cart_compatibility: {
+        a_la_carte: { allowed: true, classification: "a_la_carte_only" },
+        unlimited: { allowed: false, classification: "a_la_carte_only", message: "Not included in Unlimited." }
+      }
+    },
+    {
+      id: "beverage-addon",
+      name: "Bottled Water",
+      category: "Beverage",
+      price: 30,
+      is_available: true,
+      is_included: false,
+      is_sold_a_la_carte: true,
+      cart_compatibility: {
+        a_la_carte: { allowed: true, classification: "beverage_add_on" },
+        unlimited: { allowed: true, classification: "beverage_add_on" }
+      }
+    }
+  ]);
+  await page.getByLabel("Product").selectOption("regular-product");
+  await page.getByRole("button", { name: "Add item" }).click();
+  await expect(page.getByText("1 × Regular Roll · PHP 100.00 each")).toBeVisible();
+
+  await page.getByRole("button", { name: "Unlimited (0)" }).click();
+  await page.getByLabel("Product").selectOption("beverage-addon");
+  await page.getByRole("button", { name: "Add item" }).click();
+  await expect(page.getByText("1 × Bottled Water · PHP 30.00 each")).toBeVisible();
+
+  await page.getByRole("button", { name: "A la carte (1)" }).click();
+  await expect(page.getByText("1 × Regular Roll · PHP 100.00 each")).toBeVisible();
+  await page.getByRole("button", { name: "Unlimited (1)" }).click();
+  await expect(page.getByText("1 × Bottled Water · PHP 30.00 each")).toBeVisible();
+});
+
+test("shows guestless a-la-carte lines in checkout without a guest label", async ({ page }) => {
+  await openDiningService(page, async (route) => {
+    await route.fulfill({ json: orderResponse, status: 201 });
+  });
+  await page.getByRole("button", { name: "Review bill" }).click();
+  await expect(page.getByText("2 × California Roll")).toBeVisible();
+  await expect(page.getByText(/Guest null/)).toHaveCount(0);
+});
+
+test("offers conversion when the a-la-carte cart has included items and preserves them in Unlimited", async ({ page }) => {
+  const dialogMessages: string[] = [];
+  page.on("dialog", async (dialog) => {
+    dialogMessages.push(dialog.message());
+    await dialog.accept();
+  });
+  await openDiningService(page, async (route) => {
+    await route.fulfill({ json: orderResponse, status: 201 });
+  }, () => 100, [{
+    id: "included-product",
+    name: "Iced Tea",
+    category: "Beverage",
+    price: 45,
+    is_available: true,
+    is_included: true,
+    is_sold_a_la_carte: true,
+    cart_compatibility: {
+      a_la_carte: { allowed: true, classification: "included_in_unlimited" },
+      unlimited: { allowed: true, classification: "included_in_unlimited" }
+    }
+  }]);
+  await page.getByLabel("Product").selectOption("included-product");
+  await page.getByRole("button", { name: "Add item" }).click();
+  await expect.poll(() => dialogMessages.length).toBe(1);
+  expect(dialogMessages[0]).toContain("Convert this cart to the Unlimited cart");
+  expect(dialogMessages[0]).toContain("beverage add-ons are charged at menu price");
+  await expect(page.getByRole("button", { name: "Unlimited (1)" })).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByText("1 × Iced Tea · Included")).toBeVisible();
 });
 
 test("double-click commits only once", async ({ page }) => {

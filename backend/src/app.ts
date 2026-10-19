@@ -18,6 +18,7 @@ import diningPosRoutes from "./routes/diningPos.routes";
 import { seedDemoData } from "./services/demoSeed.service";
 import { assertDevelopmentDatabase } from "./lib/seedSafety";
 import { getBeverageStockMaterialName } from "./lib/beverageStock";
+import { getProductCartCompatibility } from "./services/productCartCompatibility.service";
 import {
   assertEnoughAvailable,
   assertBatchQuantitiesMatchOnHand,
@@ -7420,6 +7421,9 @@ app.get("/api/takeout/catalog", async (_req, res, next) => {
       where: { is_deleted: false },
       orderBy: [{ category: "asc" }, { name: "asc" }],
       include: {
+        unlimited_included_products: {
+          select: { is_included: true }
+        },
         recipes: {
           select: {
             recipe_ingredients: {
@@ -8094,6 +8098,9 @@ app.get("/api/products", async (_req, res, next) => {
       where: { is_deleted: false },
       orderBy: [{ category: "asc" }, { name: "asc" }],
       include: {
+        unlimited_included_products: {
+          select: { is_included: true }
+        },
         recipes: {
           include: {
             recipe_ingredients: {
@@ -8118,6 +8125,21 @@ app.get("/api/products", async (_req, res, next) => {
 
         return {
           ...product,
+          is_included: product.unlimited_included_products[0]?.is_included ?? false,
+          cart_compatibility: {
+            a_la_carte: getProductCartCompatibility({
+              name: product.name,
+              category: product.category,
+              is_included: product.unlimited_included_products[0]?.is_included ?? false,
+              is_sold_a_la_carte: product.is_sold_a_la_carte
+            }, "a_la_carte"),
+            unlimited: getProductCartCompatibility({
+              name: product.name,
+              category: product.category,
+              is_included: product.unlimited_included_products[0]?.is_included ?? false,
+              is_sold_a_la_carte: product.is_sold_a_la_carte
+            }, "unlimited")
+          },
           image_url: imageUrl,
           imageUrl,
           available_stock: availableStockByProduct.get(product) ?? 0

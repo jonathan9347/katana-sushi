@@ -8,8 +8,8 @@ if (!testDatabaseUrl) {
 }
 
 const testDatabaseName = new URL(testDatabaseUrl).pathname.slice(1);
-if (!/^katana_sushi_dev_step4_(2|4|6)_/.test(testDatabaseName)) {
-  throw new Error("Dining order commit integration tests only run on a dedicated restored Step 4.2, 4.4, or 4.6 test copy.");
+if (!/^katana_sushi_dev_step4_(2|4|5|6)_/.test(testDatabaseName)) {
+  throw new Error("Dining order commit integration tests only run on a dedicated restored Step 4.2, 4.4, 4.5, or 4.6 test copy.");
 }
 
 process.env.DATABASE_URL = testDatabaseUrl;
@@ -57,6 +57,7 @@ async function createFixture(input: {
   stock?: number;
   price?: number;
   soldAlaCarte?: boolean;
+  included?: boolean;
   category?: string;
   beverageWithoutRecipe?: boolean;
 } = {}): Promise<Fixture> {
@@ -104,6 +105,11 @@ async function createFixture(input: {
     }
   });
   fixture.productId = product.id;
+  if (input.included) {
+    await prisma.unlimitedIncludedProduct.create({
+      data: { selling_product_id: product.id, is_included: true }
+    });
+  }
 
   if (!input.beverageWithoutRecipe) {
     const recipe = await prisma.recipe.create({
@@ -479,8 +485,8 @@ test("insufficient stock rolls back the order and every inventory change with a 
   assert.deepEqual(await readStock(fixture), { onHand: 4, batchRemaining: 4 });
 });
 
-test("requires a-la-carte sale eligibility and keeps Unlimited commits disabled in this step", async () => {
-  const fixture = await createFixture({ soldAlaCarte: false });
+test("requires a-la-carte sale eligibility and refuses Unlimited-only products in that cart", async () => {
+  const fixture = await createFixture({ soldAlaCarte: false, included: true });
   const alaCarteResponse = await request(
     `/api/pos/dining/sessions/${fixture.sessionId}/orders`,
     orderBody(fixture, "step42-unsold-product-00001")
@@ -491,17 +497,79 @@ test("requires a-la-carte sale eligibility and keeps Unlimited commits disabled 
     /only available in the Unlimited cart/i
   );
 
-  const unlimitedResponse = await request(`/api/pos/dining/sessions/${fixture.sessionId}/orders`, {
-    idempotencyKey: "step42-unlimited-disabled-001",
+  assert.equal(await prisma.diningOrder.count({ where: { dining_session_id: fixture.sessionId } }), 0);
+  assert.deepEqual(await readStock(fixture), { onHand: 20, batchRemaining: 20 });
+});
+
+test("Unlimited cart commits included products free and charges beverage add-ons at menu price", async () => {
+  const included = await createFixture({ included: true });
+  const packageResponse = await request(
+    `/api/pos/dining/sessions/${included.sessionId}/unlimited-sessions`,
+    { paxCount: 2 }
+  );
+  const packageText = await packageResponse.text();
+  assert.equal(packageResponse.status, 201, packageText);
+  const packageId = (JSON.parse(packageText) as { unlimited_session: { id: string } }).unlimited_session.id;
+  const includedResponse = await request(`/api/pos/dining/sessions/${included.sessionId}/orders`, {
+    idempotencyKey: `${testRunKey}-unlimited-included-free`,
     orderType: "unlimited",
-    unlimitedSessionId: "not-yet-enabled",
+    unlimitedSessionId: packageId,
+    items: [{ productId: included.productId, quantity: 2, expectedUnitPrice: 0 }]
+  });
+  const includedText = await includedResponse.text();
+  assert.equal(includedResponse.status, 201, includedText);
+  const includedOrder = JSON.parse(includedText) as {
+    order: { order_type: string; unlimited_session_id: string; status: string; items: Array<{ unit_price: number; total_price: number }> };
+  };
+  assert.equal(includedOrder.order.order_type, "unlimited");
+  assert.equal(includedOrder.order.unlimited_session_id, packageId);
+  assert.equal(includedOrder.order.status, "committed");
+  assert.equal(includedOrder.order.items[0].unit_price, 0);
+  assert.equal(includedOrder.order.items[0].total_price, 0);
+  assert.deepEqual(await readStock(included), { onHand: 16, batchRemaining: 16 });
+
+  const beverage = await createFixture({ beverageWithoutRecipe: true, price: 7.25 });
+  const beveragePackage = await request(
+    `/api/pos/dining/sessions/${beverage.sessionId}/unlimited-sessions`,
+    { paxCount: 2 }
+  );
+  const beveragePackageText = await beveragePackage.text();
+  assert.equal(beveragePackage.status, 201, beveragePackageText);
+  const beveragePackageId = (JSON.parse(beveragePackageText) as { unlimited_session: { id: string } }).unlimited_session.id;
+  const beverageResponse = await request(`/api/pos/dining/sessions/${beverage.sessionId}/orders`, {
+    idempotencyKey: `${testRunKey}-unlimited-beverage-addon`,
+    orderType: "unlimited",
+    unlimitedSessionId: beveragePackageId,
+    items: [{ productId: beverage.productId, quantity: 2, expectedUnitPrice: beverage.price }]
+  });
+  const beverageText = await beverageResponse.text();
+  assert.equal(beverageResponse.status, 201, beverageText);
+  const beverageOrder = JSON.parse(beverageText) as {
+    order: { items: Array<{ unit_price: number; total_price: number }> };
+  };
+  assert.equal(beverageOrder.order.items[0].unit_price, beverage.price);
+  assert.equal(beverageOrder.order.items[0].total_price, beverage.price * 2);
+  assert.deepEqual(await readStock(beverage), { onHand: 18, batchRemaining: 18 });
+});
+
+test("Unlimited cart refuses non-included non-beverage products with a clear message", async () => {
+  const fixture = await createFixture();
+  const packageResponse = await request(
+    `/api/pos/dining/sessions/${fixture.sessionId}/unlimited-sessions`,
+    { paxCount: 2 }
+  );
+  const packageText = await packageResponse.text();
+  assert.equal(packageResponse.status, 201, packageText);
+  const packageId = (JSON.parse(packageText) as { unlimited_session: { id: string } }).unlimited_session.id;
+  const response = await request(`/api/pos/dining/sessions/${fixture.sessionId}/orders`, {
+    idempotencyKey: `${testRunKey}-unlimited-regular-refused`,
+    orderType: "unlimited",
+    unlimitedSessionId: packageId,
     items: [{ productId: fixture.productId, quantity: 1, expectedUnitPrice: fixture.price }]
   });
-  assert.equal(unlimitedResponse.status, 409);
-  assert.match(
-    (await unlimitedResponse.json() as { message: string }).message,
-    /Unlimited order commits are not available yet/i
-  );
+  const responseText = await response.text();
+  assert.equal(response.status, 409, responseText);
+  assert.match(responseText, /not included in Unlimited/i);
   assert.equal(await prisma.diningOrder.count({ where: { dining_session_id: fixture.sessionId } }), 0);
   assert.deepEqual(await readStock(fixture), { onHand: 20, batchRemaining: 20 });
 });
