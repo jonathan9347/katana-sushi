@@ -8,8 +8,8 @@ if (!testDatabaseUrl) {
 }
 
 const testDatabaseName = new URL(testDatabaseUrl).pathname.slice(1);
-if (!testDatabaseName.startsWith("katana_sushi_dev_step4_2_")) {
-  throw new Error("Dining order commit integration tests only run on a dedicated restored Step 4.2 test copy.");
+if (!/^katana_sushi_dev_step4_(2|4)_/.test(testDatabaseName)) {
+  throw new Error("Dining order commit integration tests only run on a dedicated restored Step 4.2 or 4.4 test copy.");
 }
 
 process.env.DATABASE_URL = testDatabaseUrl;
@@ -336,7 +336,7 @@ test("commits a guestless a-la-carte order, snapshots price/table, and consumes 
 
 test("concurrent duplicate commits and retries replay one order without a second stock deduction", async () => {
   const fixture = await createFixture();
-  const body = orderBody(fixture, "step42-idempotent-concurrent-01");
+  const body = orderBody(fixture, "step44-idempotent-concurrent-01");
   const responses = await Promise.all([
     request(`/api/pos/dining/sessions/${fixture.sessionId}/orders`, body),
     request(`/api/pos/dining/sessions/${fixture.sessionId}/orders`, body)
@@ -345,11 +345,17 @@ test("concurrent duplicate commits and retries replay one order without a second
   assert.deepEqual(statusCodes, [200, 201]);
   const results = await Promise.all(responses.map((response) => response.json())) as Array<{
     replayed: boolean;
-    order: { id: string };
+    order: { id: string; order_number: string };
   }>;
   assert.equal(results[0].order.id, results[1].order.id);
   assert.equal(results.filter((result) => result.replayed).length, 1);
   assert.deepEqual(await readStock(fixture), { onHand: 16, batchRemaining: 16 });
+  assert.equal(await prisma.inventoryMovement.count({
+    where: { raw_material_id: fixture.materialId, source_reference: results[0].order.order_number }
+  }), 1);
+  assert.equal(await prisma.inventoryMovement.count({
+    where: { raw_material_id: fixture.materialId, action: "Used" }
+  }), 1);
   assert.equal(await prisma.diningOrder.count({ where: { dining_session_id: fixture.sessionId } }), 1);
 
   const retry = await request(`/api/pos/dining/sessions/${fixture.sessionId}/orders`, body);
@@ -357,14 +363,20 @@ test("concurrent duplicate commits and retries replay one order without a second
   assert.equal(retry.status, 200, retryText);
   assert.equal((JSON.parse(retryText) as { replayed: boolean }).replayed, true);
   assert.deepEqual(await readStock(fixture), { onHand: 16, batchRemaining: 16 });
+  assert.equal(await prisma.inventoryMovement.count({
+    where: { raw_material_id: fixture.materialId, action: "Used" }
+  }), 1);
 
   const conflict = await request(
     `/api/pos/dining/sessions/${fixture.sessionId}/orders`,
-    orderBody(fixture, "step42-idempotent-concurrent-01", 3)
+    orderBody(fixture, "step44-idempotent-concurrent-01", 3)
   );
   const conflictText = await conflict.text();
   assert.equal(conflict.status, 409, conflictText);
   assert.deepEqual(await readStock(fixture), { onHand: 16, batchRemaining: 16 });
+  assert.equal(await prisma.inventoryMovement.count({
+    where: { raw_material_id: fixture.materialId, action: "Used" }
+  }), 1);
 });
 
 test("concurrent orders at separate tables cannot oversell the same locked material", async () => {

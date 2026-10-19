@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ChefHat, Printer, ShoppingCart, Table2 } from "lucide-react";
 import { Link } from "react-router-dom";
@@ -17,17 +17,43 @@ type TicketItem = {
   id: string;
   name_snapshot: string;
   quantity: number;
-  guest: Guest;
+  guest: Guest | null;
 };
 
 type KitchenOrder = {
   id: string;
   order_number: string;
   order_type: "ala_carte" | "unlimited";
-  status: "reserved" | "prepared" | "ready" | "released" | "cancelled";
+  status: "committed" | "reserved" | "prepared" | "ready" | "released" | "cancelled";
   created_at: string;
   dining_session: { table: { table_number: number } };
   items: TicketItem[];
+};
+
+type CommittedDiningOrder = {
+  id: string;
+  order_number: string;
+  table_number_snapshot: number | null;
+  created_at: string;
+  items: Array<{
+    id: string;
+    name_snapshot: string;
+    quantity: number;
+    unit_price: number | string;
+    total_price: number | string;
+  }>;
+};
+
+type ReviewedOrder = {
+  sessionId: string;
+  tableNumber: number;
+  idempotencyKey: string;
+  items: Array<{
+    productId: string;
+    name: string;
+    quantity: number;
+    expectedUnitPrice: number;
+  }>;
 };
 
 type UnlimitedSession = {
@@ -116,7 +142,8 @@ type CheckoutTransaction = {
 };
 
 type Props = { mode?: "service" | "kitchen" };
-type DraftItem = { productId: string; guestNumber: number; quantity: number };
+type DraftItem = { productId: string; quantity: number };
+type CommitOrderInput = { review: ReviewedOrder; printWindow: Window | null };
 type DiningAction = { method: "post" | "patch"; url: string; body?: unknown };
 type DiningActionResult = {
   transaction?: CheckoutTransaction;
@@ -152,6 +179,51 @@ function escapeHtml(value: string) {
   })[character] ?? character);
 }
 
+function printDiningOrderSlip(
+  target: Window,
+  order: CommittedDiningOrder,
+  isReprint = false
+) {
+  const lines = order.items.map((item) => `
+    <tr>
+      <td>${escapeHtml(item.name_snapshot)}</td>
+      <td class="number">${item.quantity}</td>
+      <td class="number">${money(Number(item.unit_price))}</td>
+      <td class="number">${money(Number(item.total_price))}</td>
+    </tr>`).join("");
+  target.document.open();
+  target.document.write(`<!doctype html>
+    <html>
+      <head>
+        <meta charset="utf-8">
+        <title>Order ${escapeHtml(order.order_number)}</title>
+        <style>
+          body { font: 14px Arial, sans-serif; margin: 24px; color: #111; }
+          h1 { font-size: 20px; margin: 0 0 8px; }
+          p { margin: 4px 0 16px; }
+          table { border-collapse: collapse; width: 100%; }
+          th, td { border-bottom: 1px solid #bbb; padding: 7px 4px; text-align: left; }
+          .number { text-align: right; white-space: nowrap; }
+          .reprint { border: 2px solid #111; font-weight: bold; padding: 8px; text-align: center; }
+          .total { font-weight: bold; }
+        </style>
+      </head>
+      <body>
+        ${isReprint ? '<p class="reprint">REPRINT</p>' : ""}
+        <h1>Order ${escapeHtml(order.order_number)}</h1>
+        <p>Table ${order.table_number_snapshot ?? "—"} · ${escapeHtml(formatTime(order.created_at))}</p>
+        <table>
+          <thead><tr><th>Item</th><th class="number">Qty</th><th class="number">Price</th><th class="number">Total</th></tr></thead>
+          <tbody>${lines}</tbody>
+          <tfoot><tr class="total"><td colspan="3">Total</td><td class="number">${money(order.items.reduce((sum, item) => sum + Number(item.total_price), 0))}</td></tr></tfoot>
+        </table>
+      </body>
+    </html>`);
+  target.document.close();
+  target.focus();
+  target.print();
+}
+
 function errorMessage(error: unknown) {
   if (typeof error === "object" && error && "response" in error) {
     const response = (error as { response?: { data?: { message?: string } } }).response;
@@ -175,10 +247,13 @@ export default function DiningService({ mode = "service" }: Props) {
   const [selectedSessionId, setSelectedSessionId] = useState("");
   const [orderType, setOrderType] = useState<"ala_carte" | "unlimited">("ala_carte");
   const [productId, setProductId] = useState("");
-  const [guestNumber, setGuestNumber] = useState(1);
   const [quantity, setQuantity] = useState(1);
   const [draftItems, setDraftItems] = useState<DraftItem[]>([]);
   const [draftKey, setDraftKey] = useState(() => crypto.randomUUID());
+  const [orderReview, setOrderReview] = useState<ReviewedOrder | null>(null);
+  const [lastCommittedOrder, setLastCommittedOrder] = useState<CommittedDiningOrder | null>(null);
+  const [printError, setPrintError] = useState("");
+  const confirmClickLocked = useRef(false);
   const [packageCovers, setPackageCovers] = useState(1);
   const [leftoverProductId, setLeftoverProductId] = useState("");
   const [leftoverQuantity, setLeftoverQuantity] = useState(0);
@@ -239,9 +314,6 @@ export default function DiningService({ mode = "service" }: Props) {
   });
   const session = sessionsQuery.data?.find((item) => item.id === selectedSessionId) ?? null;
   const activeUnlimited = session?.unlimited_sessions.find((item) => item.status === "active") ?? null;
-  const coveredGuests = orderType === "unlimited" && activeUnlimited
-    ? session?.guests.filter((guest) => guest.guest_number <= activeUnlimited.pax_count) ?? []
-    : session?.guests ?? [];
   const seatedTables = (tablesQuery.data ?? []).filter((table) =>
     Boolean(table.active_session?.guests.length) &&
     !table.linked_to_table_id &&
@@ -301,6 +373,7 @@ export default function DiningService({ mode = "service" }: Props) {
       if (action.url.endsWith("/checkout")) {
         if (result.transaction) setCompletedTransaction(result.transaction);
         setSelectedSessionId("");
+        resetDraftForSessionChange();
         setShowCheckout(false);
         setCashReceived("");
       }
@@ -310,6 +383,7 @@ export default function DiningService({ mode = "service" }: Props) {
         action.url.endsWith("/temporary-table")
       )) {
         setSelectedSessionId(result.session.id);
+        resetDraftForSessionChange();
         setTemporaryTableReservationId(null);
         setShowCheckout(false);
       }
@@ -332,23 +406,51 @@ export default function DiningService({ mode = "service" }: Props) {
     retry: false
   });
 
-  const sendTicket = useMutation({
-    mutationFn: async () => {
-      if (!session || draftItems.length === 0) throw new Error("Add at least one item before sending the ticket.");
-      return (await api.post(`/api/pos/dining/sessions/${session.id}/orders`, {
-        idempotencyKey: draftKey,
-        orderType,
-        unlimitedSessionId: orderType === "unlimited" ? activeUnlimited?.id : undefined,
-        items: draftItems
-      })).data;
-    },
-    onSuccess: async () => {
+  const commitOrder = useMutation({
+    mutationFn: async ({ review }: CommitOrderInput) => (
+      await api.post<{ order: CommittedDiningOrder; replayed: boolean }>(
+        `/api/pos/dining/sessions/${review.sessionId}/orders`,
+        {
+          idempotencyKey: review.idempotencyKey,
+          orderType: "ala_carte",
+          items: review.items.map(({ productId, quantity, expectedUnitPrice }) => ({
+            productId,
+            quantity,
+            expectedUnitPrice
+          }))
+        }
+      )
+    ).data,
+    onSuccess: async (result, input) => {
+      setLastCommittedOrder(result.order);
       setDraftItems([]);
       setDraftKey(crypto.randomUUID());
+      setOrderReview(null);
+      setPrintError("");
+      confirmClickLocked.current = false;
+      if (input.printWindow) {
+        try {
+          printDiningOrderSlip(input.printWindow, result.order);
+        } catch {
+          input.printWindow.close();
+          setPrintError("The order was saved, but the print window failed. Use Reprint to try again.");
+          toast("The order was saved, but printing failed. Use Reprint to try again.");
+        }
+      } else {
+        setPrintError("The order was saved, but the print window was blocked. Use Reprint to try again.");
+        toast("The order was saved, but the print window was blocked. Use Reprint to try again.");
+      }
       await refreshQueries();
-      toast("Kitchen ticket sent and ingredients reserved.");
     },
-    onError: (error) => toast(errorMessage(error))
+    onError: async (error, input) => {
+      input.printWindow?.close();
+      confirmClickLocked.current = false;
+      if (errorCode(error) === "PRODUCT_PRICE_CHANGED") {
+        setOrderReview(null);
+        await queryClient.invalidateQueries({ queryKey: ["products"], exact: true });
+      }
+      toast(errorMessage(error));
+    }
   });
   const currentOrderMutation = useMutation({
     mutationFn: async (input: { orderId: string; status: "prepared" | "ready" | "released" | "cancelled" }) =>
@@ -362,19 +464,99 @@ export default function DiningService({ mode = "service" }: Props) {
   });
 
   const currentOrders = kitchenQuery.data ?? [];
+  const orderControlsDisabled = commitOrder.isPending || runMutation.isPending;
 
   function runAction(method: "post" | "patch", url: string, body?: unknown) {
+    const startsSession = method === "post" && (
+      url === "/api/pos/dining/sessions" ||
+      url.endsWith("/seat") ||
+      url.endsWith("/temporary-table")
+    );
+    if (startsSession) {
+      if (commitOrder.isPending) {
+        toast("Wait for the current order to finish before seating another table.");
+        return;
+      }
+      if (draftItems.length > 0 && !window.confirm("Starting another table session will discard this unconfirmed cart. Continue?")) {
+        return;
+      }
+    }
     runMutation.mutate({ method, url, body });
   }
 
-  function addDraftItem() {
-    if (!productId || !guestNumber || quantity < 1) {
-      toast("Choose a product, guest number, and quantity.");
-      return;
-    }
-    setDraftItems((items) => [...items, { productId, guestNumber, quantity }]);
+  function resetDraftForSessionChange() {
+    setDraftItems([]);
+    setDraftKey(crypto.randomUUID());
+    setOrderReview(null);
     setProductId("");
     setQuantity(1);
+    setOrderType("ala_carte");
+  }
+
+  function addDraftItem() {
+    if (!productId || !Number.isInteger(quantity) || quantity < 1) {
+      toast("Choose a product and a whole-number quantity.");
+      return;
+    }
+    setDraftItems((items) => [...items, { productId, quantity }]);
+    setOrderReview(null);
+    setShowCheckout(false);
+    setProductId("");
+    setQuantity(1);
+  }
+
+  function reviewDraftOrder() {
+    if (!session || draftItems.length === 0) {
+      toast("Add at least one item before reviewing the order.");
+      return;
+    }
+    const items: ReviewedOrder["items"] = [];
+    for (const item of draftItems) {
+      const product = productsById.get(item.productId);
+      const price = Number(product?.price);
+      if (!product || !product.is_available || !Number.isFinite(price) || price < 0) {
+        toast("A selected product is no longer available or has an invalid price. Review the cart again.");
+        return;
+      }
+      items.push({
+        productId: item.productId,
+        name: product.name,
+        quantity: item.quantity,
+        expectedUnitPrice: Number(price.toFixed(2))
+      });
+    }
+    setOrderReview({
+      sessionId: session.id,
+      tableNumber: session.table.table_number,
+      idempotencyKey: draftKey,
+      items
+    });
+  }
+
+  function confirmAndPrint() {
+    if (!orderReview || confirmClickLocked.current || commitOrder.isPending) return;
+    confirmClickLocked.current = true;
+    setPrintError("");
+    const printWindow = window.open("", "_blank", "width=520,height=700");
+    commitOrder.mutate({ review: orderReview, printWindow });
+  }
+
+  function reprintLastOrder() {
+    if (!lastCommittedOrder) return;
+    const printWindow = window.open("", "_blank", "width=520,height=700");
+    if (!printWindow) {
+      setPrintError("The reprint window was blocked. Allow pop-ups and try Reprint again.");
+      toast("The reprint window was blocked. Allow pop-ups and try Reprint again.");
+      return;
+    }
+    try {
+      printDiningOrderSlip(printWindow, lastCommittedOrder, true);
+      setPrintError("");
+    } catch {
+      printWindow.close();
+      setPrintError("The order is still saved, but reprinting failed. Try Reprint again.");
+      toast("The order is still saved, but reprinting failed. Try Reprint again.");
+    }
   }
 
   function printTicket(order: KitchenOrder) {
@@ -390,7 +572,10 @@ export default function DiningService({ mode = "service" }: Props) {
         <h1>Table ${order.dining_session.table.table_number}</h1>
         <p>${order.order_type === "unlimited" ? "UNLIMITED" : "A LA CARTE"} · ${escapeHtml(order.order_number)}</p>
         <p>${formatTime(order.created_at)}</p><hr />
-        <ul>${order.items.map((item) => `<li>Guest ${item.guest.guest_number}: ${item.quantity} × ${escapeHtml(item.name_snapshot)}</li>`).join("")}</ul>
+        <ul>${order.items.map((item) => {
+          const guestLabel = item.guest ? `Guest ${item.guest.guest_number}: ` : "";
+          return `<li>${guestLabel}${item.quantity} × ${escapeHtml(item.name_snapshot)}</li>`;
+        }).join("")}</ul>
         <script>window.print();window.close();</script>
       </body></html>
     `);
@@ -423,7 +608,7 @@ export default function DiningService({ mode = "service" }: Props) {
                 <ul className="my-4 divide-y divide-slate-100">
                   {order.items.map((item) => (
                     <li key={item.id} className="py-2 text-sm font-semibold">
-                      Guest {item.guest.guest_number} · {item.quantity} × {item.name_snapshot}
+                      {item.guest ? `Guest ${item.guest.guest_number} · ` : ""}{item.quantity} × {item.name_snapshot}
                     </li>
                   ))}
                 </ul>
@@ -456,7 +641,7 @@ export default function DiningService({ mode = "service" }: Props) {
             <h1 className="text-3xl font-black text-slate-950">Table service</h1>
           </div>
           <div className="flex flex-wrap items-center gap-3">
-            <p className="text-sm text-slate-500">Kitchen deductions happen only when an order is released.</p>
+            <p className="text-sm text-slate-500">New dine-in orders deduct stock at Confirm &amp; Print; legacy kitchen tickets deduct when released.</p>
             <ActionButton tone="muted" onClick={() => setManageTablesOpen(true)}>Manage tables</ActionButton>
           </div>
         </header>
@@ -517,7 +702,7 @@ export default function DiningService({ mode = "service" }: Props) {
                         </span>
                         {reservation.state !== "arrived" && (
                           <ActionButton
-                            disabled={runMutation.isPending}
+                            disabled={runMutation.isPending || commitOrder.isPending}
                             onClick={() => {
                               if (window.confirm(`Seat ${reservation.customer_name} at the assigned table${reservation.table_numbers.length === 1 ? "" : "s"}?`)) {
                                 runAction("post", `/api/pos/dining/reservations/${reservation.id}/seat`, {});
@@ -533,7 +718,7 @@ export default function DiningService({ mode = "service" }: Props) {
                           An assigned table is busy or unavailable. Add a temporary table for this reservation.
                           <button
                             className="ml-3 rounded bg-amber-800 px-3 py-1.5 font-bold text-white hover:bg-amber-900 disabled:opacity-50"
-                            disabled={runMutation.isPending}
+                            disabled={runMutation.isPending || commitOrder.isPending}
                             onClick={() => {
                               if (window.confirm(`Add a temporary table for ${reservation.customer_name} (${reservation.party_size} guests)?`)) {
                                 runAction("post", `/api/pos/dining/reservations/${reservation.id}/temporary-table`, {});
@@ -557,15 +742,22 @@ export default function DiningService({ mode = "service" }: Props) {
                   <button
                     key={item.id}
                     className={`rounded-lg border p-3 text-left ${selectedSessionId === item.id ? "border-red-700 bg-red-50" : "border-slate-200 hover:bg-slate-50"}`}
+                    disabled={runMutation.isPending || commitOrder.isPending}
                     onClick={() => {
+                      if (
+                        item.id !== selectedSessionId &&
+                        draftItems.length > 0 &&
+                        !window.confirm("Switching tables will discard this unconfirmed cart. Continue?")
+                      ) {
+                        return;
+                      }
+                      if (item.id !== selectedSessionId) resetDraftForSessionChange();
                       setSelectedSessionId(item.id);
-                      setGuestNumber(1);
-                      setDraftItems([]);
                       setShowCheckout(false);
                     }}
                   >
                     <span className="font-bold">Table {item.table.table_number}</span>
-                    <span className="ml-2 text-sm text-slate-600">{item.guests.length} guests · {item.orders.filter((order) => order.status !== "released" && order.status !== "cancelled").length} open tickets</span>
+                    <span className="ml-2 text-sm text-slate-600">{item.guests.length} guests · {item.orders.filter((order) => ["reserved", "prepared", "ready"].includes(order.status)).length} open tickets</span>
                   </button>
                 ))}
                 {!sessionsQuery.isLoading && (sessionsQuery.data ?? []).length === 0 && <p className="text-sm text-slate-500">No active table sessions.</p>}
@@ -650,7 +842,7 @@ export default function DiningService({ mode = "service" }: Props) {
                       {state === "free" && (
                         <button
                           className="mt-3 rounded bg-emerald-800 px-3 py-1.5 text-sm font-bold text-white hover:bg-emerald-900 disabled:opacity-50"
-                          disabled={runMutation.isPending}
+                          disabled={runMutation.isPending || commitOrder.isPending}
                           onClick={() => runAction("post", "/api/pos/dining/sessions", { tableId: table.id })}
                         >
                           Seat walk-in
@@ -666,7 +858,7 @@ export default function DiningService({ mode = "service" }: Props) {
             </section>
             {!session ? (
               <section className="grid min-h-64 place-items-center rounded-xl border border-dashed border-slate-300 bg-white p-6 text-center text-slate-500">
-                Select an active table to assign guest numbers, send kitchen tickets, and check out.
+                Select an active table to prepare and confirm an a-la-carte order or check out.
               </section>
             ) : (
               <>
@@ -696,22 +888,16 @@ export default function DiningService({ mode = "service" }: Props) {
                   </div>
                 </section>
 
-                {session.guests.length === 0 ? (
-                  <section className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-950 shadow-sm">
-                    This table is seated without guest records. Additional orders will be available in Phase 2 Step 4.
-                  </section>
-                ) : (
-                <>
                 <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
                   <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
-                    <h2 className="text-lg font-bold">Create kitchen ticket</h2>
-                    <select className="h-10 rounded border border-slate-300 px-2" value={orderType} onChange={(event) => {
+                    <h2 className="text-lg font-bold">Dine-in order</h2>
+                    <select className="h-10 rounded border border-slate-300 px-2" value={orderType} disabled={orderControlsDisabled} onChange={(event) => {
                       setOrderType(event.target.value as "ala_carte" | "unlimited");
                       setProductId("");
-                      setGuestNumber(1);
+                      setOrderReview(null);
                     }}>
                       <option value="ala_carte">A la carte</option>
-                      <option value="unlimited">Unlimited package</option>
+                      <option value="unlimited">Unlimited session</option>
                     </select>
                   </div>
                   {orderType === "unlimited" && (
@@ -748,47 +934,87 @@ export default function DiningService({ mode = "service" }: Props) {
                       )}
                     </div>
                   )}
-                  {orderType === "unlimited" && !activeUnlimited && <p className="mb-3 text-sm text-amber-800">Start a package before sending an Unlimited ticket. Guests 1 through the selected cover count are covered.</p>}
-                  <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_130px_100px_auto]">
-                    <label className="grid gap-1 text-sm font-medium text-slate-700">
-                      Product
-                      <select className="h-10 min-w-0 rounded border border-slate-300 px-2" value={productId} onChange={(event) => setProductId(event.target.value)}>
-                        <option value="">Select product</option>
-                        {availableProducts.filter((item) => item.is_available).map((item) => (
-                          <option key={item.id} value={item.id}>{item.name} · {orderType === "ala_carte" ? money(Number(item.price)) : "Included"}</option>
-                        ))}
-                      </select>
-                    </label>
-                    <label className="grid gap-1 text-sm font-medium text-slate-700">
-                      Guest
-                      <select className="h-10 rounded border border-slate-300 px-2" value={guestNumber} onChange={(event) => setGuestNumber(Number(event.target.value))}>
-                        {coveredGuests.map((guest) => <option key={guest.id} value={guest.guest_number}>Guest {guest.guest_number}</option>)}
-                      </select>
-                    </label>
-                    <label className="grid gap-1 text-sm font-medium text-slate-700">
-                      Qty
-                      <input className="h-10 rounded border border-slate-300 px-2" type="number" min={1} value={quantity} onChange={(event) => setQuantity(Number(event.target.value))} />
-                    </label>
-                    <button className="mt-auto h-10 rounded border border-slate-300 px-3 font-bold hover:bg-slate-50" onClick={addDraftItem}>Add item</button>
-                  </div>
-                  {draftItems.length > 0 && (
+                  {orderType === "ala_carte" && productsQuery.isError && (
+                    <p role="alert" className="mb-3 text-sm text-red-700">Current product prices could not be loaded. Reload products before preparing this order.</p>
+                  )}
+                  {orderType === "unlimited" ? (
+                    <p className="rounded bg-amber-50 p-3 text-sm text-amber-900">
+                      Unlimited item ordering is not available yet. Existing package controls above are unchanged.
+                    </p>
+                  ) : (
+                    <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_120px_auto]">
+                      <label className="grid gap-1 text-sm font-medium text-slate-700">
+                        Product
+                        <select className="h-10 min-w-0 rounded border border-slate-300 px-2" value={productId} disabled={orderControlsDisabled} onChange={(event) => setProductId(event.target.value)}>
+                          <option value="">Select product</option>
+                          {availableProducts.filter((item) => item.is_available).map((item) => (
+                            <option key={item.id} value={item.id}>{item.name} · {money(Number(item.price))}</option>
+                          ))}
+                        </select>
+                      </label>
+                      <label className="grid gap-1 text-sm font-medium text-slate-700">
+                        Qty
+                        <input className="h-10 rounded border border-slate-300 px-2" type="number" min={1} step={1} value={quantity} disabled={orderControlsDisabled} onChange={(event) => setQuantity(Number(event.target.value))} />
+                      </label>
+                      <button className="mt-auto h-10 rounded border border-slate-300 px-3 font-bold hover:bg-slate-50 disabled:opacity-50" disabled={orderControlsDisabled} onClick={addDraftItem}>Add item</button>
+                    </div>
+                  )}
+                  {draftItems.length > 0 && orderType === "ala_carte" && (
                     <div className="mt-4 rounded-lg bg-slate-50 p-3">
                       <ul className="space-y-2 text-sm">
                         {draftItems.map((item, index) => (
                           <li key={`${item.productId}-${index}`} className="flex items-center justify-between gap-2">
-                            <span>Guest {item.guestNumber} · {item.quantity} × {productsById.get(item.productId)?.name ?? item.productId}</span>
-                            <button className="text-red-700 underline" onClick={() => setDraftItems((items) => items.filter((_, itemIndex) => itemIndex !== index))}>Remove</button>
+                            <span>
+                              {item.quantity} × {productsById.get(item.productId)?.name ?? item.productId}
+                              {productsById.get(item.productId) && ` · ${money(Number(productsById.get(item.productId)?.price))} each`}
+                            </span>
+                            <button className="text-red-700 underline disabled:opacity-50" disabled={orderControlsDisabled} onClick={() => {
+                              setDraftItems((items) => items.filter((_, itemIndex) => itemIndex !== index));
+                              setOrderReview(null);
+                            }}>Remove</button>
                           </li>
                         ))}
                       </ul>
                       <ActionButton
                         className="mt-3"
-                        disabled={sendTicket.isPending || (orderType === "unlimited" && !activeUnlimited)}
-                        onClick={() => sendTicket.mutate()}
+                        disabled={orderControlsDisabled}
+                        onClick={reviewDraftOrder}
                       >
-                        {sendTicket.isPending ? "Sending..." : "Send ticket"}
+                        Review order
                       </ActionButton>
                     </div>
+                  )}
+                  {orderReview && orderType === "ala_carte" && (
+                    <section aria-label="Order confirmation" className="mt-4 rounded-lg border-2 border-slate-300 bg-white p-4" data-testid="order-review">
+                      <h3 className="text-lg font-bold">Confirm order · Table {orderReview.tableNumber}</h3>
+                      <p className="mb-3 text-sm text-slate-600">Check the complete item and price list. Stock is deducted once when you confirm and print.</p>
+                      <ul className="divide-y divide-slate-200">
+                        {orderReview.items.map((item, index) => (
+                          <li key={`${item.productId}-${index}`} className="flex justify-between gap-3 py-2 text-sm">
+                            <span>{item.quantity} × {item.name} at {money(item.expectedUnitPrice)}</span>
+                            <span className="font-semibold">{money(item.quantity * item.expectedUnitPrice)}</span>
+                          </li>
+                        ))}
+                      </ul>
+                      <p className="mt-3 text-right font-bold">
+                        Total: {money(orderReview.items.reduce((sum, item) => sum + item.quantity * item.expectedUnitPrice, 0))}
+                      </p>
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        <ActionButton tone="muted" disabled={orderControlsDisabled} onClick={() => setOrderReview(null)}>Edit cart</ActionButton>
+                        <ActionButton disabled={orderControlsDisabled} onClick={confirmAndPrint}>
+                          {commitOrder.isPending ? "Committing..." : "Confirm & Print"}
+                        </ActionButton>
+                      </div>
+                    </section>
+                  )}
+                  {lastCommittedOrder && (
+                    <section aria-label="Last committed order" className="mt-4 rounded-lg border border-emerald-300 bg-emerald-50 p-3">
+                      <p className="font-semibold">
+                        Saved order {lastCommittedOrder.order_number} · Table {lastCommittedOrder.table_number_snapshot ?? "—"}
+                      </p>
+                      {printError && <p role="alert" className="mt-1 text-sm text-amber-900">{printError}</p>}
+                      <ActionButton className="mt-2" tone="muted" onClick={reprintLastOrder}>Reprint</ActionButton>
+                    </section>
                   )}
                 </section>
 
@@ -815,11 +1041,12 @@ export default function DiningService({ mode = "service" }: Props) {
                   </section>
                 ) : (
                   <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-                    <p className="text-sm text-slate-600">Checkout after all kitchen tickets are released or cancelled and all Unlimited packages are ended.</p>
-                    <ActionButton disabled={runMutation.isPending} onClick={() => setShowCheckout(true)}>Review bill</ActionButton>
+                    <p className="text-sm text-slate-600">Legacy kitchen tickets must be released or cancelled. Committed orders are included automatically; end all Unlimited packages before checkout.</p>
+                    <div className="flex flex-col items-end gap-1">
+                      {draftItems.length > 0 && <p className="text-xs text-amber-800">Confirm or remove the draft cart before checkout.</p>}
+                      <ActionButton disabled={runMutation.isPending || draftItems.length > 0} onClick={() => setShowCheckout(true)}>Review bill</ActionButton>
+                    </div>
                   </div>
-                )}
-                </>
                 )}
               </>
             )}
