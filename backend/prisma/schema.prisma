@@ -664,6 +664,7 @@ model UnlimitedSetting {
   id                      String   @id @default(cuid())
   price_per_person        Float
   time_limit_minutes      Int
+  extension_minutes       Int      @default(30)
   leftover_charge_percent Float
   updated_at              DateTime @updatedAt
 
