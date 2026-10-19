@@ -34,6 +34,8 @@ export type UnifiedTransaction = {
   discount_amount?: number;
   guest_count?: number;
   discount_guest_count?: number;
+  discount_base_snapshot?: number | null;
+  discount_rate_snapshot?: number | null;
   payment_method: string;
   cash_received?: number | null;
   change_due?: number | null;
@@ -294,6 +296,8 @@ export async function getUnifiedTransactions(params: {
       discount_amount: Number(t.discount_amount),
       guest_count: t.guest_count,
       discount_guest_count: t.discount_guest_count,
+      discount_base_snapshot: t.discount_base_snapshot === null ? null : Number(t.discount_base_snapshot),
+      discount_rate_snapshot: t.discount_rate_snapshot,
       payment_method: t.payment_method,
       cash_received: t.cash_received,
       change_due: t.change_due,

@@ -8,8 +8,8 @@ if (!testDatabaseUrl) {
 }
 
 const testDatabaseName = new URL(testDatabaseUrl).pathname.slice(1);
-if (!/^katana_sushi_dev_step4_(3|5|6)_/.test(testDatabaseName)) {
-  throw new Error("Dining checkout integration tests only run on a dedicated restored Step 4.3, 4.5, or 4.6 test copy.");
+if (!/^katana_sushi_dev_step4_(3|5|6|senior_pwd)_/.test(testDatabaseName)) {
+  throw new Error("Dining checkout integration tests only run on a dedicated restored Step 4.3, 4.5, 4.6, or senior/PWD test copy.");
 }
 
 process.env.DATABASE_URL = testDatabaseUrl;
@@ -137,8 +137,8 @@ async function createFixture(input: { price?: number; temporary?: boolean } = {}
 
 async function createOrder(
   fixture: Fixture,
-  status: "committed" | "released" | "reserved" | "prepared" | "ready",
-  options: { name?: string; price?: number; quantity?: number; suffix?: string } = {}
+  status: "committed" | "released" | "cancelled" | "reserved" | "prepared" | "ready",
+  options: { name?: string; price?: number; quantity?: number; suffix?: string; orderType?: "ala_carte" | "unlimited" } = {}
 ) {
   const suffix = options.suffix ?? `${testRunKey}-${fixtureSequence}-${status}`;
   const quantity = options.quantity ?? 1;
@@ -149,7 +149,7 @@ async function createOrder(
       idempotency_key: `s43-${suffix}`,
       dining_session_id: fixture.sessionId,
       table_number_snapshot: fixture.tableNumber,
-      order_type: "ala_carte",
+      order_type: options.orderType ?? "ala_carte",
       status,
       created_by: cashier.id,
       items: {
@@ -180,11 +180,21 @@ async function commitOrder(fixture: Fixture, suffix: string, quantity = 2) {
   return JSON.parse(body) as { order: { id: string; items: Array<{ total_price: number }> } };
 }
 
-async function checkout(fixture: Fixture) {
+async function checkout(fixture: Fixture, guestCount = 1, seniorPwdCount = 0) {
   return request(`/api/pos/dining/sessions/${fixture.sessionId}/checkout`, {
     paymentMethod: "cash",
+    guestCount,
+    seniorPwdCount,
     cashReceived: 10000
   });
+}
+
+async function checkoutPreview(fixture: Fixture, guestCount = 1, seniorPwdCount = 0) {
+  return request(
+    `/api/pos/dining/sessions/${fixture.sessionId}/checkout-preview?guestCount=${guestCount}&seniorPwdCount=${seniorPwdCount}`,
+    undefined,
+    "GET"
+  );
 }
 
 async function readStockAndMovements(fixture: Fixture) {
@@ -251,22 +261,28 @@ test("checks out committed orders from saved snapshots without changing stock or
     data: { table_number: savedTableNumber + 50000 }
   });
 
-  const previewResponse = await request(
-    `/api/pos/dining/sessions/${fixture.sessionId}/checkout-preview`,
-    undefined,
-    "GET"
-  );
+  const previewResponse = await checkoutPreview(fixture);
   const previewText = await previewResponse.text();
   assert.equal(previewResponse.status, 200, previewText);
   const preview = JSON.parse(previewText) as {
     table_number: number;
     a_la_carte_lines: Array<{ name: string; unit_price: number; total_price: number }>;
+    discount_base_snapshot: number;
+    discount_rate_snapshot: number;
+    guest_count: number;
+    discounted_guest_count: number;
+    discount_amount: number;
     total: number;
   };
   assert.equal(preview.table_number, savedTableNumber);
   assert.equal(preview.a_la_carte_lines[0].name, savedName);
   assert.equal(preview.a_la_carte_lines[0].unit_price, fixture.price);
   assert.equal(preview.a_la_carte_lines[0].total_price, fixture.price * 2);
+  assert.equal(preview.discount_base_snapshot, fixture.price * 2);
+  assert.equal(preview.discount_rate_snapshot, 0.2);
+  assert.equal(preview.guest_count, 1);
+  assert.equal(preview.discounted_guest_count, 0);
+  assert.equal(preview.discount_amount, 0);
   assert.equal(preview.total, fixture.price * 2);
 
   const response = await checkout(fixture);
@@ -277,6 +293,11 @@ test("checks out committed orders from saved snapshots without changing stock or
     transaction: {
       id: string;
       total: number;
+      discount_amount: number;
+      discount_base_snapshot: number | null;
+      discount_rate_snapshot: number | null;
+      guest_count: number;
+      discount_guest_count: number;
       table_number_snapshot: number | null;
       items: Array<{
         name_snapshot: string | null;
@@ -289,6 +310,11 @@ test("checks out committed orders from saved snapshots without changing stock or
   };
   assert.equal(result.replayed, false);
   assert.equal(result.transaction.total, fixture.price * 2);
+  assert.equal(result.transaction.discount_amount, 0);
+  assert.equal(result.transaction.discount_base_snapshot, fixture.price * 2);
+  assert.equal(result.transaction.discount_rate_snapshot, 0.2);
+  assert.equal(result.transaction.guest_count, 1);
+  assert.equal(result.transaction.discount_guest_count, 0);
   assert.equal(result.transaction.table_number_snapshot, savedTableNumber);
   assert.equal(result.transaction.items.length, 1);
   assert.equal(result.transaction.items[0].name_snapshot, savedName);
@@ -314,12 +340,87 @@ test("checks out committed orders from saved snapshots without changing stock or
   const history = JSON.parse(historyText) as {
     transactions: Array<{
       table_number: number | null;
+      discount_base_snapshot: number | null;
+      discount_rate_snapshot: number | null;
       items: Array<{ name_snapshot?: string | null; selling_product: { name: string } }>;
     }>;
   };
   assert.equal(history.transactions.length, 1);
   assert.equal(history.transactions[0].table_number, savedTableNumber);
+  assert.equal(history.transactions[0].discount_base_snapshot, fixture.price * 2);
+  assert.equal(history.transactions[0].discount_rate_snapshot, 0.2);
   assert.equal(history.transactions[0].items[0].name_snapshot, savedName);
+});
+
+test("applies 20 percent to the table a-la-carte share and excludes cancelled orders", async () => {
+  const fixture = await createFixture({ price: 1000 });
+  await commitOrder(fixture, "senior-pwd-1000", 1);
+  await createOrder(fixture, "cancelled", {
+    name: "Voided legacy a-la-carte line",
+    price: 500,
+    quantity: 1,
+    suffix: `${testRunKey}-voided-line`
+  });
+
+  const previewResponse = await checkoutPreview(fixture, 10, 3);
+  const previewText = await previewResponse.text();
+  assert.equal(previewResponse.status, 200, previewText);
+  const preview = JSON.parse(previewText) as {
+    subtotal: number;
+    discount_base_snapshot: number;
+    discount_rate_snapshot: number;
+    guest_count: number;
+    discounted_guest_count: number;
+    discount_amount: number;
+    total: number;
+    a_la_carte_lines: Array<{ name: string }>;
+  };
+  assert.equal(preview.subtotal, 1000);
+  assert.equal(preview.discount_base_snapshot, 1000);
+  assert.equal(preview.discount_rate_snapshot, 0.2);
+  assert.equal(preview.guest_count, 10);
+  assert.equal(preview.discounted_guest_count, 3);
+  assert.equal(preview.discount_amount, 60);
+  assert.equal(preview.total, 940);
+  assert.equal(preview.a_la_carte_lines.length, 1);
+  assert.notEqual(preview.total, 700);
+
+  const checkoutResponse = await checkout(fixture, 10, 3);
+  const checkoutText = await checkoutResponse.text();
+  assert.equal(checkoutResponse.status, 201, checkoutText);
+  const result = JSON.parse(checkoutText) as {
+    transaction: {
+      subtotal: number;
+      discount_amount: number;
+      discount_base_snapshot: number | null;
+      discount_rate_snapshot: number | null;
+      guest_count: number;
+      discount_guest_count: number;
+      total: number;
+    };
+  };
+  assert.equal(result.transaction.subtotal, 1000);
+  assert.equal(result.transaction.discount_amount, 60);
+  assert.equal(result.transaction.discount_base_snapshot, 1000);
+  assert.equal(result.transaction.discount_rate_snapshot, 0.2);
+  assert.equal(result.transaction.guest_count, 10);
+  assert.equal(result.transaction.discount_guest_count, 3);
+  assert.equal(result.transaction.total, 940);
+});
+
+test("validates bill-time guest counts before preview or checkout", async () => {
+  const fixture = await createFixture();
+  const noGuests = await checkout(fixture, 0, 0);
+  assert.equal(noGuests.status, 400);
+  const tooManySeniors = await checkout(fixture, 2, 3);
+  assert.equal(tooManySeniors.status, 400);
+  const invalidPreview = await request(
+    `/api/pos/dining/sessions/${fixture.sessionId}/checkout-preview?guestCount=2&seniorPwdCount=3`,
+    undefined,
+    "GET"
+  );
+  assert.equal(invalidPreview.status, 400);
+  assert.equal(await prisma.posTransaction.count({ where: { dining_session_id: fixture.sessionId } }), 0);
 });
 
 test("checkout totals committed and legacy released orders from their saved prices", async () => {
@@ -378,20 +479,23 @@ test("checkout includes saved Unlimited beverage add-ons separately from the Unl
   const orderText = await orderResponse.text();
   assert.equal(orderResponse.status, 201, orderText);
 
-  const endResponse = await request(`/api/pos/dining/unlimited-sessions/${packageId}/end`, {});
+  const endResponse = await request(`/api/pos/dining/unlimited-sessions/${packageId}/end`, {
+    leftovers: [{ productId: fixture.productId, quantity: 1 }]
+  });
   const endText = await endResponse.text();
   assert.equal(endResponse.status, 200, endText);
   const settings = await prisma.unlimitedSetting.findFirstOrThrow();
-  const previewResponse = await request(
-    `/api/pos/dining/sessions/${fixture.sessionId}/checkout-preview`,
-    undefined,
-    "GET"
-  );
+  const previewResponse = await checkoutPreview(fixture, 10, 3);
   const previewText = await previewResponse.text();
   assert.equal(previewResponse.status, 200, previewText);
   const preview = JSON.parse(previewText) as {
     unlimited_order_lines: Array<{ name: string; quantity: number; unit_price: number; total_price: number }>;
     unlimited_amount: number;
+    leftover_amount: number;
+    discount_base_snapshot: number;
+    discount_rate_snapshot: number;
+    discounted_guest_count: number;
+    discount_amount: number;
     subtotal: number;
   };
   assert.deepEqual(preview.unlimited_order_lines.map((line) => ({
@@ -406,10 +510,15 @@ test("checkout includes saved Unlimited beverage add-ons separately from the Unl
     total_price: fixture.price * 2
   }]);
   assert.equal(preview.unlimited_amount, 2 * Number(settings.price_per_person));
-  assert.equal(preview.subtotal, 2 * fixture.price + preview.unlimited_amount);
+  assert.equal(preview.leftover_amount, fixture.price * Number(settings.leftover_charge_percent) / 100);
+  assert.equal(preview.discount_base_snapshot, 0);
+  assert.equal(preview.discount_rate_snapshot, 0.2);
+  assert.equal(preview.discounted_guest_count, 3);
+  assert.equal(preview.discount_amount, 0);
+  assert.equal(preview.subtotal, 2 * fixture.price + preview.unlimited_amount + preview.leftover_amount);
 
   const stockAndMovementsBeforeCheckout = await readStockAndMovements(fixture);
-  const checkoutResponse = await checkout(fixture);
+  const checkoutResponse = await checkout(fixture, 10, 3);
   const checkoutText = await checkoutResponse.text();
   assert.equal(checkoutResponse.status, 201, checkoutText);
   const checkoutResult = JSON.parse(checkoutText) as {

@@ -15,10 +15,12 @@ import {
 } from "../services/tableManagement.service";
 import { roleGuard, ROLES } from "../middleware/roleGuard";
 import { isDineInReservationLateAlert } from "../config/reservationSettings";
+import { SENIOR_PWD_DISCOUNT_RATE } from "../config/seniorPwdSettings";
 import {
   getProductCartCompatibility,
   type DiningCartType
 } from "../services/productCartCompatibility.service";
+import { calculateSeniorPwdDiscount } from "../services/seniorPwdDiscount.service";
 import {
   consumeMaterialStock,
   inventoryUnitsMatch,
@@ -33,6 +35,28 @@ const COMMITTED_ORDER_STATUS_CHECK =
   "CHECK ((status = ANY (ARRAY['reserved'::text, 'prepared'::text, 'ready'::text, 'released'::text, 'cancelled'::text, 'committed'::text])))";
 const COMMITTED_ORDER_STATUS_CACHE_MS = 5000;
 const money = (amount: number) => Number(amount.toFixed(2));
+const checkoutHeadcountFields = {
+  guestCount: z.coerce.number().int().min(1).max(1000),
+  seniorPwdCount: z.coerce.number().int().min(0).max(1000)
+};
+function refineCheckoutHeadcount(
+  value: { guestCount: number; seniorPwdCount: number },
+  context: z.RefinementCtx
+) {
+  if (value.seniorPwdCount > value.guestCount) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["seniorPwdCount"],
+      message: "Senior/PWD count cannot exceed total guests."
+    });
+  }
+}
+const checkoutHeadcountSchema = z.object(checkoutHeadcountFields).superRefine(refineCheckoutHeadcount);
+const checkoutBodySchema = z.object({
+  ...checkoutHeadcountFields,
+  paymentMethod: z.enum(["cash", "gcash", "bank_transfer"]),
+  cashReceived: z.coerce.number().nonnegative().optional()
+}).superRefine(refineCheckoutHeadcount);
 type AuthenticatedRequest = Request & { user?: { sub: string } };
 let committedOrderStatusCache: { allowed: boolean; expiresAt: number } | null = null;
 
@@ -252,7 +276,10 @@ async function findInventoryNeeds(
   return Array.from(needs.values()).sort((a, b) => a.raw_material_id.localeCompare(b.raw_material_id));
 }
 
-async function buildCheckout(session: NonNullable<Awaited<ReturnType<typeof getDiningSession>>>) {
+async function buildCheckout(
+  session: NonNullable<Awaited<ReturnType<typeof getDiningSession>>>,
+  headcount: { guestCount: number; seniorPwdCount: number }
+) {
   const unfinishedOrders = session.orders.filter((order) =>
     !["committed", "released", "cancelled"].includes(order.status)
   );
@@ -297,10 +324,15 @@ async function buildCheckout(session: NonNullable<Awaited<ReturnType<typeof getD
   );
   const leftoverAmount = leftoverLines.reduce((total, item) => total + item.total, 0);
   const subtotal = money(aLaCarteAmount + unlimitedOrderAmount + unlimitedAmount + leftoverAmount);
-  const guestCount = session.guests.length;
-  const discountedGuestCount = session.guests.filter((guest) => guest.discount_type !== "none").length;
-  const perGuestShare = guestCount > 0 ? money(subtotal / guestCount) : 0;
-  const discountAmount = money(perGuestShare * discountedGuestCount);
+  const discount = calculateSeniorPwdDiscount({
+    aLaCarteTotal: money(aLaCarteAmount),
+    guestCount: headcount.guestCount,
+    seniorPwdCount: headcount.seniorPwdCount,
+    discountRate: SENIOR_PWD_DISCOUNT_RATE
+  });
+  const guestCount = discount.guestCount;
+  const discountedGuestCount = discount.seniorPwdCount;
+  const discountAmount = discount.discountAmount;
   const total = money(Math.max(0, subtotal - discountAmount));
 
   return {
@@ -315,7 +347,8 @@ async function buildCheckout(session: NonNullable<Awaited<ReturnType<typeof getD
     subtotal,
     guestCount,
     discountedGuestCount,
-    perGuestShare,
+    discountBaseSnapshot: discount.discountBase,
+    discountRateSnapshot: discount.discountRate,
     discountAmount,
     total
   };
@@ -1480,11 +1513,12 @@ router.get(
   "/api/pos/dining/sessions/:id/checkout-preview",
   roleGuard(["admin", "cashier"]),
   asyncRoute(async (req, res) => {
+    const headcount = checkoutHeadcountSchema.parse(req.query);
     const session = await getDiningSession(prisma, z.string().min(1).parse(req.params.id));
     if (!session || session.status !== "active") {
       throw new InventoryError("Active dining session not found.", "SESSION_NOT_FOUND", 404);
     }
-    const totals = await buildCheckout(session);
+    const totals = await buildCheckout(session, headcount);
     return res.json({
       session_id: session.id,
       table_number: getCommittedTableNumberSnapshot(session) ?? session.table.table_number,
@@ -1512,8 +1546,9 @@ router.get(
       subtotal: totals.subtotal,
       unlimited_amount: totals.unlimitedAmount,
       leftover_amount: totals.leftoverAmount,
+      discount_base_snapshot: totals.discountBaseSnapshot,
+      discount_rate_snapshot: totals.discountRateSnapshot,
       discounted_guest_count: totals.discountedGuestCount,
-      per_guest_share: totals.perGuestShare,
       discount_amount: totals.discountAmount,
       total: totals.total
     });
@@ -1524,10 +1559,7 @@ router.post(
   "/api/pos/dining/sessions/:id/checkout",
   roleGuard(["admin", "cashier"]),
   asyncRoute(async (req, res) => {
-    const body = z.object({
-      paymentMethod: z.enum(["cash", "gcash", "bank_transfer"]),
-      cashReceived: z.coerce.number().nonnegative().optional()
-    }).parse(req.body);
+    const body = checkoutBodySchema.parse(req.body);
     const sessionId = z.string().min(1).parse(req.params.id);
     const cashierId = actorId(req);
     const transactionNumber = makeReference("POS");
@@ -1552,7 +1584,7 @@ router.post(
       if (!session || session.status !== "active") {
         throw new InventoryError("Active dining session not found.", "SESSION_NOT_FOUND", 404);
       }
-      const totals = await buildCheckout(session);
+      const totals = await buildCheckout(session, body);
       if (body.paymentMethod === "cash" && Number(body.cashReceived ?? 0) < totals.total) {
         throw new InventoryError("Cash received must be at least the amount due.", "INSUFFICIENT_CASH", 400);
       }
@@ -1569,6 +1601,8 @@ router.post(
           unlimited_amount: totals.unlimitedAmount,
           leftover_amount: totals.leftoverAmount,
           discount_amount: totals.discountAmount,
+          discount_base_snapshot: totals.discountBaseSnapshot,
+          discount_rate_snapshot: totals.discountRateSnapshot,
           guest_count: totals.guestCount,
           discount_guest_count: totals.discountedGuestCount,
           total: totals.total,

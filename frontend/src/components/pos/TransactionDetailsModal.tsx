@@ -17,6 +17,8 @@ export type PosHistoryTransaction = {
   discount_amount?: number;
   guest_count?: number;
   discount_guest_count?: number;
+  discount_base_snapshot?: number | null;
+  discount_rate_snapshot?: number | null;
   payment_method: string;
   cash_received?: number | null;
   change_due?: number | null;
@@ -116,7 +118,14 @@ export default function TransactionDetailsModal({
             <Line label="Tax" value={transaction.tax} />
             {transaction.discount_amount ? (
               <Line
-                label={`${transaction.discount_guest_count ?? 0} discounted guest(s) × ${money(transaction.guest_count ? transaction.subtotal / transaction.guest_count : 0)} per-guest share`}
+                label={
+                  transaction.discount_base_snapshot !== null
+                    && transaction.discount_base_snapshot !== undefined
+                    && transaction.discount_rate_snapshot !== null
+                    && transaction.discount_rate_snapshot !== undefined
+                    ? `Senior/PWD discount (${transaction.discount_guest_count ?? 0} of ${transaction.guest_count ?? 0} guests; ${transaction.discount_rate_snapshot * 100}% of ${money(transaction.discount_base_snapshot)} a-la-carte total)`
+                    : "Senior/PWD discount"
+                }
                 value={-transaction.discount_amount}
               />
             ) : null}

@@ -85,7 +85,7 @@ async function openDiningService(
       await route.fulfill({ json: {
         session_id: "session-1",
         table_number: 4,
-        guest_count: 0,
+        guest_count: 10,
         a_la_carte_lines: [{
           name: "California Roll",
           guest_number: null,
@@ -99,10 +99,11 @@ async function openDiningService(
         subtotal: 200,
         unlimited_amount: 0,
         leftover_amount: 0,
-        discounted_guest_count: 0,
-        per_guest_share: 0,
-        discount_amount: 0,
-        total: 200
+        discount_base_snapshot: 200,
+        discount_rate_snapshot: 0.2,
+        discounted_guest_count: 3,
+        discount_amount: 12,
+        total: 188
       } });
       return;
     }
@@ -271,8 +272,67 @@ test("shows guestless a-la-carte lines in checkout without a guest label", async
     await route.fulfill({ json: orderResponse, status: 201 });
   });
   await page.getByRole("button", { name: "Review bill" }).click();
+  await page.getByLabel("Total guests at this table").fill("10");
+  await page.getByLabel("Senior/PWD guests").fill("3");
   await expect(page.getByText("2 × California Roll")).toBeVisible();
   await expect(page.getByText(/Guest null/)).toHaveCount(0);
+  await expect(page.getByText(/Senior\/PWD discount \(3 of 10 guests; 20% of PHP 200.00 a-la-carte total\)/)).toBeVisible();
+});
+
+test("receipt uses saved a-la-carte base and rate instead of the whole-subtotal share", async ({ page }) => {
+  let submittedCheckout: Record<string, unknown> | undefined;
+  await openDiningService(page, async (route) => {
+    await route.fulfill({ json: orderResponse, status: 201 });
+  });
+  await page.route("**/api/pos/dining/sessions/session-1/checkout", async (route) => {
+    submittedCheckout = route.request().postDataJSON() as Record<string, unknown>;
+    await route.fulfill({ status: 201, json: {
+      replayed: false,
+      transaction: {
+        transaction_number: "POS-SENIOR-001",
+        subtotal: 200,
+        tax: 0,
+        unlimited_amount: 0,
+        leftover_amount: 0,
+        discount_amount: 12,
+        discount_base_snapshot: 200,
+        discount_rate_snapshot: 0.2,
+        guest_count: 10,
+        discount_guest_count: 3,
+        total: 188,
+        payment_method: "cash",
+        cash_received: 200,
+        change_due: 12,
+        created_at: "2026-10-19T12:00:00.000Z",
+        table_number_snapshot: 4,
+        items: [{
+          quantity: 2,
+          unit_price: 100,
+          total_price: 200,
+          name_snapshot: "California Roll",
+          selling_product: { name: "California Roll" }
+        }],
+        charges: [],
+        dining_session: { table: { table_number: 4 } }
+      }
+    } });
+  });
+
+  await page.getByRole("button", { name: "Review bill" }).click();
+  await page.getByLabel("Total guests at this table").fill("10");
+  await page.getByLabel("Senior/PWD guests").fill("3");
+  await page.getByLabel("Cash received").fill("200");
+  await expect(page.getByRole("button", { name: "Complete checkout" })).toBeEnabled();
+  await page.getByRole("button", { name: "Complete checkout" }).click();
+  await expect(page.getByText("Checkout complete")).toBeVisible();
+
+  const receiptPromise = page.waitForEvent("popup");
+  await page.getByRole("button", { name: "Print receipt" }).click();
+  const receipt = await receiptPromise;
+  await expect(receipt.locator("body")).toContainText("3 of 10 guests; 20% of PHP 200.00 a-la-carte total");
+  await expect(receipt.locator("body")).toContainText("−PHP 12.00");
+  await expect(receipt.locator("body")).not.toContainText("per-guest share");
+  expect(submittedCheckout).toMatchObject({ guestCount: 10, seniorPwdCount: 3 });
 });
 
 test("offers conversion when the a-la-carte cart has included items and preserves them in Unlimited", async ({ page }) => {

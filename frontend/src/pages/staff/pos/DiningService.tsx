@@ -10,7 +10,6 @@ import { useToast } from "../../../hooks/useToast";
 type Guest = {
   id: string;
   guest_number: number;
-  discount_type: "none" | "senior" | "pwd";
 };
 
 type TicketItem = {
@@ -129,8 +128,9 @@ type CheckoutPreview = {
   subtotal: number;
   unlimited_amount: number;
   leftover_amount: number;
+  discount_base_snapshot: number;
+  discount_rate_snapshot: number;
   discounted_guest_count: number;
-  per_guest_share: number;
   discount_amount: number;
   total: number;
 };
@@ -142,6 +142,8 @@ type CheckoutTransaction = {
   unlimited_amount: number;
   leftover_amount: number;
   discount_amount: number;
+  discount_base_snapshot: number | null;
+  discount_rate_snapshot: number | null;
   guest_count: number;
   discount_guest_count: number;
   total: number;
@@ -279,6 +281,8 @@ export default function DiningService({ mode = "service" }: Props) {
   const [leftoverProductId, setLeftoverProductId] = useState("");
   const [leftoverQuantity, setLeftoverQuantity] = useState(0);
   const [cashReceived, setCashReceived] = useState("");
+  const [checkoutGuestCount, setCheckoutGuestCount] = useState("");
+  const [checkoutSeniorPwdCount, setCheckoutSeniorPwdCount] = useState("0");
   const [paymentMethod, setPaymentMethod] = useState<"cash" | "gcash" | "bank_transfer">("cash");
   const [showCheckout, setShowCheckout] = useState(false);
   const [manageTablesOpen, setManageTablesOpen] = useState(false);
@@ -344,6 +348,15 @@ export default function DiningService({ mode = "service" }: Props) {
   const lastCommittedOrder = lastCommittedOrderQuery.data ?? null;
   const session = sessionsQuery.data?.find((item) => item.id === selectedSessionId) ?? null;
   const activeUnlimited = session?.unlimited_sessions.find((item) => item.status === "active") ?? null;
+  const checkoutGuestCountValue = Number(checkoutGuestCount);
+  const checkoutSeniorPwdCountValue = Number(checkoutSeniorPwdCount);
+  const checkoutHeadcountValid = checkoutGuestCount.trim() !== ""
+    && checkoutSeniorPwdCount.trim() !== ""
+    && Number.isInteger(checkoutGuestCountValue)
+    && checkoutGuestCountValue >= 1
+    && Number.isInteger(checkoutSeniorPwdCountValue)
+    && checkoutSeniorPwdCountValue >= 0
+    && checkoutSeniorPwdCountValue <= checkoutGuestCountValue;
   const seatedTables = (tablesQuery.data ?? []).filter((table) =>
     Boolean(table.active_session?.guests.length) &&
     !table.linked_to_table_id &&
@@ -432,10 +445,17 @@ export default function DiningService({ mode = "service" }: Props) {
     }
   });
   const checkoutPreviewQuery = useQuery({
-    queryKey: ["pos", "dining", "checkout-preview", selectedSessionId],
-    queryFn: async () =>
-      (await api.get<CheckoutPreview>(`/api/pos/dining/sessions/${selectedSessionId}/checkout-preview`)).data,
-    enabled: !kitchenOnly && Boolean(selectedSessionId) && showCheckout,
+    queryKey: ["pos", "dining", "checkout-preview", selectedSessionId, checkoutGuestCount, checkoutSeniorPwdCount],
+    queryFn: async () => {
+      const query = new URLSearchParams({
+        guestCount: checkoutGuestCount,
+        seniorPwdCount: checkoutSeniorPwdCount
+      });
+      return (await api.get<CheckoutPreview>(
+        `/api/pos/dining/sessions/${selectedSessionId}/checkout-preview?${query.toString()}`
+      )).data;
+    },
+    enabled: !kitchenOnly && Boolean(selectedSessionId) && showCheckout && checkoutHeadcountValid,
     refetchInterval: 10000,
     retry: false
   });
@@ -533,6 +553,8 @@ export default function DiningService({ mode = "service" }: Props) {
     setProductId("");
     setQuantity(1);
     setOrderType("ala_carte");
+    setCheckoutGuestCount("");
+    setCheckoutSeniorPwdCount("0");
   }
 
   function canConvertDraftToUnlimited(items: DraftItem[]) {
@@ -972,25 +994,12 @@ export default function DiningService({ mode = "service" }: Props) {
                     <div>
                       <p className="text-sm font-bold uppercase text-red-700">Active dining session</p>
                       <h2 className="text-2xl font-black">Table {session.table.table_number}</h2>
-                      <p className="text-sm text-slate-500">{session.guests.length} guests · session {session.id.slice(-8)}</p>
+                      <p className="text-sm text-slate-500">{session.guests.length} recorded guest record(s) · session {session.id.slice(-8)}</p>
                     </div>
                   </div>
-                  <div className="mt-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-                    {session.guests.map((guest) => (
-                      <label key={guest.id} className="grid gap-1 rounded border border-slate-200 p-2 text-sm">
-                        <span className="font-bold">Guest {guest.guest_number}</span>
-                        <select
-                          className="h-9 rounded border border-slate-300 px-2"
-                          value={guest.discount_type}
-                          onChange={(event) => runAction("patch", `/api/pos/dining/sessions/${session.id}/guests/${guest.id}`, { discountType: event.target.value })}
-                        >
-                          <option value="none">No discount</option>
-                          <option value="senior">Senior</option>
-                          <option value="pwd">PWD</option>
-                        </select>
-                      </label>
-                    ))}
-                  </div>
+                  <p className="mt-3 text-sm text-slate-600">
+                    Guest records remain available for legacy order attribution. Enter the actual headcount at bill-out.
+                  </p>
                 </section>
 
                 <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
@@ -1163,6 +1172,41 @@ export default function DiningService({ mode = "service" }: Props) {
                       <h2 className="text-lg font-bold">Table bill</h2>
                       <button className="text-sm font-semibold text-slate-600 underline" onClick={() => setShowCheckout(false)}>Close</button>
                     </div>
+                    <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                      <label className="grid gap-1 text-sm font-semibold">
+                        Total guests at this table
+                        <input
+                          aria-label="Total guests at this table"
+                          className="h-10 rounded border border-slate-300 px-3"
+                          type="number"
+                          min="1"
+                          step="1"
+                          value={checkoutGuestCount}
+                          onChange={(event) => setCheckoutGuestCount(event.target.value)}
+                        />
+                      </label>
+                      <label className="grid gap-1 text-sm font-semibold">
+                        Senior/PWD guests
+                        <input
+                          aria-label="Senior/PWD guests"
+                          className="h-10 rounded border border-slate-300 px-3"
+                          type="number"
+                          min="0"
+                          max={checkoutHeadcountValid ? checkoutGuestCountValue : undefined}
+                          step="1"
+                          value={checkoutSeniorPwdCount}
+                          onChange={(event) => setCheckoutSeniorPwdCount(event.target.value)}
+                        />
+                      </label>
+                    </div>
+                    <p className="mt-2 text-xs text-slate-600">
+                      The configured Senior/PWD discount is calculated only from a-la-carte orders and uses the total guests entered here. Unlimited charges are excluded.
+                    </p>
+                    {!checkoutHeadcountValid && (
+                      <p className="mt-2 text-sm text-amber-800" role="status">
+                        Enter at least 1 total guest and no more senior/PWD guests than the total.
+                      </p>
+                    )}
                     {checkoutPreviewQuery.isLoading && <p className="py-4 text-sm text-slate-500">Checking kitchen and package status...</p>}
                     {checkoutPreviewQuery.isError && <p className="py-3 text-sm text-red-700">{errorMessage(checkoutPreviewQuery.error)}</p>}
                     {checkoutPreviewQuery.data && <CheckoutBill
@@ -1174,6 +1218,8 @@ export default function DiningService({ mode = "service" }: Props) {
                       pending={runMutation.isPending}
                       onPay={() => runAction("post", `/api/pos/dining/sessions/${session.id}/checkout`, {
                         paymentMethod,
+                        guestCount: checkoutGuestCountValue,
+                        seniorPwdCount: checkoutSeniorPwdCountValue,
                         cashReceived: paymentMethod === "cash" ? Number(cashReceived || 0) : undefined
                       })}
                     />}
@@ -1410,7 +1456,10 @@ function CheckoutBill({
       {preview.leftover_lines.map((line, index) => <BillLine key={`leftover-${index}`} label={`${line.name} · ${line.quantity}`} amount={line.total} />)}
       <div className="border-t border-dashed border-slate-300 pt-2">
         <BillLine label="Subtotal (tax not applied)" amount={preview.subtotal} />
-        <BillLine label={`${preview.discounted_guest_count} discounted guest(s) × ${money(preview.per_guest_share)} per-guest share`} amount={-preview.discount_amount} />
+        <BillLine
+          label={`Senior/PWD discount (${preview.discounted_guest_count} of ${preview.guest_count} guests; ${preview.discount_rate_snapshot * 100}% of ${money(preview.discount_base_snapshot)} a-la-carte total)`}
+          amount={-preview.discount_amount}
+        />
         <BillLine label="Amount due" amount={preview.total} strong />
       </div>
       <label className="grid gap-1 pt-2 font-semibold">
@@ -1477,7 +1526,7 @@ function printCheckoutReceipt(transaction: CheckoutTransaction) {
       <div class="line"></div>
       <p class="right">Subtotal: ${money(transaction.subtotal)}</p>
       ${transaction.tax > 0 ? `<p class="right">Tax: ${money(transaction.tax)}</p>` : ""}
-      ${transaction.discount_amount > 0 ? `<p class="right">${transaction.discount_guest_count} discounted guest(s) × ${money(transaction.guest_count ? transaction.subtotal / transaction.guest_count : 0)} per-guest share: −${money(transaction.discount_amount)}</p>` : ""}
+      ${transaction.discount_amount > 0 ? `<p class="right">Senior/PWD discount (${transaction.discount_guest_count} of ${transaction.guest_count} guests${transaction.discount_base_snapshot === null || transaction.discount_rate_snapshot === null ? "" : `; ${transaction.discount_rate_snapshot * 100}% of ${money(transaction.discount_base_snapshot)} a-la-carte total`}): −${money(transaction.discount_amount)}</p>` : ""}
       <p class="right total">Total: ${money(transaction.total)}</p>
       ${transaction.cash_received === null ? "" : `<p class="right">Cash received: ${money(transaction.cash_received)}</p>`}
       ${transaction.change_due === null ? "" : `<p class="right">Change: ${money(transaction.change_due)}</p>`}
