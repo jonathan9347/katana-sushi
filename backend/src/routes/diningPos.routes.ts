@@ -384,6 +384,23 @@ router.get(
 );
 
 router.get(
+  "/api/pos/dining/history-tables",
+  roleGuard(["admin", "cashier"]),
+  asyncRoute(async (_req, res) => {
+    const tables = await prisma.table.findMany({
+      orderBy: [{ table_number: "asc" }, { id: "asc" }],
+      select: {
+        id: true,
+        table_number: true,
+        is_archived: true,
+        is_temporary: true
+      }
+    });
+    return res.json({ tables });
+  })
+);
+
+router.get(
   "/api/pos/dining/upcoming-reservations",
   roleGuard(["admin", "cashier"]),
   asyncRoute(async (_req, res) => {
@@ -1589,12 +1606,26 @@ router.post(
         throw new InventoryError("Cash received must be at least the amount due.", "INSUFFICIENT_CASH", 400);
       }
       const received = body.paymentMethod === "cash" ? Number(body.cashReceived ?? 0) : null;
+      const tableHistory = await tx.diningTableSession.findUniqueOrThrow({
+        where: { id: session.id },
+        select: {
+          table_id: true,
+          table: { select: { linked_tables: { select: { id: true } } } },
+          table_combination: { select: { members: { select: { table_id: true } } } }
+        }
+      });
+      const tableIdsSnapshot = Array.from(new Set([
+        tableHistory.table_id,
+        ...tableHistory.table.linked_tables.map((table) => table.id),
+        ...(tableHistory.table_combination?.members.map((member) => member.table_id) ?? [])
+      ]));
       const transaction = await tx.posTransaction.create({
         data: {
           transaction_number: transactionNumber,
           customer_name: null,
           dining_session_id: session.id,
           table_number_snapshot: getCommittedTableNumberSnapshot(session),
+          table_ids_snapshot: tableIdsSnapshot,
           transaction_type: "dine_in",
           subtotal: totals.subtotal,
           tax: 0,

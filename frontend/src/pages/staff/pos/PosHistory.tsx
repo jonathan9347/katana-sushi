@@ -20,6 +20,13 @@ type PosSummary = {
   byPayment: Record<string, { count: number; total: number }>;
 };
 
+type HistoryTable = {
+  id: string;
+  table_number: number;
+  is_archived: boolean;
+  is_temporary: boolean;
+};
+
 const posTabs: Array<SectionNavTab> = [
   { id: "new-sale", label: "Takeout Sale", icon: <ShoppingCart className="h-4 w-4" />, to: "/staff/pos", end: true },
   { id: "dining", label: "Table Service", icon: <Table2 className="h-4 w-4" />, to: "/staff/pos/dining" },
@@ -65,6 +72,7 @@ export default function PosHistory() {
   const [to, setTo] = useState("");
   const [paymentMethod, setPaymentMethod] = useState("");
   const [transactionType, setTransactionType] = useState("");
+  const [tableId, setTableId] = useState("");
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
   const [exporting, setExporting] = useState(false);
@@ -75,8 +83,17 @@ export default function PosHistory() {
   const queryClient = useQueryClient();
   const { toast } = useToast();
 
+  const tablesQuery = useQuery({
+    queryKey: ["pos", "transactions", "history-tables"],
+    queryFn: async () => {
+      const response = await api.get<{ tables: HistoryTable[] }>("/api/pos/dining/history-tables");
+      return response.data.tables;
+    },
+    enabled: allowed
+  });
+
   const transactionsQuery = useQuery({
-    queryKey: ["pos", "transactions", from, to, paymentMethod, transactionType, search, page],
+    queryKey: ["pos", "transactions", from, to, paymentMethod, transactionType, tableId, search, page],
     queryFn: async () => {
       const response = await api.get<{
         transactions: PosHistoryTransaction[];
@@ -87,6 +104,7 @@ export default function PosHistory() {
           to: to || undefined,
           payment_method: paymentMethod || undefined,
           transaction_type: transactionType || undefined,
+          table_id: tableId || undefined,
           search: search || undefined,
           page,
           limit: 100
@@ -130,6 +148,7 @@ export default function PosHistory() {
             to: to || undefined,
             payment_method: paymentMethod || undefined,
             transaction_type: transactionType || undefined,
+            table_id: tableId || undefined,
             search: search || undefined,
             page: nextPage,
             limit: 100
@@ -194,7 +213,12 @@ export default function PosHistory() {
                 <CardTitle>Filters</CardTitle>
               </CardHeader>
               <CardContent>
-                <div className="grid gap-3 md:grid-cols-5">
+                {tablesQuery.isError && (
+                  <p className="mb-3 text-sm text-red-700" role="alert">
+                    Unable to load tables for history filtering.
+                  </p>
+                )}
+                <div className="grid gap-3 md:grid-cols-6">
               <input aria-label="From date" className="h-10 rounded-md border border-slate-300 px-3 text-sm" type="date" value={from} onChange={(event) => { setFrom(event.target.value); setPage(1); }} />
               <input aria-label="To date" className="h-10 rounded-md border border-slate-300 px-3 text-sm" type="date" value={to} onChange={(event) => { setTo(event.target.value); setPage(1); }} />
               <Select value={paymentMethod} onChange={(event) => { setPaymentMethod(event.target.value); setPage(1); }}>
@@ -214,6 +238,16 @@ export default function PosHistory() {
                 <option value="catering_deposit">Catering Deposit</option>
                 <option value="catering_balance">Catering Balance</option>
                 <option value="catering_prepaid">Catering Prepaid</option>
+              </Select>
+              <Select aria-label="Table" value={tableId} onChange={(event) => { setTableId(event.target.value); setPage(1); }}>
+                <option value="">All tables</option>
+                {(tablesQuery.data ?? []).map((table) => (
+                  <option key={table.id} value={table.id}>
+                    Table {table.table_number}
+                    {table.is_temporary ? " (temporary)" : ""}
+                    {table.is_archived ? " (archived)" : ""}
+                  </option>
+                ))}
               </Select>
 
               <input

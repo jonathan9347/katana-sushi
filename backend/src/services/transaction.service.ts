@@ -110,6 +110,7 @@ export async function getUnifiedTransactions(params: {
   from?: string;
   to?: string;
   search?: string;
+  tableId?: string;
   cashierId?: string;
   paymentMethod?: string;
   transactionType?: string;
@@ -131,6 +132,7 @@ export async function getUnifiedTransactions(params: {
     from,
     to,
     search = "",
+    tableId,
     cashierId,
     paymentMethod,
     transactionType,
@@ -277,9 +279,22 @@ export async function getUnifiedTransactions(params: {
   ]);
 
   const unified: UnifiedTransaction[] = [];
+  const tableScopedTransactionIds = new Set<string>();
 
   // POS walk-in sales
   for (const t of posTransactions) {
+    if (tableId) {
+      const snapshot = t.table_ids_snapshot;
+      const snapshotIds = Array.isArray(snapshot)
+        ? snapshot.filter((id): id is string => typeof id === "string")
+        : null;
+      const matchesTable = snapshotIds
+        ? snapshotIds.includes(tableId)
+        : snapshot === null && t.dining_session?.table.id === tableId;
+      if (!matchesTable) continue;
+      tableScopedTransactionIds.add(t.id);
+    }
+
     const transactionType: UnifiedTransaction["transaction_type"] =
       t.transaction_type === "takeout" ? "takeout" : t.transaction_type === "unlimited" ? "unlimited" : "dine_in";
 
@@ -576,7 +591,8 @@ export async function getUnifiedTransactions(params: {
 
   const normalized = unified.filter((transaction) =>
     (!paymentMethod || transaction.payment_method === paymentMethod) &&
-    (!createdAt || isInDateRange(transaction.created_at, createdAt))
+    (!createdAt || isInDateRange(transaction.created_at, createdAt)) &&
+    (!tableId || tableScopedTransactionIds.has(transaction.id))
   );
 
   normalized.sort((a, b) => b.created_at.getTime() - a.created_at.getTime());

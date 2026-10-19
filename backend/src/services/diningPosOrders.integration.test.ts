@@ -449,10 +449,16 @@ test("takeout checkout deducts ingredient stock once when the sale is created", 
       transaction_number: string;
       transaction_type: string;
       dining_session_id?: string | null;
+      table_ids_snapshot?: string[] | null;
     };
   };
   assert.equal(result.transaction.transaction_type, "takeout");
   assert.equal(result.transaction.dining_session_id ?? null, null);
+  assert.equal(result.transaction.table_ids_snapshot, null);
+  assert.equal((await prisma.posTransaction.findUniqueOrThrow({
+    where: { id: result.transaction.id },
+    select: { table_ids_snapshot: true }
+  })).table_ids_snapshot, null);
   assert.deepEqual(await readStock(fixture), {
     onHand: stockBefore.onHand - 4,
     batchRemaining: stockBefore.batchRemaining - 4

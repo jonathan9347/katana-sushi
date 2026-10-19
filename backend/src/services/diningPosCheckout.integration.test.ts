@@ -652,6 +652,142 @@ test("checkout frees linked tables and archives a temporary table", async () => 
   })).status, "closed");
 });
 
+test("table history finds a combined-table sale by a secondary table after checkout unlinks it", async () => {
+  const fixture = await createFixture();
+  const maxTableNumber = await prisma.table.aggregate({ _max: { table_number: true } });
+  const secondaryTable = await prisma.table.create({
+    data: {
+      table_number: (maxTableNumber._max.table_number ?? 0) + 1,
+      capacity: 2,
+      status: "unavailable",
+      linked_to_table_id: fixture.tableId,
+      unavailable_reason: "Linked to active table",
+      is_archived: false
+    }
+  });
+  const combination = await prisma.tableCombination.create({
+    data: {
+      name: `Step 4.6 history ${testRunKey}-${fixtureSequence}`,
+      members: {
+        create: [
+          { table_id: fixture.tableId, order_index: 0 },
+          { table_id: secondaryTable.id, order_index: 1 }
+        ]
+      }
+    }
+  });
+  await prisma.diningTableSession.update({
+    where: { id: fixture.sessionId },
+    data: { table_combination_id: combination.id }
+  });
+  await createOrder(fixture, "committed", {
+    suffix: `${testRunKey}-combined-table-history`
+  });
+
+  const checkoutResponse = await checkout(fixture);
+  const checkoutText = await checkoutResponse.text();
+  assert.equal(checkoutResponse.status, 201, checkoutText);
+  const checkoutResult = JSON.parse(checkoutText) as {
+    transaction: { id: string; transaction_number: string; table_ids_snapshot: string[] };
+  };
+  assert.deepEqual(
+    checkoutResult.transaction.table_ids_snapshot.sort(),
+    [fixture.tableId, secondaryTable.id].sort()
+  );
+  assert.equal((await prisma.table.findUniqueOrThrow({ where: { id: secondaryTable.id } })).linked_to_table_id, null);
+
+  await prisma.table.update({
+    where: { id: secondaryTable.id },
+    data: { table_number: secondaryTable.table_number + 50000 }
+  });
+  const historyResponse = await request(
+    `/api/pos/transactions/unified?transaction_type=dine_in&table_id=${encodeURIComponent(secondaryTable.id)}&search=${encodeURIComponent(checkoutResult.transaction.transaction_number)}`,
+    undefined,
+    "GET"
+  );
+  const historyText = await historyResponse.text();
+  assert.equal(historyResponse.status, 200, historyText);
+  const history = JSON.parse(historyText) as {
+    transactions: Array<{ id: string; transaction_number: string }>;
+  };
+  assert.deepEqual(history.transactions.map((transaction) => transaction.id), [checkoutResult.transaction.id]);
+});
+
+test("table history finds archived temporary-table sales by their saved stable ID", async () => {
+  const fixture = await createFixture({ temporary: true });
+  await createOrder(fixture, "committed", { suffix: `${testRunKey}-temporary-table-history` });
+  const checkoutResponse = await checkout(fixture);
+  const checkoutText = await checkoutResponse.text();
+  assert.equal(checkoutResponse.status, 201, checkoutText);
+  const checkoutResult = JSON.parse(checkoutText) as {
+    transaction: { id: string; transaction_number: string; table_ids_snapshot: string[] };
+  };
+  assert.deepEqual(checkoutResult.transaction.table_ids_snapshot, [fixture.tableId]);
+  const archivedTable = await prisma.table.findUniqueOrThrow({ where: { id: fixture.tableId } });
+  assert.equal(archivedTable.is_archived, true);
+
+  const tablesResponse = await request("/api/pos/dining/history-tables", undefined, "GET");
+  const tablesText = await tablesResponse.text();
+  assert.equal(tablesResponse.status, 200, tablesText);
+  const tables = JSON.parse(tablesText) as {
+    tables: Array<{ id: string; is_archived: boolean; is_temporary: boolean }>;
+  };
+  assert.ok(tables.tables.some((table) =>
+    table.id === fixture.tableId && table.is_archived && table.is_temporary
+  ));
+
+  const historyResponse = await request(
+    `/api/pos/transactions/unified?table_id=${encodeURIComponent(fixture.tableId)}&search=${encodeURIComponent(checkoutResult.transaction.transaction_number)}`,
+    undefined,
+    "GET"
+  );
+  const historyText = await historyResponse.text();
+  assert.equal(historyResponse.status, 200, historyText);
+  const history = JSON.parse(historyText) as { transactions: Array<{ id: string }> };
+  assert.deepEqual(history.transactions.map((transaction) => transaction.id), [checkoutResult.transaction.id]);
+});
+
+test("legacy history falls back to the dining session table when the snapshot is null", async () => {
+  const fixture = await createFixture();
+  const transaction = await prisma.posTransaction.create({
+    data: {
+      transaction_number: `LEGACY-${testRunKey}-${fixtureSequence}`,
+      customer_name: null,
+      dining_session_id: fixture.sessionId,
+      table_number_snapshot: null,
+      transaction_type: "dine_in",
+      subtotal: fixture.price,
+      tax: 0,
+      unlimited_amount: 0,
+      leftover_amount: 0,
+      discount_amount: 0,
+      guest_count: 1,
+      discount_guest_count: 0,
+      total: fixture.price,
+      payment_method: "cash",
+      cash_received: fixture.price,
+      change_due: 0,
+      status: "paid",
+      cashier_id: cashier.id
+    }
+  });
+  assert.equal(transaction.table_ids_snapshot, null);
+
+  const historyResponse = await request(
+    `/api/pos/transactions/unified?transaction_type=dine_in&table_id=${encodeURIComponent(fixture.tableId)}&search=${encodeURIComponent(transaction.transaction_number)}`,
+    undefined,
+    "GET"
+  );
+  const historyText = await historyResponse.text();
+  assert.equal(historyResponse.status, 200, historyText);
+  const history = JSON.parse(historyText) as {
+    transactions: Array<{ id: string; table_number: number | null }>;
+  };
+  assert.equal(history.transactions.length, 1);
+  assert.equal(history.transactions[0].id, transaction.id);
+  assert.equal(history.transactions[0].table_number, fixture.tableNumber);
+});
+
 test("concurrent checkout retries create one transaction and replay the saved result", async () => {
   const fixture = await createFixture();
   await createOrder(fixture, "committed", { suffix: `${testRunKey}-idempotent-checkout` });

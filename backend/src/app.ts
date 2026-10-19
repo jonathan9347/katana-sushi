@@ -9281,6 +9281,7 @@ app.get("/api/pos/transactions/unified", async (req, res, next) => {
       from: typeof req.query.from === "string" ? req.query.from : undefined,
       to: typeof req.query.to === "string" ? req.query.to : undefined,
       search: typeof req.query.search === "string" ? req.query.search : undefined,
+      tableId: typeof req.query.table_id === "string" ? req.query.table_id : undefined,
       cashierId: typeof req.query.cashier === "string" ? req.query.cashier : undefined,
       paymentMethod: typeof req.query.payment_method === "string" ? req.query.payment_method : undefined,
       transactionType: typeof req.query.transaction_type === "string" ? req.query.transaction_type : undefined,
