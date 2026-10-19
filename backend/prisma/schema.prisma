@@ -208,26 +208,27 @@ model InventoryMovement {
 }
 
 model PosTransaction {
-  id                   String   @id @default(cuid())
-  transaction_number   String   @unique
-  customer_name        String?
-  dining_session_id    String?  @unique
-  transaction_type     String
-  subtotal             Float
-  tax                  Float
-  unlimited_amount     Float    @default(0)
-  leftover_amount      Float    @default(0)
-  discount_amount      Float    @default(0)
-  guest_count          Int      @default(0)
-  discount_guest_count Int      @default(0)
-  total                Float
-  payment_method       String
-  cash_received        Float?
-  change_due           Float?
-  status               String
-  cashier_id           String
-  created_at           DateTime @default(now())
-  updated_at           DateTime @updatedAt
+  id                    String   @id @default(cuid())
+  transaction_number    String   @unique
+  customer_name         String?
+  dining_session_id     String?  @unique
+  table_number_snapshot Int?
+  transaction_type      String
+  subtotal              Float
+  tax                   Float
+  unlimited_amount      Float    @default(0)
+  leftover_amount       Float    @default(0)
+  discount_amount       Float    @default(0)
+  guest_count           Int      @default(0)
+  discount_guest_count  Int      @default(0)
+  total                 Float
+  payment_method        String
+  cash_received         Float?
+  change_due            Float?
+  status                String
+  cashier_id            String
+  created_at            DateTime @default(now())
+  updated_at            DateTime @updatedAt
 
   cashier        User                   @relation(fields: [cashier_id], references: [id])
   items          PosItem[]
@@ -241,6 +242,7 @@ model PosItem {
   id                 String   @id @default(cuid())
   transaction_id     String
   selling_product_id String
+  name_snapshot      String?
   quantity           Int
   unit_price         Float
   total_price        Float
