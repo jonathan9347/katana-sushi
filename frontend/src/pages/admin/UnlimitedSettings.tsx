@@ -11,6 +11,7 @@ import { useToast } from "../../hooks/useToast";
 type UnlimitedSettingsRecord = {
   price_per_person: number;
   time_limit_minutes: number;
+  extension_minutes: number;
   leftover_charge_percent: number;
 };
 
@@ -40,6 +41,7 @@ export default function UnlimitedSettings() {
   const [settingsForm, setSettingsForm] = useState({
     price_per_person: "599",
     time_limit_minutes: "90",
+    extension_minutes: "30",
     leftover_charge_percent: "100"
   });
   const [included, setIncluded] = useState<Record<string, boolean>>({});
@@ -71,6 +73,7 @@ export default function UnlimitedSettings() {
       setSettingsForm({
         price_per_person: String(settingsQuery.data.price_per_person),
         time_limit_minutes: String(settingsQuery.data.time_limit_minutes),
+        extension_minutes: String(settingsQuery.data.extension_minutes),
         leftover_charge_percent: String(settingsQuery.data.leftover_charge_percent)
       });
     }
@@ -87,6 +90,7 @@ export default function UnlimitedSettings() {
       api.put("/api/admin/unlimited/settings", {
         price_per_person: Number(settingsForm.price_per_person),
         time_limit_minutes: Number(settingsForm.time_limit_minutes),
+        extension_minutes: Number(settingsForm.extension_minutes),
         leftover_charge_percent: Number(settingsForm.leftover_charge_percent)
       }),
     onSuccess: () => {
@@ -144,7 +148,7 @@ export default function UnlimitedSettings() {
                 <CardTitle>Pricing and Rules</CardTitle>
               </CardHeader>
               <CardContent>
-                <form className="grid gap-4 md:grid-cols-4" onSubmit={saveSettings}>
+                <form className="grid gap-4 md:grid-cols-5" onSubmit={saveSettings}>
               <label className="grid gap-1 text-sm font-medium text-slate-700">
                 <span>Price per Person</span>
                 <input className="h-10 rounded-md border border-slate-300 px-3" type="number" value={settingsForm.price_per_person} onChange={(event) => setSettingsForm((current) => ({ ...current, price_per_person: event.target.value }))} />
@@ -152,6 +156,10 @@ export default function UnlimitedSettings() {
               <label className="grid gap-1 text-sm font-medium text-slate-700">
                 <span>Time Limit Minutes</span>
                 <input className="h-10 rounded-md border border-slate-300 px-3" type="number" value={settingsForm.time_limit_minutes} onChange={(event) => setSettingsForm((current) => ({ ...current, time_limit_minutes: event.target.value }))} />
+              </label>
+              <label className="grid gap-1 text-sm font-medium text-slate-700">
+                <span>Unlimited Extension Minutes (5–120)</span>
+                <input className="h-10 rounded-md border border-slate-300 px-3" type="number" min={5} max={120} step={1} required value={settingsForm.extension_minutes} onChange={(event) => setSettingsForm((current) => ({ ...current, extension_minutes: event.target.value }))} />
               </label>
               <label className="grid gap-1 text-sm font-medium text-slate-700">
                 <span>Leftover Charge Percent</span>

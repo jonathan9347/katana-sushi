@@ -8,8 +8,8 @@ if (!testDatabaseUrl) {
 }
 
 const testDatabaseName = new URL(testDatabaseUrl).pathname.slice(1);
-if (!/^katana_sushi_dev_step4_(2|4)_/.test(testDatabaseName)) {
-  throw new Error("Dining order commit integration tests only run on a dedicated restored Step 4.2 or 4.4 test copy.");
+if (!/^katana_sushi_dev_step4_(2|4|6)_/.test(testDatabaseName)) {
+  throw new Error("Dining order commit integration tests only run on a dedicated restored Step 4.2, 4.4, or 4.6 test copy.");
 }
 
 process.env.DATABASE_URL = testDatabaseUrl;
@@ -479,6 +479,114 @@ test("still supports optional guest assignment for legacy sessions that have gue
   assert.ok(fixture.sessionId);
   const guest = await prisma.diningGuest.create({
     data: { dining_session_id: fixture.sessionId, guest_number: 1 }
+  });
+
+  test("starts Unlimited with explicit headcount on a guestless session and starts the timer at the button action", async () => {
+    const fixture = await createFixture();
+    const settings = await prisma.unlimitedSetting.findFirstOrThrow();
+    const before = Date.now();
+    const response = await request(
+      `/api/pos/dining/sessions/${fixture.sessionId}/unlimited-sessions`,
+      { paxCount: 3 }
+    );
+    const responseText = await response.text();
+    assert.equal(response.status, 201, responseText);
+    const payload = JSON.parse(responseText) as {
+      unlimited_session: {
+        id: string;
+        pax_count: number;
+        price_per_pax: number;
+        time_limit_minutes: number;
+        first_round_at: string | null;
+        started_at: string;
+        ends_at: string;
+      };
+    };
+    const started = new Date(payload.unlimited_session.first_round_at ?? "").getTime();
+    const ends = new Date(payload.unlimited_session.ends_at).getTime();
+    assert.equal(payload.unlimited_session.pax_count, 3);
+    assert.equal(payload.unlimited_session.price_per_pax, Number(settings.price_per_person));
+    assert.equal(payload.unlimited_session.time_limit_minutes, settings.time_limit_minutes);
+    assert.ok(payload.unlimited_session.first_round_at);
+    assert.ok(started >= before && started <= Date.now());
+    assert.equal(ends - started, settings.time_limit_minutes * 60_000);
+
+    const invalidHeadcount = await request(
+      `/api/pos/dining/sessions/${fixture.sessionId}/unlimited-sessions`,
+      { paxCount: 0 }
+    );
+    assert.equal(invalidHeadcount.status, 400);
+  });
+
+  test("concurrent Unlimited starts create exactly one active package", async () => {
+    const fixture = await createFixture();
+    const path = `/api/pos/dining/sessions/${fixture.sessionId}/unlimited-sessions`;
+    const responses = await Promise.all([
+      request(path, { paxCount: 2 }),
+      request(path, { paxCount: 2 })
+    ]);
+    const responseTexts = await Promise.all(responses.map((response) => response.text()));
+    assert.deepEqual(responses.map((response) => response.status).sort(), [201, 409]);
+    const activePackages = await prisma.unlimitedSession.findMany({
+      where: { dining_session_id: fixture.sessionId, status: "active" }
+    });
+    assert.equal(activePackages.length, 1, responseTexts.join("\n"));
+  });
+
+  test("cashier extends Unlimited by the configured no-fee duration", async () => {
+    const fixture = await createFixture();
+    const settings = await prisma.unlimitedSetting.findFirstOrThrow();
+    await prisma.unlimitedSetting.update({
+      where: { id: settings.id },
+      data: { extension_minutes: 45 }
+    });
+    const startResponse = await request(
+      `/api/pos/dining/sessions/${fixture.sessionId}/unlimited-sessions`,
+      { paxCount: 2 }
+    );
+    const startText = await startResponse.text();
+    assert.equal(startResponse.status, 201, startText);
+    const sessionId = (JSON.parse(startText) as { unlimited_session: { id: string; ends_at: string } }).unlimited_session.id;
+    const previousEnd = new Date((JSON.parse(startText) as { unlimited_session: { ends_at: string } }).unlimited_session.ends_at).getTime();
+
+    const extensionResponse = await request(`/api/pos/dining/unlimited-sessions/${sessionId}/extend`, {});
+    const extensionText = await extensionResponse.text();
+    assert.equal(extensionResponse.status, 200, extensionText);
+    const extensionPayload = JSON.parse(extensionText) as {
+      extension: { minutes: number };
+      session: { ends_at: string };
+    };
+    assert.equal(extensionPayload.extension.minutes, 45);
+    assert.equal(new Date(extensionPayload.session.ends_at).getTime(), previousEnd + 45 * 60_000);
+    assert.equal(await prisma.unlimitedExtension.count({ where: { unlimited_session_id: sessionId } }), 1);
+  });
+
+  test("Unlimited extension setting accepts only whole-number values from 5 through 120", async () => {
+    const settings = await prisma.unlimitedSetting.findFirstOrThrow();
+    const originalValue = settings.extension_minutes;
+    for (const extensionMinutes of [4, 121, 30.5]) {
+      const invalidResponse = await request("/api/admin/unlimited/settings", {
+        price_per_person: settings.price_per_person,
+        time_limit_minutes: settings.time_limit_minutes,
+        extension_minutes: extensionMinutes,
+        leftover_charge_percent: settings.leftover_charge_percent
+      }, "PUT");
+      assert.equal(invalidResponse.status, 400, `Expected ${extensionMinutes} to be rejected.`);
+    }
+
+    const validResponse = await request("/api/admin/unlimited/settings", {
+      price_per_person: settings.price_per_person,
+      time_limit_minutes: settings.time_limit_minutes,
+      extension_minutes: 45,
+      leftover_charge_percent: settings.leftover_charge_percent
+    }, "PUT");
+    const validText = await validResponse.text();
+    assert.equal(validResponse.status, 200, validText);
+    assert.equal((JSON.parse(validText) as { settings: { extension_minutes: number } }).settings.extension_minutes, 45);
+    await prisma.unlimitedSetting.update({
+      where: { id: settings.id },
+      data: { extension_minutes: originalValue }
+    });
   });
   const response = await request(
     `/api/pos/dining/sessions/${fixture.sessionId}/orders`,

@@ -13,7 +13,7 @@ import {
   getNextTableNumber,
   type ManagedTableState
 } from "../services/tableManagement.service";
-import { roleGuard } from "../middleware/roleGuard";
+import { roleGuard, ROLES } from "../middleware/roleGuard";
 import { isDineInReservationLateAlert } from "../config/reservationSettings";
 import {
   consumeMaterialStock,
@@ -25,7 +25,6 @@ import {
 } from "../services/inventory.service";
 
 const router = express.Router();
-const EXTENSION_MINUTES = 30;
 const COMMITTED_ORDER_STATUS_CHECK =
   "CHECK ((status = ANY (ARRAY['reserved'::text, 'prepared'::text, 'ready'::text, 'released'::text, 'cancelled'::text, 'committed'::text])))";
 const COMMITTED_ORDER_STATUS_CACHE_MS = 5000;
@@ -1237,15 +1236,15 @@ router.post(
     const settings = await prisma.unlimitedSetting.findFirst();
     if (!settings) throw new InventoryError("Unlimited pricing settings are unavailable.", "UNLIMITED_SETTINGS_MISSING", 503);
     const unlimited = await prisma.$transaction(async (tx) => {
+      await tx.$queryRaw<Array<{ id: string }>>`
+        SELECT id FROM dining_table_sessions WHERE id = ${sessionId} FOR UPDATE
+      `;
       const tableSession = await tx.diningTableSession.findUnique({
         where: { id: sessionId },
-        include: { table: true, guests: true }
+        include: { table: true }
       });
       if (!tableSession || tableSession.status !== "active") {
         throw new InventoryError("Active dining session not found.", "SESSION_NOT_FOUND", 404);
-      }
-      if (body.paxCount > tableSession.guests.length) {
-        throw new InventoryError("Unlimited covers cannot exceed the guest count at this table.", "INVALID_COVER_COUNT", 400);
       }
       const activePackage = await tx.unlimitedSession.findFirst({
         where: { dining_session_id: sessionId, status: "active" },
@@ -1255,6 +1254,7 @@ router.post(
         throw new InventoryError("End the current Unlimited package before starting another.", "UNLIMITED_SESSION_ACTIVE", 409);
       }
       const startedAt = new Date();
+      const endsAt = new Date(startedAt.getTime() + settings.time_limit_minutes * 60_000);
       return tx.unlimitedSession.create({
         data: {
           dining_session_id: sessionId,
@@ -1264,7 +1264,8 @@ router.post(
           total_paid: 0,
           time_limit_minutes: settings.time_limit_minutes,
           started_at: startedAt,
-          ends_at: new Date(startedAt.getTime() + settings.time_limit_minutes * 60_000),
+          first_round_at: startedAt,
+          ends_at: endsAt,
           status: "active",
           cashier_id: cashierId
         },
@@ -1280,7 +1281,7 @@ router.post(
 
 router.post(
   "/api/pos/dining/unlimited-sessions/:id/extend",
-  roleGuard(["admin"]),
+  roleGuard(ROLES.CASHIER),
   asyncRoute(async (req, res) => {
     const unlimitedId = z.string().min(1).parse(req.params.id);
     const approvedBy = actorId(req);
@@ -1292,13 +1293,16 @@ router.post(
       if (!session || session.status !== "active" || !session.dining_session_id) {
         throw new InventoryError("Active table Unlimited session not found.", "UNLIMITED_SESSION_NOT_FOUND", 404);
       }
+      const settings = await tx.unlimitedSetting.findFirst();
+      if (!settings) throw new InventoryError("Unlimited pricing settings are unavailable.", "UNLIMITED_SETTINGS_MISSING", 503);
       const now = new Date();
-      const nextEnd = new Date(Math.max(session.ends_at.getTime(), now.getTime()) + EXTENSION_MINUTES * 60_000);
+      const extensionMinutes = settings.extension_minutes;
+      const nextEnd = new Date(Math.max(session.ends_at.getTime(), now.getTime()) + extensionMinutes * 60_000);
       const [extension, updated] = await Promise.all([
         tx.unlimitedExtension.create({
           data: {
             unlimited_session_id: session.id,
-            minutes: EXTENSION_MINUTES,
+            minutes: extensionMinutes,
             approved_by: approvedBy
           }
         }),

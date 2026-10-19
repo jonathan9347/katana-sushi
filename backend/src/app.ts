@@ -9512,6 +9512,7 @@ async function getUnlimitedSettings() {
     data: {
       price_per_person: 599,
       time_limit_minutes: 90,
+      extension_minutes: 30,
       leftover_charge_percent: 100
     }
   });
@@ -9830,6 +9831,7 @@ app.put("/api/admin/unlimited/settings", async (req, res, next) => {
       .object({
         price_per_person: z.coerce.number().positive(),
         time_limit_minutes: z.coerce.number().int().positive(),
+        extension_minutes: z.coerce.number().int().min(5).max(120),
         leftover_charge_percent: z.coerce.number().nonnegative()
       })
       .parse(req.body);

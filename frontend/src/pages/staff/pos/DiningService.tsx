@@ -66,6 +66,11 @@ type UnlimitedSession = {
   extensions: Array<{ minutes: number; created_at: string }>;
 };
 
+type UnlimitedSettings = {
+  price_per_person: number;
+  extension_minutes: number;
+};
+
 type DiningSession = {
   id: string;
   status: string;
@@ -309,7 +314,7 @@ export default function DiningService({ mode = "service" }: Props) {
   const unlimitedSettingsQuery = useQuery({
     queryKey: ["admin", "unlimited", "settings"],
     queryFn: async () =>
-      (await api.get<{ settings: { price_per_person: number } }>("/api/admin/unlimited/settings")).data.settings,
+      (await api.get<{ settings: UnlimitedSettings }>("/api/admin/unlimited/settings")).data.settings,
     enabled: !kitchenOnly
   });
   const session = sessionsQuery.data?.find((item) => item.id === selectedSessionId) ?? null;
@@ -906,9 +911,23 @@ export default function DiningService({ mode = "service" }: Props) {
                         <div className="flex flex-wrap items-center gap-2 rounded bg-amber-50 p-2 text-sm">
                           <span>
                             {activeUnlimited.pax_count} covers × {money(Number(activeUnlimited.price_per_pax))} ·
-                            {activeUnlimited.first_round_at ? ` ends ${formatTime(activeUnlimited.ends_at)}` : " timer starts when first ticket is served"}
+                            {activeUnlimited.first_round_at ? ` started ${formatTime(activeUnlimited.first_round_at)} · ends ${formatTime(activeUnlimited.ends_at)}` : ` timer starts when the first legacy ticket is served · ends ${formatTime(activeUnlimited.ends_at)}`}
                           </span>
-                          {isAdmin && <ActionButton tone="muted" disabled={runMutation.isPending} onClick={() => runAction("post", `/api/pos/dining/unlimited-sessions/${activeUnlimited.id}/extend`)}>Approve +30 min</ActionButton>}
+                          <div className="grid gap-1">
+                            <ActionButton
+                              tone="muted"
+                              disabled={runMutation.isPending || unlimitedSettingsQuery.isLoading || unlimitedSettingsQuery.isError || !unlimitedSettingsQuery.data}
+                              onClick={() => {
+                                const minutes = unlimitedSettingsQuery.data?.extension_minutes;
+                                if (minutes && window.confirm(`Extend this Unlimited session by ${minutes} minutes? There is no fee.`)) {
+                                  runAction("post", `/api/pos/dining/unlimited-sessions/${activeUnlimited.id}/extend`);
+                                }
+                              }}
+                            >
+                              Extend session
+                            </ActionButton>
+                            <span className="text-xs">Adds {unlimitedSettingsQuery.data?.extension_minutes ?? "—"} minutes · no fee</span>
+                          </div>
                           <select className="h-9 rounded border border-slate-300 px-2" value={leftoverProductId} onChange={(event) => setLeftoverProductId(event.target.value)}>
                             <option value="">Leftover item (optional)</option>
                             {(unlimitedProductsQuery.data ?? []).map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
@@ -923,13 +942,24 @@ export default function DiningService({ mode = "service" }: Props) {
                         </div>
                       ) : (
                         <>
-                          <label className="grid gap-1 text-sm">Covered guests
-                            <select className="h-10 rounded border border-slate-300 px-2" value={packageCovers} onChange={(event) => setPackageCovers(Number(event.target.value))}>
-                              {session.guests.map((guest) => <option key={guest.id} value={guest.guest_number}>{guest.guest_number} cover{guest.guest_number === 1 ? "" : "s"} · {money(Number(unlimitedSettingsQuery.data?.price_per_person ?? 0) * guest.guest_number)}</option>)}
-                            </select>
+                          <label className="grid gap-1 text-sm">Unlimited headcount
+                            <input
+                              className="h-10 w-32 rounded border border-slate-300 px-2"
+                              type="number"
+                              min={1}
+                              max={100}
+                              step={1}
+                              value={packageCovers}
+                              onChange={(event) => setPackageCovers(Number(event.target.value))}
+                            />
                           </label>
                           {unlimitedSettingsQuery.isError && <p className="text-sm text-red-700">Unlimited pricing could not be loaded.</p>}
-                          <ActionButton disabled={runMutation.isPending} onClick={() => runAction("post", `/api/pos/dining/sessions/${session.id}/unlimited-sessions`, { paxCount: packageCovers })}>Start Unlimited</ActionButton>
+                          <ActionButton
+                            disabled={runMutation.isPending || unlimitedSettingsQuery.isLoading || unlimitedSettingsQuery.isError || !Number.isInteger(packageCovers) || packageCovers < 1 || packageCovers > 100}
+                            onClick={() => runAction("post", `/api/pos/dining/sessions/${session.id}/unlimited-sessions`, { paxCount: packageCovers })}
+                          >
+                            Start session
+                          </ActionButton>
                         </>
                       )}
                     </div>
