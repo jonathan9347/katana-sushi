@@ -109,7 +109,8 @@ type CheckoutTransaction = {
   cash_received: number | null;
   change_due: number | null;
   created_at: string;
-  items: Array<{ quantity: number; unit_price: number; total_price: number; selling_product: { name: string } }>;
+  table_number_snapshot: number | null;
+  items: Array<{ quantity: number; unit_price: number; total_price: number; name_snapshot: string | null; selling_product: { name: string } }>;
   charges: Array<{ name_snapshot: string; quantity: number; unit_price: number; total_price: number }>;
   dining_session: { table: { table_number: number } };
 };
@@ -1074,7 +1075,7 @@ function printCheckoutReceipt(transaction: CheckoutTransaction) {
   }
   const lines = [
     ...transaction.items.map((item) =>
-      `<tr><td>${item.quantity} × ${escapeHtml(item.selling_product.name)}</td><td class="right">${money(item.total_price)}</td></tr>`
+      `<tr><td>${item.quantity} × ${escapeHtml(item.name_snapshot ?? item.selling_product.name)}</td><td class="right">${money(item.total_price)}</td></tr>`
     ),
     ...transaction.charges.map((charge) =>
       `<tr><td>${charge.quantity} × ${escapeHtml(charge.name_snapshot)}</td><td class="right">${money(charge.total_price)}</td></tr>`
@@ -1094,7 +1095,7 @@ function printCheckoutReceipt(transaction: CheckoutTransaction) {
       </style>
     </head><body>
       <h1>Katana Sushi</h1>
-      <p>Table ${transaction.dining_session.table.table_number}</p>
+      <p>Table ${transaction.table_number_snapshot ?? transaction.dining_session.table.table_number}</p>
       <p>Transaction: ${escapeHtml(transaction.transaction_number)}</p>
       <p>Date: ${escapeHtml(formatTime(transaction.created_at))}</p>
       <p>Payment: ${escapeHtml(transaction.payment_method.toUpperCase())}</p>

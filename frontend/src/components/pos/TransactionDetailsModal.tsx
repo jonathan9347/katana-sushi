@@ -22,6 +22,7 @@ export type PosHistoryTransaction = {
   change_due?: number | null;
   status: string;
   created_at: string;
+  table_number?: number | null;
   cashier?: {
     name: string;
     email: string;
@@ -31,6 +32,7 @@ export type PosHistoryTransaction = {
     quantity: number;
     unit_price: number;
     total_price: number;
+    name_snapshot?: string | null;
     selling_product: {
       name: string;
       category: string;
@@ -73,6 +75,9 @@ export default function TransactionDetailsModal({
             <p>Payment: <span className="font-semibold">{transaction.payment_method}</span></p>
             <p>Status: <span className="font-semibold">{transaction.status}</span></p>
             <p>Date: <span className="font-semibold">{formatManilaDateTime(transaction.created_at)}</span></p>
+            {transaction.transaction_type === "dine_in" && transaction.table_number !== null && transaction.table_number !== undefined && (
+              <p>Table: <span className="font-semibold">{transaction.table_number}</span></p>
+            )}
             {transaction.reference_booking_id && (
               <p>
                 Booking ID:{" "}
@@ -96,7 +101,7 @@ export default function TransactionDetailsModal({
               <TableBody>
                 {transaction.items.map((item) => (
                   <TableRow key={item.id}>
-                    <TableCell className="font-medium">{item.selling_product.name}</TableCell>
+                    <TableCell className="font-medium">{item.name_snapshot ?? item.selling_product.name}</TableCell>
                     <TableCell>{item.quantity}</TableCell>
                     <TableCell>{money(item.unit_price)}</TableCell>
                     <TableCell>{money(item.total_price)}</TableCell>

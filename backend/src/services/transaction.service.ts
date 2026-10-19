@@ -40,6 +40,7 @@ export type UnifiedTransaction = {
   status: string;
   cashier?: { name: string; email: string } | null;
   created_at: Date;
+  table_number?: number | null;
   items: Array<unknown>;
 };
 
@@ -215,7 +216,8 @@ export async function getUnifiedTransactions(params: {
           include: {
             cashier: { select: { id: true, name: true, email: true } },
             items: { include: { selling_product: true } },
-            charges: true
+            charges: true,
+            dining_session: { include: { table: true } }
           },
           orderBy: { created_at: "desc" }
         })
@@ -298,6 +300,7 @@ export async function getUnifiedTransactions(params: {
       status: t.status,
       cashier: t.cashier ? { name: t.cashier.name, email: t.cashier.email } : null,
       created_at: t.created_at,
+      table_number: t.table_number_snapshot ?? t.dining_session?.table.table_number ?? null,
       items: [
         ...t.items,
         ...t.charges.map((charge) => ({

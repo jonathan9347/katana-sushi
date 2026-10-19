@@ -132,6 +132,14 @@ async function getDiningSession(tx: Prisma.TransactionClient, sessionId: string)
   });
 }
 
+function getCommittedTableNumberSnapshot(session: NonNullable<Awaited<ReturnType<typeof getDiningSession>>>) {
+  return session.orders.find((order) =>
+    order.order_type === "ala_carte"
+    && order.status === "committed"
+    && order.table_number_snapshot !== null
+  )?.table_number_snapshot ?? null;
+}
+
 async function lockTablesInStableOrder(tx: Prisma.TransactionClient) {
   await tx.$queryRaw<Array<{ id: string }>>`
     SELECT id FROM tables ORDER BY id FOR UPDATE
@@ -243,9 +251,15 @@ async function findInventoryNeeds(
 }
 
 async function buildCheckout(session: NonNullable<Awaited<ReturnType<typeof getDiningSession>>>) {
-  const unfinishedOrders = session.orders.filter((order) => !["released", "cancelled"].includes(order.status));
+  const unfinishedOrders = session.orders.filter((order) =>
+    !["committed", "released", "cancelled"].includes(order.status)
+  );
   if (unfinishedOrders.length > 0) {
-    throw new InventoryError("All kitchen tickets must be released or cancelled before checkout.", "ORDERS_NOT_COMPLETE", 409);
+    throw new InventoryError(
+      "Legacy kitchen tickets (reserved, prepared, or ready) must be released or cancelled before bill-out.",
+      "ORDERS_NOT_COMPLETE",
+      409
+    );
   }
   const activeUnlimitedSessions = session.unlimited_sessions.filter((unlimited) => unlimited.status === "active");
   if (activeUnlimitedSessions.length > 0) {
@@ -253,7 +267,10 @@ async function buildCheckout(session: NonNullable<Awaited<ReturnType<typeof getD
   }
 
   const aLaCarteItems = session.orders
-    .filter((order) => order.order_type === "ala_carte" && order.status === "released")
+    .filter((order) =>
+      order.order_type === "ala_carte"
+      && ["committed", "released"].includes(order.status)
+    )
     .flatMap((order) => order.items);
   const aLaCarteAmount = aLaCarteItems.reduce((total, item) => total + Number(item.total_price), 0);
   const unlimitedPackages = session.unlimited_sessions
@@ -1381,7 +1398,7 @@ router.get(
     const totals = await buildCheckout(session);
     return res.json({
       session_id: session.id,
-      table_number: session.table.table_number,
+      table_number: getCommittedTableNumberSnapshot(session) ?? session.table.table_number,
       guest_count: totals.guestCount,
       a_la_carte_lines: totals.aLaCarteItems.map((item) => ({
         name: item.name_snapshot,
@@ -1450,6 +1467,7 @@ router.post(
           transaction_number: transactionNumber,
           customer_name: null,
           dining_session_id: session.id,
+          table_number_snapshot: getCommittedTableNumberSnapshot(session),
           transaction_type: "dine_in",
           subtotal: totals.subtotal,
           tax: 0,
@@ -1467,6 +1485,7 @@ router.post(
           items: {
             create: totals.aLaCarteItems.map((item) => ({
               selling_product_id: item.selling_product_id!,
+              name_snapshot: item.name_snapshot,
               quantity: item.quantity,
               unit_price: Number(item.unit_price),
               total_price: Number(item.total_price)

@@ -1,0 +1,483 @@
+import assert from "node:assert/strict";
+import { after, before, test } from "node:test";
+import jwt from "jsonwebtoken";
+
+const testDatabaseUrl = process.env.DINING_POS_CHECKOUT_TEST_DATABASE_URL;
+if (!testDatabaseUrl) {
+  throw new Error("DINING_POS_CHECKOUT_TEST_DATABASE_URL must point to a fresh restored test database.");
+}
+
+const testDatabaseName = new URL(testDatabaseUrl).pathname.slice(1);
+if (!testDatabaseName.startsWith("katana_sushi_dev_step4_3_")) {
+  throw new Error("Dining checkout integration tests only run on a dedicated restored Step 4.3 test copy.");
+}
+
+process.env.DATABASE_URL = testDatabaseUrl;
+const dotenv = require("dotenv") as typeof import("dotenv");
+dotenv.config();
+
+const { app, prisma } = require("../app") as typeof import("../app");
+const { checkDatabaseHealth } = require("../lib/database") as typeof import("../lib/database");
+
+let server: ReturnType<typeof app.listen>;
+let baseUrl = "";
+let fixtureSequence = 0;
+let cashier: { id: string; email: string; role: string };
+const testRunKey = Date.now().toString(36);
+
+type Fixture = {
+  productId: string;
+  materialId: string;
+  batchId: string;
+  tableId: string;
+  tableNumber: number;
+  sessionId: string;
+  productName: string;
+  price: number;
+};
+
+function tokenFor(user: { id: string; email: string; role: string }) {
+  const secret = process.env.JWT_SECRET;
+  assert.ok(secret, "JWT_SECRET must be configured for route authorization tests.");
+  const token = jwt.sign({ sub: user.id, email: user.email, role: user.role }, secret.trim());
+  return "Bear" + "er " + token;
+}
+
+async function request(path: string, body?: unknown, method = "POST") {
+  return fetch(`${baseUrl}${path}`, {
+    method,
+    headers: {
+      Authorization: tokenFor(cashier),
+      ...(body === undefined ? {} : { "Content-Type": "application/json" })
+    },
+    ...(body === undefined ? {} : { body: JSON.stringify(body) })
+  });
+}
+
+async function createFixture(input: { price?: number; temporary?: boolean } = {}): Promise<Fixture> {
+  fixtureSequence += 1;
+  const suffix = `${testRunKey}-${fixtureSequence}`;
+  const price = input.price ?? 12.5;
+  const materialName = `Step 4.3 Stock ${suffix}`;
+  const productName = `Step 4.3 Product ${suffix}`;
+  const material = await prisma.rawMaterial.create({
+    data: {
+      name: materialName,
+      category: "Step 4.3 Test",
+      unit: "portion",
+      current_stock: 50n,
+      reorder_level: 0n,
+      cost_per_unit: 1
+    }
+  });
+  const batch = await prisma.materialBatch.create({
+    data: {
+      raw_material_id: material.id,
+      batch_number: `STEP43-${suffix}`,
+      quantity: 50n,
+      remaining_quantity: 50n
+    }
+  });
+  const product = await prisma.sellingProduct.create({
+    data: {
+      name: productName,
+      category: "Food",
+      price,
+      is_available: true,
+      is_deleted: false,
+      is_sold_a_la_carte: true
+    }
+  });
+  const recipe = await prisma.recipe.create({
+    data: {
+      selling_product_id: product.id,
+      total_yield_quantity: 1n,
+      yield_unit: "portion"
+    }
+  });
+  await prisma.recipeIngredient.create({
+    data: {
+      recipe_id: recipe.id,
+      raw_material_id: material.id,
+      quantity_per_yield: 2n,
+      unit: "portion"
+    }
+  });
+
+  const maxTableNumber = await prisma.table.aggregate({ _max: { table_number: true } });
+  const tableNumber = (maxTableNumber._max.table_number ?? 0) + 1000 + fixtureSequence;
+  const table = await prisma.table.create({
+    data: {
+      table_number: tableNumber,
+      capacity: 2,
+      status: "occupied",
+      is_archived: false,
+      is_temporary: input.temporary ?? false
+    }
+  });
+  const session = await prisma.diningTableSession.create({
+    data: {
+      table_id: table.id,
+      cashier_id: cashier.id,
+      status: "active"
+    }
+  });
+
+  return {
+    productId: product.id,
+    materialId: material.id,
+    batchId: batch.id,
+    tableId: table.id,
+    tableNumber,
+    sessionId: session.id,
+    productName,
+    price
+  };
+}
+
+async function createOrder(
+  fixture: Fixture,
+  status: "committed" | "released" | "reserved" | "prepared" | "ready",
+  options: { name?: string; price?: number; quantity?: number; suffix?: string } = {}
+) {
+  const suffix = options.suffix ?? `${testRunKey}-${fixtureSequence}-${status}`;
+  const quantity = options.quantity ?? 1;
+  const unitPrice = options.price ?? fixture.price;
+  return prisma.diningOrder.create({
+    data: {
+      order_number: `S43-${suffix}`,
+      idempotency_key: `s43-${suffix}`,
+      dining_session_id: fixture.sessionId,
+      table_number_snapshot: fixture.tableNumber,
+      order_type: "ala_carte",
+      status,
+      created_by: cashier.id,
+      items: {
+        create: [{
+          selling_product_id: fixture.productId,
+          name_snapshot: options.name ?? fixture.productName,
+          quantity,
+          unit_price: unitPrice,
+          total_price: unitPrice * quantity
+        }]
+      }
+    }
+  });
+}
+
+async function commitOrder(fixture: Fixture, suffix: string, quantity = 2) {
+  const response = await request(`/api/pos/dining/sessions/${fixture.sessionId}/orders`, {
+    idempotencyKey: `s43-${testRunKey}-${suffix}`,
+    orderType: "ala_carte",
+    items: [{
+      productId: fixture.productId,
+      quantity,
+      expectedUnitPrice: fixture.price
+    }]
+  });
+  const body = await response.text();
+  assert.equal(response.status, 201, body);
+  return JSON.parse(body) as { order: { id: string; items: Array<{ total_price: number }> } };
+}
+
+async function checkout(fixture: Fixture) {
+  return request(`/api/pos/dining/sessions/${fixture.sessionId}/checkout`, {
+    paymentMethod: "cash",
+    cashReceived: 10000
+  });
+}
+
+async function readStockAndMovements(fixture: Fixture) {
+  const [material, batch, movements] = await Promise.all([
+    prisma.rawMaterial.findUniqueOrThrow({ where: { id: fixture.materialId } }),
+    prisma.materialBatch.findUniqueOrThrow({ where: { id: fixture.batchId } }),
+    prisma.inventoryMovement.findMany({
+      where: { raw_material_id: fixture.materialId },
+      orderBy: { created_at: "asc" },
+      select: { id: true, action: true, quantity: true, source_reference: true }
+    })
+  ]);
+  return {
+    stock: material.current_stock,
+    batchRemaining: batch.remaining_quantity,
+    movements
+  };
+}
+
+before(async () => {
+  const database = await prisma.$queryRaw<Array<{ name: string }>>`SELECT current_database() AS name`;
+  assert.equal(database[0]?.name, testDatabaseName, "Tests must connect to the new restored copy.");
+  assert.equal(await checkDatabaseHealth(), true, "The restored copy must be reachable.");
+  const user = await prisma.user.findFirst({
+    where: { role: "cashier", is_active: true },
+    select: { id: true, email: true, role: true }
+  });
+  assert.ok(user, "The restored copy must contain an active cashier account.");
+  cashier = user;
+
+  server = app.listen(0);
+  await new Promise<void>((resolve, reject) => {
+    server.once("listening", resolve);
+    server.once("error", reject);
+  });
+  const address = server.address();
+  assert.ok(address && typeof address !== "string");
+  baseUrl = `http://127.0.0.1:${address.port}`;
+});
+
+after(async () => {
+  if (server) {
+    await new Promise<void>((resolve, reject) =>
+      server.close((error) => error ? reject(error) : resolve())
+    );
+  }
+  await prisma.$disconnect();
+});
+
+test("checks out committed orders from saved snapshots without changing stock or movements", async () => {
+  const fixture = await createFixture({ price: 15.75 });
+  const committed = await commitOrder(fixture, "snapshots-stock", 2);
+  const savedName = fixture.productName;
+  const savedTableNumber = fixture.tableNumber;
+  const beforeCheckoutStockAndMovements = await readStockAndMovements(fixture);
+  assert.equal(beforeCheckoutStockAndMovements.movements.length, 1);
+
+  await prisma.sellingProduct.update({
+    where: { id: fixture.productId },
+    data: { name: `${savedName} renamed`, price: 0.01 }
+  });
+  await prisma.table.update({
+    where: { id: fixture.tableId },
+    data: { table_number: savedTableNumber + 50000 }
+  });
+
+  const previewResponse = await request(
+    `/api/pos/dining/sessions/${fixture.sessionId}/checkout-preview`,
+    undefined,
+    "GET"
+  );
+  const previewText = await previewResponse.text();
+  assert.equal(previewResponse.status, 200, previewText);
+  const preview = JSON.parse(previewText) as {
+    table_number: number;
+    a_la_carte_lines: Array<{ name: string; unit_price: number; total_price: number }>;
+    total: number;
+  };
+  assert.equal(preview.table_number, savedTableNumber);
+  assert.equal(preview.a_la_carte_lines[0].name, savedName);
+  assert.equal(preview.a_la_carte_lines[0].unit_price, fixture.price);
+  assert.equal(preview.a_la_carte_lines[0].total_price, fixture.price * 2);
+  assert.equal(preview.total, fixture.price * 2);
+
+  const response = await checkout(fixture);
+  const responseText = await response.text();
+  assert.equal(response.status, 201, responseText);
+  const result = JSON.parse(responseText) as {
+    replayed: boolean;
+    transaction: {
+      id: string;
+      total: number;
+      table_number_snapshot: number | null;
+      items: Array<{
+        name_snapshot: string | null;
+        quantity: number;
+        unit_price: number;
+        total_price: number;
+        selling_product: { name: string };
+      }>;
+    };
+  };
+  assert.equal(result.replayed, false);
+  assert.equal(result.transaction.total, fixture.price * 2);
+  assert.equal(result.transaction.table_number_snapshot, savedTableNumber);
+  assert.equal(result.transaction.items.length, 1);
+  assert.equal(result.transaction.items[0].name_snapshot, savedName);
+  assert.equal(result.transaction.items[0].selling_product.name, `${savedName} renamed`);
+  assert.equal(result.transaction.items[0].quantity, 2);
+  assert.equal(result.transaction.items[0].unit_price, fixture.price);
+  assert.equal(result.transaction.items[0].total_price, fixture.price * 2);
+  assert.deepEqual(await readStockAndMovements(fixture), beforeCheckoutStockAndMovements);
+  assert.equal(await prisma.diningOrder.count({
+    where: { id: committed.order.id, status: "committed" }
+  }), 1);
+
+  const completedTransaction = JSON.parse(responseText) as {
+    transaction: { transaction_number: string };
+  };
+  const historyResponse = await request(
+    `/api/pos/transactions/unified?transaction_type=dine_in&search=${encodeURIComponent(completedTransaction.transaction.transaction_number)}`,
+    undefined,
+    "GET"
+  );
+  const historyText = await historyResponse.text();
+  assert.equal(historyResponse.status, 200, historyText);
+  const history = JSON.parse(historyText) as {
+    transactions: Array<{
+      table_number: number | null;
+      items: Array<{ name_snapshot?: string | null; selling_product: { name: string } }>;
+    }>;
+  };
+  assert.equal(history.transactions.length, 1);
+  assert.equal(history.transactions[0].table_number, savedTableNumber);
+  assert.equal(history.transactions[0].items[0].name_snapshot, savedName);
+});
+
+test("checkout totals committed and legacy released orders from their saved prices", async () => {
+  const fixture = await createFixture();
+  await commitOrder(fixture, "mixed-committed", 2);
+  await createOrder(fixture, "released", {
+    name: "Legacy saved item",
+    price: 7,
+    quantity: 3,
+    suffix: `${testRunKey}-mixed-released`
+  });
+
+  const response = await checkout(fixture);
+  const responseText = await response.text();
+  assert.equal(response.status, 201, responseText);
+  const result = JSON.parse(responseText) as {
+    transaction: {
+      total: number;
+      items: Array<{ name_snapshot: string | null; unit_price: number; total_price: number; quantity: number }>;
+    };
+  };
+  assert.equal(result.transaction.total, fixture.price * 2 + 7 * 3);
+  assert.deepEqual(
+    result.transaction.items.map((item) => ({
+      name: item.name_snapshot,
+      unitPrice: item.unit_price,
+      total: item.total_price,
+      quantity: item.quantity
+    })),
+    [
+      { name: fixture.productName, unitPrice: fixture.price, total: fixture.price * 2, quantity: 2 },
+      { name: "Legacy saved item", unitPrice: 7, total: 21, quantity: 3 }
+    ]
+  );
+});
+
+test("legacy sale-history rows with null snapshots fall back to live product and table values", async () => {
+  const fixture = await createFixture();
+  await prisma.diningTableSession.update({
+    where: { id: fixture.sessionId },
+    data: { status: "closed", closed_at: new Date() }
+  });
+  await prisma.table.update({
+    where: { id: fixture.tableId },
+    data: { status: "available" }
+  });
+  const transaction = await prisma.posTransaction.create({
+    data: {
+      transaction_number: `S43-LEGACY-${testRunKey}-${fixtureSequence}`,
+      customer_name: null,
+      dining_session_id: fixture.sessionId,
+      transaction_type: "dine_in",
+      subtotal: fixture.price,
+      tax: 0,
+      total: fixture.price,
+      payment_method: "cash",
+      status: "paid",
+      cashier_id: cashier.id,
+      items: {
+        create: [{
+          selling_product_id: fixture.productId,
+          name_snapshot: null,
+          quantity: 1,
+          unit_price: fixture.price,
+          total_price: fixture.price
+        }]
+      }
+    }
+  });
+
+  const response = await request(
+    `/api/pos/transactions/unified?transaction_type=dine_in&search=${encodeURIComponent(transaction.transaction_number)}`,
+    undefined,
+    "GET"
+  );
+  const responseText = await response.text();
+  assert.equal(response.status, 200, responseText);
+  const history = JSON.parse(responseText) as {
+    transactions: Array<{
+      table_number: number | null;
+      items: Array<{ name_snapshot?: string | null; selling_product: { name: string } }>;
+    }>;
+  };
+  assert.equal(history.transactions.length, 1);
+  assert.equal(history.transactions[0].table_number, fixture.tableNumber);
+  assert.equal(history.transactions[0].items[0].name_snapshot, null);
+  assert.equal(history.transactions[0].items[0].selling_product.name, fixture.productName);
+});
+
+test("unfinished legacy kitchen tickets block checkout until released or cancelled", async () => {
+  for (const status of ["reserved", "prepared", "ready"] as const) {
+    const fixture = await createFixture();
+    await createOrder(fixture, status, { suffix: `${testRunKey}-block-${status}` });
+    const response = await checkout(fixture);
+    const body = await response.json() as { message: string };
+    assert.equal(response.status, 409);
+    assert.match(body.message, /legacy kitchen tickets/i);
+    assert.match(body.message, /released or cancelled/i);
+    const session = await prisma.diningTableSession.findUniqueOrThrow({
+      where: { id: fixture.sessionId }
+    });
+    assert.equal(session.status, "active");
+    assert.equal(await prisma.posTransaction.count({ where: { dining_session_id: fixture.sessionId } }), 0);
+  }
+});
+
+test("checkout frees linked tables and archives a temporary table", async () => {
+  const linkedFixture = await createFixture();
+  await createOrder(linkedFixture, "committed", { suffix: `${testRunKey}-linked` });
+  const maxTable = await prisma.table.aggregate({ _max: { table_number: true } });
+  const linkedTable = await prisma.table.create({
+    data: {
+      table_number: (maxTable._max.table_number ?? 0) + 1,
+      capacity: 2,
+      status: "unavailable",
+      unavailable_reason: "Linked to active table",
+      linked_to_table_id: linkedFixture.tableId,
+      is_archived: false
+    }
+  });
+  const linkedCheckout = await checkout(linkedFixture);
+  const linkedText = await linkedCheckout.text();
+  assert.equal(linkedCheckout.status, 201, linkedText);
+  assert.equal((await prisma.table.findUniqueOrThrow({ where: { id: linkedFixture.tableId } })).status, "available");
+  const freedLink = await prisma.table.findUniqueOrThrow({ where: { id: linkedTable.id } });
+  assert.equal(freedLink.status, "available");
+  assert.equal(freedLink.linked_to_table_id, null);
+  assert.equal(freedLink.unavailable_reason, null);
+
+  const temporaryFixture = await createFixture({ temporary: true });
+  await createOrder(temporaryFixture, "committed", { suffix: `${testRunKey}-temporary` });
+  const temporaryCheckout = await checkout(temporaryFixture);
+  const temporaryText = await temporaryCheckout.text();
+  assert.equal(temporaryCheckout.status, 201, temporaryText);
+  const archived = await prisma.table.findUniqueOrThrow({ where: { id: temporaryFixture.tableId } });
+  assert.equal(archived.is_temporary, true);
+  assert.equal(archived.is_archived, true);
+  assert.ok(archived.archived_at);
+  assert.equal(archived.status, "unavailable");
+  assert.equal((await prisma.diningTableSession.findUniqueOrThrow({
+    where: { id: temporaryFixture.sessionId }
+  })).status, "closed");
+});
+
+test("concurrent checkout retries create one transaction and replay the saved result", async () => {
+  const fixture = await createFixture();
+  await createOrder(fixture, "committed", { suffix: `${testRunKey}-idempotent-checkout` });
+  const responses = await Promise.all([checkout(fixture), checkout(fixture)]);
+  assert.deepEqual(responses.map((response) => response.status).sort(), [200, 201]);
+  const results = await Promise.all(responses.map(async (response) => {
+    const text = await response.text();
+    assert.ok(response.status === 200 || response.status === 201, text);
+    return JSON.parse(text) as { replayed: boolean; transaction: { id: string } };
+  }));
+  assert.equal(results[0].transaction.id, results[1].transaction.id);
+  assert.equal(results.filter((result) => result.replayed).length, 1);
+  assert.equal(await prisma.posTransaction.count({ where: { dining_session_id: fixture.sessionId } }), 1);
+  assert.equal((await prisma.diningTableSession.findUniqueOrThrow({
+    where: { id: fixture.sessionId }
+  })).status, "closed");
+});

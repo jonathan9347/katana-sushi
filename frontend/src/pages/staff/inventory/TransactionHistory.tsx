@@ -21,6 +21,7 @@ type PosHistoryRecord = {
   transaction_number: string;
   customer_name?: string | null;
   transaction_type: string;
+  table_number?: number | null;
   total: number;
   payment_method: string;
   status: string;
@@ -36,6 +37,7 @@ type PosHistoryRecord = {
     id: string;
     quantity: number;
     total_price: number;
+    name_snapshot?: string | null;
     round_number?: number;
     selling_product: {
       name: string;
@@ -154,7 +156,7 @@ export default function TransactionHistory() {
           String(transaction.total),
           transaction.payment_method,
           transaction.cashier?.name ?? transaction.cashier?.email ?? "System",
-          transaction.items.map((item) => `${item.selling_product.name} x${item.quantity}`).join("; ")
+          transaction.items.map((item) => `${item.name_snapshot ?? item.selling_product.name} x${item.quantity}`).join("; ")
         ])
       ];
 
@@ -277,7 +279,7 @@ export default function TransactionHistory() {
                             ? `Table ${transaction.table?.table_number ?? "-"} | Guests: ${transaction.unlimited_session?.pax_count ?? 0} | Rounds: ${
                                 transaction.unlimited_session?.rounds.length ?? 0
                               } | Items: ${itemCount}`
-                            : `Customer: ${transaction.customer_name || "Walk-in"} | Payment: ${transaction.payment_method}`}
+                            : `${transaction.transaction_type === "dine_in" ? `Table ${transaction.table_number ?? "-"} | ` : ""}Customer: ${transaction.customer_name || "Walk-in"} | Payment: ${transaction.payment_method}`}
                         </span>
                       </span>
                     </span>
@@ -299,7 +301,7 @@ export default function TransactionHistory() {
                             {transaction.items.map((item) => (
                               <TableRow key={item.id}>
                                 {transaction.transaction_type === "unlimited" && <TableCell>{item.round_number ?? "-"}</TableCell>}
-                                <TableCell className="font-medium">{item.selling_product.name}</TableCell>
+                                <TableCell className="font-medium">{item.name_snapshot ?? item.selling_product.name}</TableCell>
                                 <TableCell>{item.quantity}</TableCell>
                                 <TableCell>{money(item.total_price)}</TableCell>
                               </TableRow>
