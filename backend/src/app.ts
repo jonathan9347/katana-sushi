@@ -2,7 +2,7 @@ import cookieParser from "cookie-parser";
 import cors from "cors";
 import express, { NextFunction, Request, Response } from "express";
 import helmet from "helmet";
-import jwt, { SignOptions } from "jsonwebtoken";
+import jwt from "jsonwebtoken";
 import morgan from "morgan";
 import bcrypt from "bcrypt";
 import fs from "fs";
@@ -41,6 +41,7 @@ import { paymentIntentStore } from "./services/payment/paymentIntentStore";
 import { PaymentGatewayFactory } from "./services/payment/paymentGateway.factory";
 import { PaymentService } from "./services/payment.service";
 import { prisma } from "./lib/prisma";
+import { jwtExpirationSeconds } from "./lib/jwtExpiration";
 import { checkDatabaseHealth, getDatabaseStatus, markDatabaseDown } from "./lib/database";
 import { getJwtSecret } from "./lib/jwt";
 import {
@@ -5311,7 +5312,7 @@ app.post("/api/auth/login", async (req, res, next) => {
       return res.status(401).json({ message: "Invalid email or password" });
     }
 
-    const expiresIn = process.env.JWT_EXPIRES_IN ?? "8h";
+    const expiresIn = jwtExpirationSeconds(process.env.JWT_EXPIRES_IN ?? "8h");
     const token = jwt.sign(
       { sub: user.id, email: user.email, role: user.role },
       jwtSecret,
