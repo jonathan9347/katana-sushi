@@ -39,7 +39,7 @@ async function openDiningService(
   postOrder: (route: Route) => Promise<void>,
   getProductPrice: () => number = () => 100,
   menuProducts?: MockMenuProduct[],
-  path = "/staff/pos/dining",
+  path = "/staff/pos",
   sessionGuestCount = 0
 ) {
   let activeUnlimitedSession: {
@@ -183,13 +183,9 @@ async function openDiningService(
     await route.fulfill({ json: {} });
   });
   await page.goto(path);
-  if (path === "/staff/pos/dining") {
-    await page.getByRole("button", { name: /Table 4/ }).click();
-  } else {
-    await page.getByRole("group", { name: "New customer service type" })
-      .getByRole("button", { name: "Dine in" }).click();
-    await page.getByRole("button", { name: /Table 4/ }).click();
-  }
+  await page.getByRole("group", { name: "New customer service type" })
+    .getByRole("button", { name: "Dine in" }).click();
+  await page.getByRole("button", { name: /Table 4/ }).click();
   await expect(page.getByRole("heading", { name: "Dine-in order", exact: true })).toBeVisible();
 }
 
@@ -257,6 +253,9 @@ test("reload fetches the tab's saved order ID and reprints without committing ag
   await expect.poll(() => postCount).toBe(1);
 
   await page.reload();
+  await page.getByRole("group", { name: "New customer service type" })
+    .getByRole("button", { name: "Dine in" }).click();
+  await page.getByRole("button", { name: /Table 4/ }).click();
   await expect(page.getByText(`Saved order ${orderResponse.order.order_number} · Table 4`)).toBeVisible();
   await expect.poll(() => lookupCount).toBeGreaterThan(0);
 

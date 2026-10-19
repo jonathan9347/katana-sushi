@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Download, Eye, Printer, RotateCcw, Settings, ShoppingCart, Table2 } from "lucide-react";
+import { Download, Eye, Printer, RotateCcw, Settings, ShoppingCart } from "lucide-react";
 import { Link } from "react-router-dom";
 import SectionNav, { SectionNavTab } from "../../../components/layout/SectionNav";
 import TransactionDetailsModal, { PosHistoryTransaction } from "../../../components/pos/TransactionDetailsModal";
@@ -29,7 +29,6 @@ type HistoryTable = {
 
 const posTabs: Array<SectionNavTab> = [
   { id: "new-sale", label: "Takeout Sale", icon: <ShoppingCart className="h-4 w-4" />, to: "/staff/pos", end: true },
-  { id: "dining", label: "Table Service", icon: <Table2 className="h-4 w-4" />, to: "/staff/pos/dining" },
   { id: "history", label: "Transaction History", icon: <Printer className="h-4 w-4" />, to: "/staff/pos/history" },
   { id: "settings", label: "Unlimited Settings", icon: <Settings className="h-4 w-4" />, to: "/staff/pos/unlimited-settings" }
 ];

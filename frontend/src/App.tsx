@@ -87,7 +87,7 @@ export default function App() {
       <Route path="/staff/inventory" element={<StaffPage roles={["admin", "inventory_manager"]}><InventoryPage /></StaffPage>} />
       <Route path="/staff/inventory/read-only" element={<StaffPage roles={["admin", "inventory_manager", "chef"]}><InventoryPage readOnly /></StaffPage>} />
       <Route path="/staff/pos" element={<StaffPage roles={["admin", "cashier"]}><PosPage /></StaffPage>} />
-      <Route path="/staff/pos/dining" element={<StaffPage roles={["admin", "cashier"]}><DiningService /></StaffPage>} />
+      <Route path="/staff/pos/dining" element={<Navigate to="/staff/pos" replace />} />
       <Route path="/staff/kitchen" element={<StaffPage roles={["admin", "cashier", "chef"]}><DiningService mode="kitchen" /></StaffPage>} />
       <Route path="/staff/takeout" element={<StaffPage roles={["admin", "cashier", "receptionist", "chef"]}><TakeoutOrders /></StaffPage>} />
       <Route path="/staff/pos/history" element={<StaffPage roles={["admin", "cashier"]}><PosHistory /></StaffPage>} />

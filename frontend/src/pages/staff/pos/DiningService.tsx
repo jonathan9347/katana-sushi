@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ChefHat, Printer, ShoppingCart, Table2 } from "lucide-react";
+import { ChefHat, Printer, ShoppingCart } from "lucide-react";
 import { Link } from "react-router-dom";
 import SectionNav, { SectionNavTab } from "../../../components/layout/SectionNav";
 import { Dialog } from "../../../components/ui/dialog";
@@ -177,8 +177,7 @@ type DiningActionResult = {
 };
 
 const posTabs: SectionNavTab[] = [
-  { id: "sale", label: "Takeout Sale", icon: <ShoppingCart className="h-4 w-4" />, to: "/staff/pos", end: true },
-  { id: "dining", label: "Table Service", icon: <Table2 className="h-4 w-4" />, to: "/staff/pos/dining" },
+  { id: "sale", label: "Main POS", icon: <ShoppingCart className="h-4 w-4" />, to: "/staff/pos", end: true },
   { id: "kitchen", label: "Kitchen Tickets", icon: <ChefHat className="h-4 w-4" />, to: "/staff/kitchen" }
 ];
 
