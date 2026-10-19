@@ -928,6 +928,37 @@ router.patch(
   })
 );
 
+router.get(
+  "/api/pos/dining/orders/:id",
+  roleGuard(["admin", "cashier"]),
+  asyncRoute(async (req, res) => {
+    const orderId = z.string().min(1).parse(req.params.id);
+    const order = await prisma.diningOrder.findFirst({
+      where: { id: orderId, status: "committed" },
+      select: {
+        id: true,
+        order_number: true,
+        table_number_snapshot: true,
+        created_at: true,
+        items: {
+          select: {
+            id: true,
+            name_snapshot: true,
+            quantity: true,
+            unit_price: true,
+            total_price: true
+          },
+          orderBy: { id: "asc" }
+        }
+      }
+    });
+    if (!order) {
+      throw new InventoryError("Committed dine-in order not found.", "ORDER_NOT_FOUND", 404);
+    }
+    return res.json({ order });
+  })
+);
+
 router.post(
   "/api/pos/dining/sessions/:id/orders",
   roleGuard(["admin", "cashier"]),

@@ -84,6 +84,10 @@ async function openDiningService(
       await route.fulfill({ json: { settings: { price_per_person: 1500 } } });
       return;
     }
+    if (url.pathname === `/api/pos/dining/orders/${orderResponse.order.id}` && route.request().method() === "GET") {
+      await route.fulfill({ json: { order: orderResponse.order } });
+      return;
+    }
     if (url.pathname === "/api/pos/dining/sessions/session-1/orders" && route.request().method() === "POST") {
       await postOrder(route);
       return;
@@ -136,6 +140,38 @@ test("confirms guestless order with reviewed price and reprints saved slip witho
   await expect(reprintedSlip.locator("body")).toContainText("DO-PRINT-001");
   await expect(reprintedSlip.locator("body")).toHaveAttribute("data-print-requested", "true");
   expect(requests).toHaveLength(1);
+});
+
+test("reload fetches the tab's saved order ID and reprints without committing again", async ({ page }) => {
+  let postCount = 0;
+  let lookupCount = 0;
+  page.on("dialog", (dialog) => dialog.accept());
+  await openDiningService(page, async (route) => {
+    postCount += 1;
+    await route.fulfill({ json: orderResponse, status: 201 });
+  });
+  page.on("request", (request) => {
+    if (request.method() === "GET" && request.url().includes(`/api/pos/dining/orders/${orderResponse.order.id}`)) {
+      lookupCount += 1;
+    }
+  });
+  await addOneOrderLine(page);
+  const firstPopupPromise = page.waitForEvent("popup");
+  await page.getByRole("button", { name: "Confirm & Print" }).click();
+  await firstPopupPromise;
+  await expect(page.getByRole("button", { name: "Reprint" })).toBeVisible();
+  await expect.poll(() => postCount).toBe(1);
+
+  await page.reload();
+  await expect(page.getByText(`Saved order ${orderResponse.order.order_number} · Table 4`)).toBeVisible();
+  await expect.poll(() => lookupCount).toBeGreaterThan(0);
+
+  const reprintPopupPromise = page.waitForEvent("popup");
+  await page.getByRole("button", { name: "Reprint" }).click();
+  const reprintedSlip = await reprintPopupPromise;
+  await expect(reprintedSlip.locator("body")).toContainText("REPRINT");
+  await expect(reprintedSlip.locator("body")).toContainText("DO-PRINT-001");
+  expect(postCount).toBe(1);
 });
 
 test("double-click commits only once", async ({ page }) => {

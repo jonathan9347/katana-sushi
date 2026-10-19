@@ -150,6 +150,7 @@ type Props = { mode?: "service" | "kitchen" };
 type DraftItem = { productId: string; quantity: number };
 type CommitOrderInput = { review: ReviewedOrder; printWindow: Window | null };
 type DiningAction = { method: "post" | "patch"; url: string; body?: unknown };
+const LAST_COMMITTED_ORDER_STORAGE_KEY = "katana_last_committed_dining_order_id";
 type DiningActionResult = {
   transaction?: CheckoutTransaction;
   replayed?: boolean;
@@ -256,7 +257,9 @@ export default function DiningService({ mode = "service" }: Props) {
   const [draftItems, setDraftItems] = useState<DraftItem[]>([]);
   const [draftKey, setDraftKey] = useState(() => crypto.randomUUID());
   const [orderReview, setOrderReview] = useState<ReviewedOrder | null>(null);
-  const [lastCommittedOrder, setLastCommittedOrder] = useState<CommittedDiningOrder | null>(null);
+  const [lastCommittedOrderId, setLastCommittedOrderId] = useState(
+    () => sessionStorage.getItem(LAST_COMMITTED_ORDER_STORAGE_KEY) ?? ""
+  );
   const [printError, setPrintError] = useState("");
   const confirmClickLocked = useRef(false);
   const [packageCovers, setPackageCovers] = useState(1);
@@ -317,6 +320,16 @@ export default function DiningService({ mode = "service" }: Props) {
       (await api.get<{ settings: UnlimitedSettings }>("/api/admin/unlimited/settings")).data.settings,
     enabled: !kitchenOnly
   });
+  const lastCommittedOrderQuery = useQuery({
+    queryKey: ["pos", "dining", "committed-order", lastCommittedOrderId],
+    queryFn: async () =>
+      (await api.get<{ order: CommittedDiningOrder }>(
+        `/api/pos/dining/orders/${encodeURIComponent(lastCommittedOrderId)}`
+      )).data.order,
+    enabled: !kitchenOnly && Boolean(lastCommittedOrderId),
+    retry: false
+  });
+  const lastCommittedOrder = lastCommittedOrderQuery.data ?? null;
   const session = sessionsQuery.data?.find((item) => item.id === selectedSessionId) ?? null;
   const activeUnlimited = session?.unlimited_sessions.find((item) => item.status === "active") ?? null;
   const seatedTables = (tablesQuery.data ?? []).filter((table) =>
@@ -427,7 +440,8 @@ export default function DiningService({ mode = "service" }: Props) {
       )
     ).data,
     onSuccess: async (result, input) => {
-      setLastCommittedOrder(result.order);
+      sessionStorage.setItem(LAST_COMMITTED_ORDER_STORAGE_KEY, result.order.id);
+      setLastCommittedOrderId(result.order.id);
       setDraftItems([]);
       setDraftKey(crypto.randomUUID());
       setOrderReview(null);
@@ -668,6 +682,21 @@ export default function DiningService({ mode = "service" }: Props) {
               </div>
             </div>
           </section>
+        )}
+        {!kitchenOnly && lastCommittedOrder && (
+          <section aria-label="Last committed order" className="rounded-xl border border-emerald-300 bg-emerald-50 p-4 shadow-sm">
+            <p className="font-semibold">
+              Saved order {lastCommittedOrder.order_number} · Table {lastCommittedOrder.table_number_snapshot ?? "—"}
+            </p>
+            {printError && <p role="alert" className="mt-1 text-sm text-amber-900">{printError}</p>}
+            <ActionButton className="mt-2" tone="muted" onClick={reprintLastOrder}>Reprint</ActionButton>
+          </section>
+        )}
+        {!kitchenOnly && lastCommittedOrderId && lastCommittedOrderQuery.isLoading && (
+          <p className="text-sm text-slate-600">Loading the saved order for reprint…</p>
+        )}
+        {!kitchenOnly && lastCommittedOrderId && lastCommittedOrderQuery.isError && (
+          <p role="alert" className="text-sm text-red-700">Unable to load the saved order for reprint.</p>
         )}
 
         <div className="grid gap-5 xl:grid-cols-[0.85fr_1.4fr]">
@@ -1035,15 +1064,6 @@ export default function DiningService({ mode = "service" }: Props) {
                           {commitOrder.isPending ? "Committing..." : "Confirm & Print"}
                         </ActionButton>
                       </div>
-                    </section>
-                  )}
-                  {lastCommittedOrder && (
-                    <section aria-label="Last committed order" className="mt-4 rounded-lg border border-emerald-300 bg-emerald-50 p-3">
-                      <p className="font-semibold">
-                        Saved order {lastCommittedOrder.order_number} · Table {lastCommittedOrder.table_number_snapshot ?? "—"}
-                      </p>
-                      {printError && <p role="alert" className="mt-1 text-sm text-amber-900">{printError}</p>}
-                      <ActionButton className="mt-2" tone="muted" onClick={reprintLastOrder}>Reprint</ActionButton>
                     </section>
                   )}
                 </section>

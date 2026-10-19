@@ -334,6 +334,52 @@ test("commits a guestless a-la-carte order, snapshots price/table, and consumes 
   assert.deepEqual(await readStock(fixture), { onHand: 16, batchRemaining: 16 });
 });
 
+test("read-only committed-order lookup returns saved snapshots without changing stock or movements", async () => {
+  const fixture = await createFixture();
+  const commitResponse = await request(
+    `/api/pos/dining/sessions/${fixture.sessionId}/orders`,
+    orderBody(fixture, "step46-reprint-readonly-0001")
+  );
+  const commitText = await commitResponse.text();
+  assert.equal(commitResponse.status, 201, commitText);
+  const committed = JSON.parse(commitText) as {
+    order: {
+      id: string;
+      order_number: string;
+      table_number_snapshot: number;
+      created_at: string;
+      items: Array<{ id: string; name_snapshot: string; quantity: number; unit_price: number; total_price: number }>;
+    };
+  };
+  const stockBeforeLookup = await readStock(fixture);
+  const movementsBeforeLookup = await prisma.inventoryMovement.count({
+    where: { raw_material_id: fixture.materialId, source_reference: committed.order.order_number }
+  });
+
+  const lookupResponse = await request(`/api/pos/dining/orders/${committed.order.id}`, undefined, "GET");
+  const lookupText = await lookupResponse.text();
+  assert.equal(lookupResponse.status, 200, lookupText);
+  const lookup = JSON.parse(lookupText) as { order: typeof committed.order };
+  assert.equal(lookup.order.id, committed.order.id);
+  assert.equal(lookup.order.order_number, committed.order.order_number);
+  assert.equal(lookup.order.table_number_snapshot, committed.order.table_number_snapshot);
+  assert.ok(lookup.order.created_at);
+  assert.equal(lookup.order.items.length, committed.order.items.length);
+  assert.equal(lookup.order.items[0].id, committed.order.items[0].id);
+  assert.equal(lookup.order.items[0].name_snapshot, committed.order.items[0].name_snapshot);
+  assert.equal(lookup.order.items[0].quantity, committed.order.items[0].quantity);
+  assert.equal(lookup.order.items[0].unit_price, committed.order.items[0].unit_price);
+  assert.equal(lookup.order.items[0].total_price, committed.order.items[0].total_price);
+  assert.deepEqual(await readStock(fixture), stockBeforeLookup);
+  assert.equal(await prisma.inventoryMovement.count({
+    where: { raw_material_id: fixture.materialId, source_reference: committed.order.order_number }
+  }), movementsBeforeLookup);
+  assert.equal(await prisma.diningOrder.count({ where: { id: committed.order.id } }), 1);
+
+  const missingResponse = await request("/api/pos/dining/orders/does-not-exist", undefined, "GET");
+  assert.equal(missingResponse.status, 404);
+});
+
 test("concurrent duplicate commits and retries replay one order without a second stock deduction", async () => {
   const fixture = await createFixture();
   const body = orderBody(fixture, "step44-idempotent-concurrent-01");
