@@ -157,7 +157,7 @@ type CheckoutTransaction = {
   dining_session: { table: { table_number: number } };
 };
 
-type Props = { mode?: "service" | "kitchen" };
+type Props = { mode?: "service" | "kitchen" | "board"; embedded?: boolean };
 type DraftItem = { productId: string; quantity: number };
 type CommitOrderInput = { review: ReviewedOrder; printWindow: Window | null };
 type DiningAction = { method: "post" | "patch"; url: string; body?: unknown };
@@ -257,10 +257,12 @@ function errorCode(error: unknown) {
   return undefined;
 }
 
-export default function DiningService({ mode = "service" }: Props) {
+export default function DiningService({ mode = "service", embedded = false }: Props) {
   const role = (localStorage.getItem("katana_role") ?? "").toLowerCase();
   const isAdmin = role === "admin";
   const kitchenOnly = mode === "kitchen";
+  const boardOnly = mode === "board";
+  const MainContainer = embedded ? "div" : "main";
   const [selectedSessionId, setSelectedSessionId] = useState("");
   const [orderType, setOrderType] = useState<"ala_carte" | "unlimited">("ala_carte");
   const [productId, setProductId] = useState("");
@@ -323,18 +325,19 @@ export default function DiningService({ mode = "service" }: Props) {
   const kitchenQuery = useQuery({
     queryKey: ["pos", "kitchen", "orders"],
     queryFn: async () => (await api.get<{ orders: KitchenOrder[] }>("/api/pos/kitchen/orders")).data.orders,
-    refetchInterval: 10000
+    refetchInterval: 10000,
+    enabled: !boardOnly
   });
   const productsQuery = useQuery({
     queryKey: ["products"],
     queryFn: async () => (await api.get<{ products: PosProduct[] }>("/api/products")).data.products,
-    enabled: !kitchenOnly
+    enabled: !kitchenOnly && !boardOnly
   });
   const unlimitedSettingsQuery = useQuery({
     queryKey: ["admin", "unlimited", "settings"],
     queryFn: async () =>
       (await api.get<{ settings: UnlimitedSettings }>("/api/admin/unlimited/settings")).data.settings,
-    enabled: !kitchenOnly
+    enabled: !kitchenOnly && !boardOnly
   });
   const lastCommittedOrderQuery = useQuery({
     queryKey: ["pos", "dining", "committed-order", lastCommittedOrderId],
@@ -342,7 +345,7 @@ export default function DiningService({ mode = "service" }: Props) {
       (await api.get<{ order: CommittedDiningOrder }>(
         `/api/pos/dining/orders/${encodeURIComponent(lastCommittedOrderId)}`
       )).data.order,
-    enabled: !kitchenOnly && Boolean(lastCommittedOrderId),
+    enabled: !kitchenOnly && !boardOnly && Boolean(lastCommittedOrderId),
     retry: false
   });
   const lastCommittedOrder = lastCommittedOrderQuery.data ?? null;
@@ -455,7 +458,7 @@ export default function DiningService({ mode = "service" }: Props) {
         `/api/pos/dining/sessions/${selectedSessionId}/checkout-preview?${query.toString()}`
       )).data;
     },
-    enabled: !kitchenOnly && Boolean(selectedSessionId) && showCheckout && checkoutHeadcountValid,
+    enabled: !kitchenOnly && !boardOnly && Boolean(selectedSessionId) && showCheckout && checkoutHeadcountValid,
     refetchInterval: 10000,
     retry: false
   });
@@ -745,21 +748,21 @@ export default function DiningService({ mode = "service" }: Props) {
   }
 
   return (
-    <main className="min-h-screen bg-slate-100 px-4 py-5 lg:pr-6">
-      <div className="mx-auto max-w-7xl space-y-5">
+    <MainContainer className={embedded ? "space-y-5" : "min-h-screen bg-slate-100 px-4 py-5 lg:pr-6"}>
+      <div className={embedded ? "space-y-5" : "mx-auto max-w-7xl space-y-5"}>
         <header className="flex flex-wrap items-end justify-between gap-3">
           <div>
             <p className="text-sm font-bold uppercase text-red-700">Point of sale</p>
-            <h1 className="text-3xl font-black text-slate-950">Table service</h1>
+            <h1 className="text-3xl font-black text-slate-950">{boardOnly ? "Existing table" : "Table service"}</h1>
           </div>
           <div className="flex flex-wrap items-center gap-3">
-            <p className="text-sm text-slate-500">New dine-in orders deduct stock at Confirm &amp; Print; legacy kitchen tickets deduct when released.</p>
+            {!boardOnly && <p className="text-sm text-slate-500">New dine-in orders deduct stock at Confirm &amp; Print; legacy kitchen tickets deduct when released.</p>}
             <ActionButton tone="muted" onClick={() => setManageTablesOpen(true)}>Manage tables</ActionButton>
           </div>
         </header>
-        <SectionNav orientation="horizontal" tabs={posTabs} />
+        {!embedded && <SectionNav orientation="horizontal" tabs={posTabs} />}
         {(tablesQuery.isError || sessionsQuery.isError || upcomingReservationsQuery.isError) && <p className="rounded bg-red-50 p-3 text-sm text-red-800">Unable to load dining tables, sessions, or upcoming reservations.</p>}
-        {completedTransaction && (
+        {!boardOnly && completedTransaction && (
           <section className="rounded-xl border border-emerald-200 bg-emerald-50 p-4 shadow-sm">
             <div className="flex flex-wrap items-start justify-between gap-3">
               <div>
@@ -776,7 +779,7 @@ export default function DiningService({ mode = "service" }: Props) {
             </div>
           </section>
         )}
-        {!kitchenOnly && lastCommittedOrder && (
+        {!boardOnly && !kitchenOnly && lastCommittedOrder && (
           <section aria-label="Last committed order" className="rounded-xl border border-emerald-300 bg-emerald-50 p-4 shadow-sm">
             <p className="font-semibold">
               Saved order {lastCommittedOrder.order_number} · Table {lastCommittedOrder.table_number_snapshot ?? "—"}
@@ -785,10 +788,10 @@ export default function DiningService({ mode = "service" }: Props) {
             <ActionButton className="mt-2" tone="muted" onClick={reprintLastOrder}>Reprint</ActionButton>
           </section>
         )}
-        {!kitchenOnly && lastCommittedOrderId && lastCommittedOrderQuery.isLoading && (
+        {!boardOnly && !kitchenOnly && lastCommittedOrderId && lastCommittedOrderQuery.isLoading && (
           <p className="text-sm text-slate-600">Loading the saved order for reprint…</p>
         )}
-        {!kitchenOnly && lastCommittedOrderId && lastCommittedOrderQuery.isError && (
+        {!boardOnly && !kitchenOnly && lastCommittedOrderId && lastCommittedOrderQuery.isError && (
           <p role="alert" className="text-sm text-red-700">Unable to load the saved order for reprint.</p>
         )}
 
@@ -891,13 +894,15 @@ export default function DiningService({ mode = "service" }: Props) {
               </div>
             </section>
 
-            <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-              <h2 className="mb-2 text-lg font-bold">Kitchen queue</h2>
-              <p className="mb-3 text-sm text-slate-500">{currentOrders.length} tickets waiting for preparation, readiness, or release.</p>
-              <Link to="/staff/kitchen" className="inline-flex items-center gap-2 rounded border border-slate-300 px-3 py-2 text-sm font-bold text-slate-700 hover:bg-slate-50">
-                <ChefHat className="h-4 w-4" /> Open kitchen board
-              </Link>
-            </section>
+            {!boardOnly && (
+              <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+                <h2 className="mb-2 text-lg font-bold">Kitchen queue</h2>
+                <p className="mb-3 text-sm text-slate-500">{currentOrders.length} tickets waiting for preparation, readiness, or release.</p>
+                <Link to="/staff/kitchen" className="inline-flex items-center gap-2 rounded border border-slate-300 px-3 py-2 text-sm font-bold text-slate-700 hover:bg-slate-50">
+                  <ChefHat className="h-4 w-4" /> Open kitchen board
+                </Link>
+              </section>
+            )}
           </section>
 
           <section className="space-y-5">
@@ -983,7 +988,22 @@ export default function DiningService({ mode = "service" }: Props) {
                 )}
               </div>
             </section>
-            {!session ? (
+            {boardOnly ? (
+              <section aria-label="Selected existing table" className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+                {session ? (
+                  <>
+                    <h2 className="text-lg font-bold">Table {session.table.table_number} selected</h2>
+                    <p className="mt-2 text-sm text-slate-600">
+                      Dine-in ordering will be available here in the next POS step.
+                    </p>
+                  </>
+                ) : (
+                  <p className="text-sm text-slate-600">
+                    Select an active table or seat a walk-in or reservation from the board.
+                  </p>
+                )}
+              </section>
+            ) : !session ? (
               <section className="grid min-h-64 place-items-center rounded-xl border border-dashed border-slate-300 bg-white p-6 text-center text-slate-500">
                 Select an active table to prepare and confirm orders or check out.
               </section>
@@ -1417,7 +1437,7 @@ export default function DiningService({ mode = "service" }: Props) {
           </div>
         </Dialog>
       </div>
-    </main>
+    </MainContainer>
   );
 }
 

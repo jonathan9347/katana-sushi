@@ -11,6 +11,7 @@ import { useToast } from "../../../hooks/useToast";
 import { Button } from "../../../components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "../../../components/ui/card";
 import { Select } from "../../../components/ui/select";
+import DiningService from "./DiningService";
 
 type PosTransaction = {
   id: string;
@@ -63,6 +64,7 @@ function getApiErrorMessage(error: unknown, fallback: string) {
 }
 
 export default function PosPage() {
+  const [customerType, setCustomerType] = useState<"new_customer" | "existing_table">("new_customer");
   const [customerName, setCustomerName] = useState("");
   const [category, setCategory] = useState("All");
   const [paymentOpen, setPaymentOpen] = useState(false);
@@ -172,7 +174,7 @@ export default function PosPage() {
         <div className="flex items-center justify-between">
           <div>
             <p className="text-sm font-medium uppercase text-red-700">Point of Sale</p>
-            <h1 className="text-3xl font-semibold text-slate-950">Takeout Sale</h1>
+            <h1 className="text-3xl font-semibold text-slate-950">{customerType === "existing_table" ? "Existing table" : "Takeout Sale"}</h1>
           </div>
           <p className="text-sm text-slate-500">Signed in as {role}</p>
         </div>
@@ -181,16 +183,17 @@ export default function PosPage() {
           <h2 className="text-sm font-bold uppercase text-slate-600">Customer type</h2>
           <div aria-label="Customer type choices" className="mt-3 flex flex-wrap gap-2" role="group">
             <button
-              aria-pressed="true"
-              className="rounded-md border border-red-800 bg-red-800 px-4 py-2 text-sm font-bold text-white"
+              aria-pressed={customerType === "new_customer"}
+              className={`rounded-md border px-4 py-2 text-sm font-bold ${customerType === "new_customer" ? "border-red-800 bg-red-800 text-white" : "border-slate-300 bg-white text-slate-700"}`}
+              onClick={() => setCustomerType("new_customer")}
               type="button"
             >
               New customer
             </button>
             <button
-              aria-describedby="existing-table-unavailable"
-              className="rounded-md border border-slate-300 bg-slate-100 px-4 py-2 text-sm font-bold text-slate-500"
-              disabled
+              aria-pressed={customerType === "existing_table"}
+              className={`rounded-md border px-4 py-2 text-sm font-bold ${customerType === "existing_table" ? "border-red-800 bg-red-800 text-white" : "border-slate-300 bg-white text-slate-700"}`}
+              onClick={() => setCustomerType("existing_table")}
               type="button"
             >
               Existing table
@@ -204,7 +207,7 @@ export default function PosPage() {
               Pickup customer
             </button>
           </div>
-          <div aria-label="New customer service type" className="mt-3 flex flex-wrap items-center gap-2" role="group">
+          {customerType === "new_customer" && <div aria-label="New customer service type" className="mt-3 flex flex-wrap items-center gap-2" role="group">
             <span className="text-sm font-medium text-slate-600">New customer service:</span>
             <button
               aria-describedby="dine-in-unavailable"
@@ -221,14 +224,17 @@ export default function PosPage() {
             >
               Takeout
             </button>
-          </div>
+          </div>}
           <div className="mt-2 space-y-1 text-xs text-slate-500">
             <p id="dine-in-unavailable">Dine in will be available when dine-in ordering is added to this POS.</p>
-            <p id="existing-table-unavailable">Existing table will be available when the table board is added to this POS.</p>
+            {customerType === "new_customer" && <p id="existing-table-unavailable">Existing table opens the table board.</p>}
             <p id="pickup-customer-unavailable">Pickup customer is disabled until Phase 4.</p>
           </div>
         </section>
 
+        {customerType === "existing_table" ? (
+          <DiningService mode="board" embedded />
+        ) : (
         <div className="grid gap-4 lg:grid-cols-[220px_minmax(0,1fr)] lg:items-start">
           <aside className="lg:sticky lg:top-6">
             <SectionNav orientation="vertical" tabs={posTabs} />
@@ -370,6 +376,7 @@ export default function PosPage() {
             </div>
           </section>
         </div>
+        )}
       </div>
 
       <PaymentModal

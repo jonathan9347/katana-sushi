@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 
-test("keeps takeout active and disables customer types whose POS flows are not built yet", async ({ page }) => {
+test("keeps takeout active while Dine in and Pickup are unavailable", async ({ page }) => {
   await page.addInitScript(() => {
     localStorage.setItem("katana_token", "playwright-token");
     localStorage.setItem("katana_role", "cashier");
@@ -28,11 +28,11 @@ test("keeps takeout active and disables customer types whose POS flows are not b
 
   const customerType = page.getByRole("region", { name: "Customer type" });
   await expect(customerType.getByRole("button", { name: "New customer" })).toHaveAttribute("aria-pressed", "true");
-  await expect(customerType.getByRole("button", { name: "Existing table" })).toBeDisabled();
+  await expect(customerType.getByRole("button", { name: "Existing table" })).toBeEnabled();
+  await expect(customerType.getByRole("button", { name: "Existing table" })).toHaveAttribute("aria-pressed", "false");
   await expect(customerType.getByRole("button", { name: "Pickup customer" })).toBeDisabled();
   await expect(customerType.getByRole("button", { name: "Dine in" })).toBeDisabled();
   await expect(customerType.getByRole("button", { name: "Takeout" })).toHaveAttribute("aria-pressed", "true");
-  await expect(customerType).toContainText("Existing table will be available when the table board is added to this POS.");
   await expect(customerType).toContainText("Pickup customer is disabled until Phase 4.");
   await expect(page.getByRole("heading", { name: "Takeout Sale" })).toBeVisible();
 });
