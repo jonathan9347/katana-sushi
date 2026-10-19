@@ -219,6 +219,8 @@ model PosTransaction {
   unlimited_amount      Float    @default(0)
   leftover_amount       Float    @default(0)
   discount_amount       Float    @default(0)
+  discount_base_snapshot Float?
+  discount_rate_snapshot Float?
   guest_count           Int      @default(0)
   discount_guest_count  Int      @default(0)
   total                 Float
