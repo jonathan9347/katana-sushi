@@ -4,6 +4,7 @@ import { ChefHat, Printer, ShoppingCart, Table2 } from "lucide-react";
 import { Link } from "react-router-dom";
 import SectionNav, { SectionNavTab } from "../../../components/layout/SectionNav";
 import { Dialog } from "../../../components/ui/dialog";
+import UnlimitedTimer from "../../../components/pos/UnlimitedTimer";
 import { api } from "../../../lib/api";
 import { useToast } from "../../../hooks/useToast";
 
@@ -158,7 +159,7 @@ type CheckoutTransaction = {
 };
 
 type Props = {
-  mode?: "service" | "kitchen" | "board" | "a_la_carte";
+  mode?: "service" | "kitchen" | "board";
   embedded?: boolean;
   initialSessionId?: string;
   onSessionSelected?: (sessionId: string) => void;
@@ -276,7 +277,6 @@ export default function DiningService({
   const isAdmin = role === "admin";
   const kitchenOnly = mode === "kitchen";
   const boardOnly = mode === "board";
-  const aLaCarteOnly = mode === "a_la_carte";
   const MainContainer = embedded ? "div" : "main";
   const [selectedSessionId, setSelectedSessionId] = useState(initialSessionId);
   const [orderType, setOrderType] = useState<"ala_carte" | "unlimited">("ala_carte");
@@ -356,7 +356,7 @@ export default function DiningService({
     queryKey: ["admin", "unlimited", "settings"],
     queryFn: async () =>
       (await api.get<{ settings: UnlimitedSettings }>("/api/admin/unlimited/settings")).data.settings,
-    enabled: !kitchenOnly && !boardOnly && !aLaCarteOnly
+    enabled: !kitchenOnly && !boardOnly
   });
   const lastCommittedOrderQuery = useQuery({
     queryKey: ["pos", "dining", "committed-order", lastCommittedOrderId],
@@ -614,8 +614,7 @@ export default function DiningService({
       return;
     }
     const nextItems = [...draftItems, { productId, quantity }];
-    const shouldOfferConversion = !aLaCarteOnly
-      && orderType === "ala_carte"
+    const shouldOfferConversion = orderType === "ala_carte"
       && !canConvertDraftToUnlimited(draftItems)
       && canConvertDraftToUnlimited(nextItems);
     setDraftItems(nextItems);
@@ -1065,20 +1064,18 @@ export default function DiningService({
                       >
                         A la carte ({aLaCarteDraftItems.length})
                       </button>
-                      {!aLaCarteOnly && (
-                        <button
-                          aria-pressed={orderType === "unlimited"}
-                          className={`rounded border px-3 py-2 text-sm font-bold ${orderType === "unlimited" ? "border-violet-900 bg-violet-900 text-white" : "border-slate-300 bg-white"}`}
-                          disabled={orderControlsDisabled}
-                          onClick={() => {
-                            setOrderType("unlimited");
-                            setProductId("");
-                            setOrderReview(null);
-                          }}
-                        >
-                          Unlimited ({unlimitedDraftItems.length})
-                        </button>
-                      )}
+                      <button
+                        aria-pressed={orderType === "unlimited"}
+                        className={`rounded border px-3 py-2 text-sm font-bold ${orderType === "unlimited" ? "border-violet-900 bg-violet-900 text-white" : "border-slate-300 bg-white"}`}
+                        disabled={orderControlsDisabled}
+                        onClick={() => {
+                          setOrderType("unlimited");
+                          setProductId("");
+                          setOrderReview(null);
+                        }}
+                      >
+                        Unlimited ({unlimitedDraftItems.length})
+                      </button>
                     </div>
                   </div>
                   {orderType === "unlimited" && (
@@ -1089,6 +1086,10 @@ export default function DiningService({
                             {activeUnlimited.pax_count} covers × {money(Number(activeUnlimited.price_per_pax))} ·
                             {activeUnlimited.first_round_at ? ` started ${formatTime(activeUnlimited.first_round_at)} · ends ${formatTime(activeUnlimited.ends_at)}` : ` timer starts when the first legacy ticket is served · ends ${formatTime(activeUnlimited.ends_at)}`}
                           </span>
+                          <UnlimitedTimer
+                            firstRoundAt={activeUnlimited.first_round_at}
+                            endsAt={activeUnlimited.ends_at}
+                          />
                           <div className="grid gap-1">
                             <ActionButton
                               tone="muted"

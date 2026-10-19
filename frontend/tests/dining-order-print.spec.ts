@@ -39,8 +39,18 @@ async function openDiningService(
   postOrder: (route: Route) => Promise<void>,
   getProductPrice: () => number = () => 100,
   menuProducts?: MockMenuProduct[],
-  path = "/staff/pos/dining"
+  path = "/staff/pos/dining",
+  sessionGuestCount = 0
 ) {
+  let activeUnlimitedSession: {
+    id: string;
+    pax_count: number;
+    price_per_pax: number;
+    status: string;
+    ends_at: string;
+    first_round_at: string | null;
+    extensions: Array<{ minutes: number; created_at: string }>;
+  } | null = null;
   await page.context().addInitScript(() => {
     localStorage.setItem("katana_token", "playwright-token");
     localStorage.setItem("katana_role", "cashier");
@@ -72,10 +82,40 @@ async function openDiningService(
         status: "active",
         table_id: "table-1",
         table: { id: "table-1", table_number: 4, capacity: 4 },
-        guests: [],
+        guests: Array.from({ length: sessionGuestCount }, (_, index) => ({
+          id: `guest-${index + 1}`,
+          guest_number: index + 1
+        })),
         orders: [],
-        unlimited_sessions: []
+        unlimited_sessions: activeUnlimitedSession ? [activeUnlimitedSession] : []
       }] } });
+      return;
+    }
+    if (url.pathname === "/api/pos/dining/sessions/session-1/unlimited-sessions" && route.request().method() === "POST") {
+      const body = route.request().postDataJSON() as { paxCount: number };
+      const startedAt = new Date();
+      activeUnlimitedSession = {
+        id: "unlimited-session-1",
+        pax_count: body.paxCount,
+        price_per_pax: 1500,
+        status: "active",
+        first_round_at: startedAt.toISOString(),
+        ends_at: new Date(startedAt.getTime() + 90 * 60_000).toISOString(),
+        extensions: []
+      };
+      await route.fulfill({ status: 201, json: { unlimited_session: activeUnlimitedSession } });
+      return;
+    }
+    if (url.pathname === "/api/pos/dining/unlimited-sessions/unlimited-session-1/extend" && route.request().method() === "POST") {
+      if (activeUnlimitedSession) {
+        const extendedAt = new Date();
+        activeUnlimitedSession = {
+          ...activeUnlimitedSession,
+          ends_at: new Date(Math.max(new Date(activeUnlimitedSession.ends_at).getTime(), extendedAt.getTime()) + 30 * 60_000).toISOString(),
+          extensions: [...activeUnlimitedSession.extensions, { minutes: 30, created_at: extendedAt.toISOString() }]
+        };
+      }
+      await route.fulfill({ json: { session: activeUnlimitedSession } });
       return;
     }
     if (url.pathname === "/api/pos/dining/upcoming-reservations") {
@@ -129,7 +169,7 @@ async function openDiningService(
       return;
     }
     if (url.pathname === "/api/admin/unlimited/settings") {
-      await route.fulfill({ json: { settings: { price_per_person: 1500 } } });
+      await route.fulfill({ json: { settings: { price_per_person: 1500, extension_minutes: 30 } } });
       return;
     }
     if (url.pathname === `/api/pos/dining/orders/${orderResponse.order.id}` && route.request().method() === "GET") {
@@ -237,7 +277,7 @@ test("main POS dine-in commits, reprints, and checks out through the saved-order
     await route.fulfill({ json: orderResponse, status: 201 });
   }, () => 100, undefined, "/staff/pos");
 
-  await expect(page.getByRole("button", { name: /^Unlimited/ })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: /^Unlimited/ })).toHaveCount(1);
   await addOneOrderLine(page);
   const printPopupPromise = page.waitForEvent("popup");
   await page.getByRole("button", { name: "Confirm & Print" }).click();
@@ -295,6 +335,118 @@ test("main POS dine-in commits, reprints, and checks out through the saved-order
   await expect(page.getByText("Checkout complete")).toBeVisible();
   expect(submittedCheckout).toMatchObject({ guestCount: 10, seniorPwdCount: 3, cashReceived: 200 });
   expect(orderPostCount).toBe(1);
+});
+
+test("main POS offers smart conversion to the Unlimited cart", async ({ page }) => {
+  let conversionPrompt = "";
+  page.on("dialog", async (dialog) => {
+    conversionPrompt = dialog.message();
+    await dialog.accept();
+  });
+  await openDiningService(page, async (route) => {
+    await route.fulfill({ json: orderResponse, status: 201 });
+  }, () => 100, [{
+    id: "included-product",
+    name: "Iced Tea",
+    category: "Beverage",
+    price: 45,
+    is_available: true,
+    is_included: true,
+    is_sold_a_la_carte: true,
+    cart_compatibility: {
+      a_la_carte: { allowed: true, classification: "included_in_unlimited" },
+      unlimited: { allowed: true, classification: "included_in_unlimited" }
+    }
+  }], "/staff/pos");
+
+  await page.getByLabel("Product").selectOption("included-product");
+  await page.getByRole("button", { name: "Add item" }).click();
+  await expect.poll(() => conversionPrompt).toContain("Convert this cart to the Unlimited cart");
+  await expect(page.getByRole("button", { name: "Unlimited (1)" })).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByText("1 × Iced Tea · Included")).toBeVisible();
+});
+
+test("main POS supports both carts, saved headcount, live Unlimited timer, and free configured extension", async ({ page }) => {
+  let submittedOrder: Record<string, unknown> | undefined;
+  let extensionPrompt = "";
+  page.on("dialog", async (dialog) => {
+    extensionPrompt = dialog.message();
+    await dialog.accept();
+  });
+  await openDiningService(page, async (route) => {
+    submittedOrder = route.request().postDataJSON() as Record<string, unknown>;
+    await route.fulfill({ json: orderResponse, status: 201 });
+  }, () => 100, [
+    {
+      id: "product-1",
+      name: "California Roll",
+      category: "Sushi",
+      price: 100,
+      is_available: true,
+      is_included: false,
+      is_sold_a_la_carte: true,
+      cart_compatibility: {
+        a_la_carte: { allowed: true, classification: "a_la_carte_only" },
+        unlimited: { allowed: false, classification: "a_la_carte_only", message: "Not included in Unlimited." }
+      }
+    },
+    {
+      id: "included-product",
+      name: "Iced Tea",
+      category: "Beverage",
+      price: 45,
+      is_available: true,
+      is_included: true,
+      is_sold_a_la_carte: true,
+      cart_compatibility: {
+        a_la_carte: { allowed: true, classification: "included_in_unlimited" },
+        unlimited: { allowed: true, classification: "included_in_unlimited" }
+      }
+    }
+  ], "/staff/pos", 1);
+
+  await page.getByLabel("Product").selectOption("product-1");
+  await page.getByRole("button", { name: "Add item" }).click();
+  await expect(page.getByText("1 × California Roll · PHP 100.00 each")).toBeVisible();
+
+  await page.getByRole("button", { name: "Unlimited (0)" }).click();
+  await page.getByLabel("Product").selectOption("included-product");
+  await page.getByRole("button", { name: "Add item" }).click();
+  await expect(page.getByText("1 × Iced Tea · Included")).toBeVisible();
+  await page.getByLabel("Unlimited headcount").fill("3");
+
+  const startRequestPromise = page.waitForRequest((request) =>
+    request.method() === "POST" && request.url().endsWith("/sessions/session-1/unlimited-sessions")
+  );
+  await page.getByRole("button", { name: "Start session" }).click();
+  const startRequest = await startRequestPromise;
+  expect(startRequest.postDataJSON()).toEqual({ paxCount: 3 });
+  await expect(page.getByText("3 covers × PHP 1,500.00")).toBeVisible();
+  await expect(page.getByText("Time Remaining")).toBeVisible();
+  await expect(page.locator("text=/\\b\\d{2}:\\d{2}\\b/").first()).toBeVisible();
+
+  const extensionRequestPromise = page.waitForRequest((request) =>
+    request.method() === "POST" && request.url().endsWith("/unlimited-session-1/extend")
+  );
+  await page.getByRole("button", { name: "Extend session" }).click();
+  const extensionRequest = await extensionRequestPromise;
+  expect(extensionPrompt).toContain("30 minutes");
+  expect(extensionPrompt).toContain("no fee");
+  expect(extensionRequest.postData()).toBeNull();
+
+  await page.getByRole("button", { name: "A la carte (1)" }).click();
+  await expect(page.getByText("1 × California Roll · PHP 100.00 each")).toBeVisible();
+  await page.getByRole("button", { name: "Unlimited (1)" }).click();
+  await page.getByRole("button", { name: "Review order" }).click();
+  await expect(page.getByTestId("order-review")).toContainText("Confirm Unlimited order · Table 4");
+  const printPopupPromise = page.waitForEvent("popup");
+  await page.getByRole("button", { name: "Confirm & Print" }).click();
+  await printPopupPromise;
+  expect(submittedOrder).toMatchObject({
+    orderType: "unlimited",
+    unlimitedSessionId: "unlimited-session-1",
+    items: [{ productId: "included-product", quantity: 1, expectedUnitPrice: 0 }]
+  });
 });
 
 test("confirms before switching away from an unconfirmed main-POS dine-in order", async ({ page }) => {

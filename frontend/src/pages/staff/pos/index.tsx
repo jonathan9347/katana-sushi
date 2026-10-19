@@ -267,7 +267,7 @@ export default function PosPage() {
           selectedDiningSessionId ? (
             <DiningService
               key={`dining-order-${selectedDiningSessionId}`}
-              mode="a_la_carte"
+              mode="service"
               embedded
               initialSessionId={selectedDiningSessionId}
               onSessionSelected={setSelectedDiningSessionId}

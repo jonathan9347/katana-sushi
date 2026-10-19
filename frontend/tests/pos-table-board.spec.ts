@@ -138,7 +138,7 @@ test("opens the existing-table board, shows live table and reservation states, a
   await freeTable.getByRole("button", { name: "Seat walk-in" }).click();
   await expect.poll(() => seatedTableId).toBe("table-4");
   await expect(page.getByRole("heading", { name: "Dine-in order", exact: true })).toBeVisible();
-  await expect(page.getByRole("button", { name: /^Unlimited/ })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: /^Unlimited/ })).toHaveCount(1);
 });
 
 test("opens Manage tables from the main POS and preserves table creation and link controls", async ({ page }) => {
