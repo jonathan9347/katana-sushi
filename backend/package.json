@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "main": "dist/server.js",
   "scripts": {
-    "dev": "npm run prisma:generate && ts-node-dev --respawn --transpile-only --watch src --ignore-watch node_modules --ignore-watch dist --ignore-watch uploads --ignore-watch backups --ignore-watch logs --ignore-watch prisma --debounce 1000 src/server.ts",
+    "dev": "npm run prisma:generate && ts-node-dev --respawn --transpile-only --watch src --ignore-watch node_modules --ignore-watch dist --ignore-watch uploads --ignore-watch backups --ignore-watch logs --ignore-watch prisma --ignore-watch \"\\.test\\.ts$\" --debounce 1000 src/server.ts",
     "build": "npm run prisma:generate && tsc",
     "start": "node dist/server.js",
     "start:prod": "node dist/server.js",
