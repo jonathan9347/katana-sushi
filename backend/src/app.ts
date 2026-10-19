@@ -5549,7 +5549,7 @@ app.get("/api/inventory/materials", async (_req, res, next) => {
           status: lock.order.status,
           event_name: `Table ${lock.order.dining_session.table.table_number} kitchen ticket`,
           event_date: lock.order.created_at,
-          customer_name: `Guest ${lock.order.items[0]?.guest.guest_number ?? "—"}`
+          customer_name: `Guest ${lock.order.items[0]?.guest?.guest_number ?? "—"}`
         }))
       ];
       const batch_total = material.batches.reduce(

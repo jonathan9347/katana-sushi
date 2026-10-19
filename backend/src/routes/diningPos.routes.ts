@@ -16,22 +16,22 @@ import {
 import { roleGuard } from "../middleware/roleGuard";
 import { isDineInReservationLateAlert } from "../config/reservationSettings";
 import {
-  assertBatchQuantitiesMatchOnHand,
-  assertEnoughAvailable,
-  calculateAvailableQuantity,
   consumeMaterialStock,
   inventoryUnitsMatch,
   getActiveCateringReservationQuantity,
   lockMaterialForUpdate,
   recordReservationMovement,
-  validateInventoryQuantity,
   InventoryError
 } from "../services/inventory.service";
 
 const router = express.Router();
 const EXTENSION_MINUTES = 30;
+const COMMITTED_ORDER_STATUS_CHECK =
+  "CHECK ((status = ANY (ARRAY['reserved'::text, 'prepared'::text, 'ready'::text, 'released'::text, 'cancelled'::text, 'committed'::text])))";
+const COMMITTED_ORDER_STATUS_CACHE_MS = 5000;
 const money = (amount: number) => Number(amount.toFixed(2));
 type AuthenticatedRequest = Request & { user?: { sub: string } };
+let committedOrderStatusCache: { allowed: boolean; expiresAt: number } | null = null;
 
 function actorId(req: Request) {
   const user = (req as AuthenticatedRequest).user;
@@ -52,23 +52,54 @@ function makeReference(prefix: string) {
   return `${prefix}-${date}-${randomUUID().slice(0, 8).toUpperCase()}`;
 }
 
+async function isCommittedOrderStatusAllowed() {
+  if (committedOrderStatusCache && committedOrderStatusCache.expiresAt > Date.now()) {
+    return committedOrderStatusCache.allowed;
+  }
+
+  const [constraint] = await prisma.$queryRaw<Array<{ allowed: boolean }>>`
+    SELECT EXISTS (
+      SELECT 1
+      FROM pg_constraint AS c
+      WHERE c.conrelid = to_regclass('public.dining_orders')
+        AND c.conname = 'dining_orders_status_check'
+        AND c.contype = 'c'
+        AND c.convalidated
+        AND pg_get_constraintdef(c.oid) = ${COMMITTED_ORDER_STATUS_CHECK}
+    ) AS allowed
+  `;
+  const allowed = constraint?.allowed ?? false;
+  committedOrderStatusCache = {
+    allowed,
+    expiresAt: Date.now() + COMMITTED_ORDER_STATUS_CACHE_MS
+  };
+  return allowed;
+}
+
 function isSameOrderRequest(
   order: {
     dining_session_id: string;
     order_type: string;
     unlimited_session_id: string | null;
-    items: Array<{ selling_product_id: string | null; guest: { guest_number: number }; quantity: number }>;
+    items: Array<{
+      selling_product_id: string | null;
+      guest: { guest_number: number } | null;
+      quantity: number;
+      unit_price: number;
+    }>;
   },
   input: {
     orderType: string;
     unlimitedSessionId?: string;
-    items: Array<{ productId: string; guestNumber: number; quantity: number }>;
+    items: Array<{ productId: string; guestNumber?: number; quantity: number; expectedUnitPrice: number }>;
   },
   sessionId: string
 ) {
-  const requested = input.items.map((item) => `${item.productId}:${item.guestNumber}:${item.quantity}`).sort();
+  const requested = input.items.map((item) =>
+    `${item.productId}:${item.guestNumber ?? ""}:${item.quantity}:${money(item.expectedUnitPrice)}`
+  ).sort();
   const saved = order.items.map((item) =>
-    `${item.selling_product_id ?? ""}:${item.guest.guest_number}:${item.quantity}`
+    `${item.selling_product_id ?? ""}:${item.guest?.guest_number ?? ""}:${item.quantity}:${money(Number(item.unit_price))}`
   ).sort();
   return order.dining_session_id === sessionId
     && order.order_type === input.orderType
@@ -891,8 +922,12 @@ router.post(
       unlimitedSessionId: z.string().min(1).optional(),
       items: z.array(z.object({
         productId: z.string().min(1),
-        guestNumber: z.coerce.number().int().positive(),
-        quantity: z.coerce.number().int().min(1).max(100)
+        guestNumber: z.coerce.number().int().positive().optional(),
+        quantity: z.coerce.number().int().min(1).max(100),
+        expectedUnitPrice: z.coerce.number().finite().min(0).refine(
+          (value) => Math.abs(value * 100 - Math.round(value * 100)) < 1e-8,
+          "Expected unit price must be in cents."
+        )
       })).min(1).max(100)
     }).superRefine((value, context) => {
       if (value.orderType === "unlimited" && !value.unlimitedSessionId) {
@@ -902,6 +937,16 @@ router.post(
         context.addIssue({ code: z.ZodIssueCode.custom, path: ["unlimitedSessionId"], message: "A la carte tickets cannot use an Unlimited package." });
       }
     }).parse(req.body);
+    if (body.orderType !== "ala_carte") {
+      throw new InventoryError("Unlimited order commits are not available yet.", "ORDER_TYPE_NOT_ENABLED", 409);
+    }
+    if (!(await isCommittedOrderStatusAllowed())) {
+      throw new InventoryError(
+        "Order commit is not available until the pending database migration is deployed",
+        "ORDER_COMMIT_MIGRATION_PENDING",
+        503
+      );
+    }
     const sessionId = z.string().min(1).parse(req.params.id);
     const creatorId = actorId(req);
     const existing = await prisma.diningOrder.findUnique({
@@ -910,47 +955,39 @@ router.post(
     });
     if (existing) {
       if (!isSameOrderRequest(existing, body, sessionId)) {
-        throw new InventoryError("This ticket key is already tied to a different order.", "IDEMPOTENCY_CONFLICT", 409);
+        throw new InventoryError("This order key is already tied to a different order.", "IDEMPOTENCY_CONFLICT", 409);
       }
       return res.json({ order: existing, replayed: true });
     }
 
     const orderNumber = makeReference("DIN");
     try {
-      const order = await prisma.$transaction(async (tx) => {
+      const result = await prisma.$transaction(async (tx) => {
         await tx.$queryRaw<Array<{ id: string }>>`
           SELECT id FROM dining_table_sessions WHERE id = ${sessionId} FOR UPDATE
         `;
         const session = await tx.diningTableSession.findUnique({
           where: { id: sessionId },
-          include: { guests: true }
+          include: { table: true, guests: true }
         });
         if (!session || session.status !== "active") {
           throw new InventoryError("Active dining session not found.", "SESSION_NOT_FOUND", 404);
         }
-        const guestByNumber = new Map(session.guests.map((guest) => [guest.guest_number, guest]));
-        if (body.items.some((item) => !guestByNumber.has(item.guestNumber))) {
-          throw new InventoryError("Choose a valid customer number for every item.", "GUEST_NOT_FOUND", 400);
+
+        const racedOrder = await tx.diningOrder.findUnique({
+          where: { idempotency_key: body.idempotencyKey },
+          include: { items: { include: { guest: true } } }
+        });
+        if (racedOrder) {
+          if (!isSameOrderRequest(racedOrder, body, sessionId)) {
+            throw new InventoryError("This order key is already tied to a different order.", "IDEMPOTENCY_CONFLICT", 409);
+          }
+          return { order: racedOrder, replayed: true };
         }
-        let unlimitedSessionId: string | null = null;
-        if (body.orderType === "unlimited") {
-          const unlimited = await tx.unlimitedSession.findFirst({
-            where: {
-              id: body.unlimitedSessionId,
-              dining_session_id: sessionId,
-              status: "active"
-            }
-          });
-          if (!unlimited) {
-            throw new InventoryError("Active Unlimited package not found for this table.", "UNLIMITED_SESSION_NOT_FOUND", 409);
-          }
-          if (body.items.some((item) => item.guestNumber > unlimited.pax_count)) {
-            throw new InventoryError("This guest is not covered by the selected Unlimited package.", "UNLIMITED_GUEST_NOT_COVERED", 400);
-          }
-          if (unlimited.first_round_at && unlimited.ends_at.getTime() <= Date.now()) {
-            throw new InventoryError("Unlimited time has ended. An admin must approve an extension before another round.", "UNLIMITED_TIME_EXPIRED", 409);
-          }
-          unlimitedSessionId = unlimited.id;
+
+        const guestByNumber = new Map(session.guests.map((guest) => [guest.guest_number, guest]));
+        if (body.items.some((item) => item.guestNumber !== undefined && !guestByNumber.has(item.guestNumber))) {
+          throw new InventoryError("Choose a valid customer number for every item.", "GUEST_NOT_FOUND", 400);
         }
 
         const products = await tx.sellingProduct.findMany({
@@ -958,10 +995,7 @@ router.post(
             id: { in: body.items.map((item) => item.productId) },
             is_deleted: false
           },
-          include: {
-            recipes: { include: { recipe_ingredients: { include: { raw_material: true } } } },
-            unlimited_included_products: true
-          }
+          include: { recipes: { include: { recipe_ingredients: { include: { raw_material: true } } } } }
         });
         const productsById = new Map(products.map((product) => [product.id, product]));
         for (const item of body.items) {
@@ -969,11 +1003,15 @@ router.post(
           if (!product || !product.is_available) {
             throw new InventoryError("A selected product is unavailable.", "PRODUCT_UNAVAILABLE", 409);
           }
-          if (
-            body.orderType === "unlimited" &&
-            !product.unlimited_included_products.some((included) => included.is_included)
-          ) {
-            throw new InventoryError(`${product.name} is not included in Unlimited.`, "PRODUCT_NOT_INCLUDED", 409);
+          if (!product.is_sold_a_la_carte) {
+            throw new InventoryError(`${product.name} is only available in the Unlimited cart.`, "PRODUCT_NOT_SOLD_A_LA_CARTE", 409);
+          }
+          if (money(Number(product.price)) !== money(item.expectedUnitPrice)) {
+            throw new InventoryError(
+              `${product.name}'s price has changed. Review the order again before confirming.`,
+              "PRODUCT_PRICE_CHANGED",
+              409
+            );
           }
         }
 
@@ -982,36 +1020,22 @@ router.post(
           quantity: item.quantity
         }));
         const needs = await findInventoryNeeds(tx, requestedForInventory, products);
-        const reservationSnapshots: Array<{ materialId: string; before: number; need: typeof needs[number] }> = [];
-        for (const need of needs) {
-          await lockMaterialForUpdate(tx, need.raw_material_id);
-          const material = await tx.rawMaterial.findFirst({
-            where: { id: need.raw_material_id, is_deleted: false },
-            select: { id: true, name: true, unit: true, current_stock: true }
-          });
-          if (!material) throw new InventoryError("A required ingredient is unavailable.", "MATERIAL_NOT_FOUND", 409);
-          validateInventoryQuantity(need.quantity, material.unit);
-          await assertBatchQuantitiesMatchOnHand(tx, material.id, material.name, Number(material.current_stock));
-          const reserved = await getActiveCateringReservationQuantity(tx, material.id);
-          const available = calculateAvailableQuantity(Number(material.current_stock), reserved);
-          assertEnoughAvailable(material.name, material.unit, need.quantity, available);
-          reservationSnapshots.push({ materialId: material.id, before: reserved, need });
-        }
 
         const created = await tx.diningOrder.create({
           data: {
             order_number: orderNumber,
             idempotency_key: body.idempotencyKey,
             dining_session_id: sessionId,
-            unlimited_session_id: unlimitedSessionId,
-            order_type: body.orderType,
+            table_number_snapshot: session.table.table_number,
+            order_type: "ala_carte",
+            status: "committed",
             created_by: creatorId,
             items: {
               create: body.items.map((item) => {
                 const product = productsById.get(item.productId)!;
-                const price = body.orderType === "ala_carte" ? Number(product.price) : 0;
+                const price = money(Number(product.price));
                 return {
-                  guest_id: guestByNumber.get(item.guestNumber)!.id,
+                  guest_id: item.guestNumber === undefined ? null : guestByNumber.get(item.guestNumber)!.id,
                   selling_product_id: product.id,
                   name_snapshot: product.name,
                   quantity: item.quantity,
@@ -1020,36 +1044,28 @@ router.post(
                 };
               })
             },
-            ingredient_locks: {
-              create: needs.map((need) => ({
-                raw_material_id: need.raw_material_id,
-                reserved_quantity: need.quantity,
-                unit: need.unit
-              }))
-            }
           },
           include: {
             items: { include: { guest: true } },
-            dining_session: { include: { table: true } }
+            dining_session: { include: { table: true } },
+            ingredient_locks: true
           }
         });
-        for (const snapshot of reservationSnapshots) {
-          await recordReservationMovement(tx, {
-            raw_material_id: snapshot.materialId,
-            quantity: snapshot.need.quantity,
-            unit: snapshot.need.unit,
+
+        for (const need of needs) {
+          await consumeMaterialStock(tx, {
+            raw_material_id: need.raw_material_id,
+            quantity: need.quantity,
             source_type: "dine-in",
-            source_reference: created.order_number,
-            action: "Reserved",
-            reserved_before: snapshot.before,
-            reserved_after: snapshot.before + snapshot.need.quantity,
+            source_reference: orderNumber,
             actor_id: creatorId,
-            note: `Dine-in ${body.orderType === "unlimited" ? "Unlimited" : "a la carte"} kitchen ticket`
+            note: "Dine-in a la carte order committed",
+            action: "Used"
           });
         }
-        return created;
+        return { order: created, replayed: false };
       });
-      return res.status(201).json({ order, replayed: false });
+      return res.status(result.replayed ? 200 : 201).json(result);
     } catch (error) {
       if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
         const raced = await prisma.diningOrder.findUnique({
@@ -1060,7 +1076,7 @@ router.post(
           return res.json({ order: raced, replayed: true });
         }
         if (raced) {
-          throw new InventoryError("This ticket key is already tied to a different order.", "IDEMPOTENCY_CONFLICT", 409);
+          throw new InventoryError("This order key is already tied to a different order.", "IDEMPOTENCY_CONFLICT", 409);
         }
       }
       throw error;
@@ -1369,7 +1385,7 @@ router.get(
       guest_count: totals.guestCount,
       a_la_carte_lines: totals.aLaCarteItems.map((item) => ({
         name: item.name_snapshot,
-        guest_number: item.guest.guest_number,
+        guest_number: item.guest?.guest_number ?? null,
         quantity: item.quantity,
         unit_price: Number(item.unit_price),
         total_price: Number(item.total_price)
