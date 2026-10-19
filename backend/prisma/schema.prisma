@@ -213,6 +213,7 @@ model PosTransaction {
   customer_name         String?
   dining_session_id     String?  @unique
   table_number_snapshot Int?
+  table_ids_snapshot    Json?    @db.JsonB
   transaction_type      String
   subtotal              Float
   tax                   Float
