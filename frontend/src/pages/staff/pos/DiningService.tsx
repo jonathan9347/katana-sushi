@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ChefHat, Printer, ShoppingCart, Table2 } from "lucide-react";
 import { Link } from "react-router-dom";
@@ -157,7 +157,14 @@ type CheckoutTransaction = {
   dining_session: { table: { table_number: number } };
 };
 
-type Props = { mode?: "service" | "kitchen" | "board"; embedded?: boolean };
+type Props = {
+  mode?: "service" | "kitchen" | "board" | "a_la_carte";
+  embedded?: boolean;
+  initialSessionId?: string;
+  onSessionSelected?: (sessionId: string) => void;
+  onDraftStateChange?: (hasDrafts: boolean) => void;
+  onBackToBoard?: () => void;
+};
 type DraftItem = { productId: string; quantity: number };
 type CommitOrderInput = { review: ReviewedOrder; printWindow: Window | null };
 type DiningAction = { method: "post" | "patch"; url: string; body?: unknown };
@@ -257,13 +264,21 @@ function errorCode(error: unknown) {
   return undefined;
 }
 
-export default function DiningService({ mode = "service", embedded = false }: Props) {
+export default function DiningService({
+  mode = "service",
+  embedded = false,
+  initialSessionId = "",
+  onSessionSelected,
+  onDraftStateChange,
+  onBackToBoard
+}: Props) {
   const role = (localStorage.getItem("katana_role") ?? "").toLowerCase();
   const isAdmin = role === "admin";
   const kitchenOnly = mode === "kitchen";
   const boardOnly = mode === "board";
+  const aLaCarteOnly = mode === "a_la_carte";
   const MainContainer = embedded ? "div" : "main";
-  const [selectedSessionId, setSelectedSessionId] = useState("");
+  const [selectedSessionId, setSelectedSessionId] = useState(initialSessionId);
   const [orderType, setOrderType] = useState<"ala_carte" | "unlimited">("ala_carte");
   const [productId, setProductId] = useState("");
   const [quantity, setQuantity] = useState(1);
@@ -301,6 +316,10 @@ export default function DiningService({ mode = "service", embedded = false }: Pr
   const draftKey = draftKeys[orderType];
   const hasDraftItems = aLaCarteDraftItems.length > 0 || unlimitedDraftItems.length > 0;
 
+  useEffect(() => {
+    onDraftStateChange?.(hasDraftItems);
+  }, [hasDraftItems, onDraftStateChange]);
+
   const tablesQuery = useQuery({
     queryKey: ["pos", "dining", "tables"],
     queryFn: async () => (await api.get<{ tables: DiningTable[] }>("/api/pos/dining/tables")).data.tables,
@@ -337,7 +356,7 @@ export default function DiningService({ mode = "service", embedded = false }: Pr
     queryKey: ["admin", "unlimited", "settings"],
     queryFn: async () =>
       (await api.get<{ settings: UnlimitedSettings }>("/api/admin/unlimited/settings")).data.settings,
-    enabled: !kitchenOnly && !boardOnly
+    enabled: !kitchenOnly && !boardOnly && !aLaCarteOnly
   });
   const lastCommittedOrderQuery = useQuery({
     queryKey: ["pos", "dining", "committed-order", lastCommittedOrderId],
@@ -433,6 +452,7 @@ export default function DiningService({ mode = "service", embedded = false }: Pr
         action.url.endsWith("/temporary-table")
       )) {
         setSelectedSessionId(result.session.id);
+        onSessionSelected?.(result.session.id);
         resetDraftForSessionChange();
         setTemporaryTableReservationId(null);
         setShowCheckout(false);
@@ -594,7 +614,8 @@ export default function DiningService({ mode = "service", embedded = false }: Pr
       return;
     }
     const nextItems = [...draftItems, { productId, quantity }];
-    const shouldOfferConversion = orderType === "ala_carte"
+    const shouldOfferConversion = !aLaCarteOnly
+      && orderType === "ala_carte"
       && !canConvertDraftToUnlimited(draftItems)
       && canConvertDraftToUnlimited(nextItems);
     setDraftItems(nextItems);
@@ -753,10 +774,15 @@ export default function DiningService({ mode = "service", embedded = false }: Pr
         <header className="flex flex-wrap items-end justify-between gap-3">
           <div>
             <p className="text-sm font-bold uppercase text-red-700">Point of sale</p>
-            <h1 className="text-3xl font-black text-slate-950">{boardOnly ? "Existing table" : "Table service"}</h1>
+            <h1 className="text-3xl font-black text-slate-950">
+              {boardOnly ? "Table board" : embedded ? "Dine-in ordering" : "Table service"}
+            </h1>
           </div>
           <div className="flex flex-wrap items-center gap-3">
             {!boardOnly && <p className="text-sm text-slate-500">New dine-in orders deduct stock at Confirm &amp; Print; legacy kitchen tickets deduct when released.</p>}
+            {embedded && !boardOnly && onBackToBoard && (
+              <ActionButton tone="muted" onClick={onBackToBoard}>Back to table board</ActionButton>
+            )}
             <ActionButton tone="muted" onClick={() => setManageTablesOpen(true)}>Manage tables</ActionButton>
           </div>
         </header>
@@ -883,6 +909,7 @@ export default function DiningService({ mode = "service", embedded = false }: Pr
                       }
                       if (item.id !== selectedSessionId) resetDraftForSessionChange();
                       setSelectedSessionId(item.id);
+                      onSessionSelected?.(item.id);
                       setShowCheckout(false);
                     }}
                   >
@@ -994,7 +1021,7 @@ export default function DiningService({ mode = "service", embedded = false }: Pr
                   <>
                     <h2 className="text-lg font-bold">Table {session.table.table_number} selected</h2>
                     <p className="mt-2 text-sm text-slate-600">
-                      Dine-in ordering will be available here in the next POS step.
+                      Select an active table to open its dine-in order.
                     </p>
                   </>
                 ) : (
@@ -1038,18 +1065,20 @@ export default function DiningService({ mode = "service", embedded = false }: Pr
                       >
                         A la carte ({aLaCarteDraftItems.length})
                       </button>
-                      <button
-                        aria-pressed={orderType === "unlimited"}
-                        className={`rounded border px-3 py-2 text-sm font-bold ${orderType === "unlimited" ? "border-violet-900 bg-violet-900 text-white" : "border-slate-300 bg-white"}`}
-                        disabled={orderControlsDisabled}
-                        onClick={() => {
-                          setOrderType("unlimited");
-                          setProductId("");
-                          setOrderReview(null);
-                        }}
-                      >
-                        Unlimited ({unlimitedDraftItems.length})
-                      </button>
+                      {!aLaCarteOnly && (
+                        <button
+                          aria-pressed={orderType === "unlimited"}
+                          className={`rounded border px-3 py-2 text-sm font-bold ${orderType === "unlimited" ? "border-violet-900 bg-violet-900 text-white" : "border-slate-300 bg-white"}`}
+                          disabled={orderControlsDisabled}
+                          onClick={() => {
+                            setOrderType("unlimited");
+                            setProductId("");
+                            setOrderReview(null);
+                          }}
+                        >
+                          Unlimited ({unlimitedDraftItems.length})
+                        </button>
+                      )}
                     </div>
                   </div>
                   {orderType === "unlimited" && (

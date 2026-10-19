@@ -42,8 +42,18 @@ const tables = [
 async function openPosWithTableMocks(
   page: Page,
   role = "cashier",
-  onCreateTable: () => void = () => {}
+  onCreateTable: () => void = () => {},
+  onSeat: (tableId: string) => void = () => {}
 ) {
+  let createdSession: {
+    id: string;
+    status: string;
+    table_id: string;
+    table: { id: string; table_number: number; capacity: number };
+    guests: Array<{ id: string; guest_number: number }>;
+    orders: unknown[];
+    unlimited_sessions: unknown[];
+  } | null = null;
   await page.addInitScript((storedRole) => {
     localStorage.setItem("katana_token", "playwright-token");
     localStorage.setItem("katana_role", storedRole);
@@ -60,7 +70,7 @@ async function openPosWithTableMocks(
       await route.fulfill({ json: { tables } });
       return;
     }
-    if (url.pathname === "/api/pos/dining/sessions") {
+    if (url.pathname === "/api/pos/dining/sessions" && route.request().method() === "GET") {
       await route.fulfill({ json: { sessions: [{
         id: "session-1",
         status: "active",
@@ -69,7 +79,7 @@ async function openPosWithTableMocks(
         guests: [{ id: "guest-1", guest_number: 1 }],
         orders: [],
         unlimited_sessions: []
-      }] } });
+      }, ...(createdSession ? [createdSession] : [])] } });
       return;
     }
     if (url.pathname === "/api/pos/dining/upcoming-reservations") {
@@ -85,6 +95,17 @@ async function openPosWithTableMocks(
       return;
     }
     if (url.pathname === "/api/pos/dining/sessions" && route.request().method() === "POST") {
+      const tableId = route.request().postDataJSON().tableId as string;
+      onSeat(tableId);
+      createdSession = {
+        id: "session-new",
+        status: "active",
+        table_id: tableId,
+        table: { id: tableId, table_number: 14, capacity: 4 },
+        guests: [],
+        orders: [],
+        unlimited_sessions: []
+      };
       await route.fulfill({ status: 201, json: { session: { id: "session-new" } } });
       return;
     }
@@ -100,20 +121,12 @@ async function openPosWithTableMocks(
 
 test("opens the existing-table board, shows live table and reservation states, and seats a walk-in", async ({ page }) => {
   let seatedTableId = "";
-  await openPosWithTableMocks(page);
-  await page.route("**/api/pos/dining/sessions", async (route) => {
-    if (route.request().method() === "POST") {
-      seatedTableId = route.request().postDataJSON().tableId;
-      await route.fulfill({ status: 201, json: { session: { id: "session-new" } } });
-      return;
-    }
-    await route.fallback();
-  });
+  await openPosWithTableMocks(page, "cashier", undefined, (tableId) => { seatedTableId = tableId; });
 
   const customerType = page.getByRole("region", { name: "Customer type" });
   await customerType.getByRole("button", { name: "Existing table" }).click();
 
-  await expect(page.getByRole("heading", { name: "Table board" })).toBeVisible();
+  await expect(page.locator("header").getByRole("heading", { name: "Table board", exact: true })).toBeVisible();
   await expect(page.getByText("Table 11").first()).toBeVisible();
   await expect(page.getByText("Occupied", { exact: true }).first()).toBeVisible();
   await expect(page.getByText("Reserved / held", { exact: true }).first()).toBeVisible();
@@ -124,6 +137,8 @@ test("opens the existing-table board, shows live table and reservation states, a
   const freeTable = page.locator("article").filter({ hasText: "Table 14" });
   await freeTable.getByRole("button", { name: "Seat walk-in" }).click();
   await expect.poll(() => seatedTableId).toBe("table-4");
+  await expect(page.getByRole("heading", { name: "Dine-in order", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: /^Unlimited/ })).toHaveCount(0);
 });
 
 test("opens Manage tables from the main POS and preserves table creation and link controls", async ({ page }) => {

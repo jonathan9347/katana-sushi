@@ -38,7 +38,8 @@ async function openDiningService(
   page: Page,
   postOrder: (route: Route) => Promise<void>,
   getProductPrice: () => number = () => 100,
-  menuProducts?: MockMenuProduct[]
+  menuProducts?: MockMenuProduct[],
+  path = "/staff/pos/dining"
 ) {
   await page.context().addInitScript(() => {
     localStorage.setItem("katana_token", "playwright-token");
@@ -141,9 +142,15 @@ async function openDiningService(
     }
     await route.fulfill({ json: {} });
   });
-  await page.goto("/staff/pos/dining");
-  await page.getByRole("button", { name: /Table 4/ }).click();
-  await expect(page.getByRole("heading", { name: "Dine-in order" })).toBeVisible();
+  await page.goto(path);
+  if (path === "/staff/pos/dining") {
+    await page.getByRole("button", { name: /Table 4/ }).click();
+  } else {
+    await page.getByRole("group", { name: "New customer service type" })
+      .getByRole("button", { name: "Dine in" }).click();
+    await page.getByRole("button", { name: /Table 4/ }).click();
+  }
+  await expect(page.getByRole("heading", { name: "Dine-in order", exact: true })).toBeVisible();
 }
 
 async function addOneOrderLine(page: Page) {
@@ -219,6 +226,97 @@ test("reload fetches the tab's saved order ID and reprints without committing ag
   await expect(reprintedSlip.locator("body")).toContainText("REPRINT");
   await expect(reprintedSlip.locator("body")).toContainText("DO-PRINT-001");
   expect(postCount).toBe(1);
+});
+
+test("main POS dine-in commits, reprints, and checks out through the saved-order flow", async ({ page }) => {
+  let orderPostCount = 0;
+  let submittedCheckout: Record<string, unknown> | undefined;
+  page.on("dialog", (dialog) => dialog.accept());
+  await openDiningService(page, async (route) => {
+    orderPostCount += 1;
+    await route.fulfill({ json: orderResponse, status: 201 });
+  }, () => 100, undefined, "/staff/pos");
+
+  await expect(page.getByRole("button", { name: /^Unlimited/ })).toHaveCount(0);
+  await addOneOrderLine(page);
+  const printPopupPromise = page.waitForEvent("popup");
+  await page.getByRole("button", { name: "Confirm & Print" }).click();
+  const printPopup = await printPopupPromise;
+  await expect(printPopup.locator("body")).toContainText("California Roll");
+  await expect(printPopup.locator("body")).toContainText("Table 4");
+  await expect(page.getByRole("button", { name: "Reprint" })).toBeVisible();
+  expect(orderPostCount).toBe(1);
+
+  const reprintPopupPromise = page.waitForEvent("popup");
+  await page.getByRole("button", { name: "Reprint" }).click();
+  const reprintPopup = await reprintPopupPromise;
+  await expect(reprintPopup.locator("body")).toContainText("REPRINT");
+  expect(orderPostCount).toBe(1);
+
+  await page.route("**/api/pos/dining/sessions/session-1/checkout", async (route) => {
+    submittedCheckout = route.request().postDataJSON() as Record<string, unknown>;
+    await route.fulfill({ status: 201, json: {
+      replayed: false,
+      transaction: {
+        transaction_number: "POS-MAIN-001",
+        subtotal: 200,
+        tax: 0,
+        unlimited_amount: 0,
+        leftover_amount: 0,
+        discount_amount: 12,
+        discount_base_snapshot: 200,
+        discount_rate_snapshot: 0.2,
+        guest_count: 10,
+        discount_guest_count: 3,
+        total: 188,
+        payment_method: "cash",
+        cash_received: 200,
+        change_due: 12,
+        created_at: "2026-10-19T12:00:00.000Z",
+        table_number_snapshot: 4,
+        items: [{
+          quantity: 2,
+          unit_price: 100,
+          total_price: 200,
+          name_snapshot: "California Roll",
+          selling_product: { name: "California Roll" }
+        }],
+        charges: [],
+        dining_session: { table: { table_number: 4 } }
+      }
+    } });
+  });
+
+  await page.getByRole("button", { name: "Review bill" }).click();
+  await page.getByLabel("Total guests at this table").fill("10");
+  await page.getByLabel("Senior/PWD guests").fill("3");
+  await page.getByLabel("Cash received").fill("200");
+  await page.getByRole("button", { name: "Complete checkout" }).click();
+  await expect(page.getByText("Checkout complete")).toBeVisible();
+  expect(submittedCheckout).toMatchObject({ guestCount: 10, seniorPwdCount: 3, cashReceived: 200 });
+  expect(orderPostCount).toBe(1);
+});
+
+test("confirms before switching away from an unconfirmed main-POS dine-in order", async ({ page }) => {
+  const dialogMessages: string[] = [];
+  page.on("dialog", async (dialog) => {
+    dialogMessages.push(dialog.message());
+    if (dialogMessages.length === 1) await dialog.dismiss();
+    else await dialog.accept();
+  });
+  await openDiningService(page, async (route) => {
+    await route.fulfill({ json: orderResponse, status: 201 });
+  }, () => 100, undefined, "/staff/pos");
+  await addOneOrderLine(page);
+
+  const serviceType = page.getByRole("group", { name: "New customer service type" });
+  await serviceType.getByRole("button", { name: "Takeout" }).click();
+  await expect(page.getByRole("heading", { name: "Dine-in order", exact: true })).toBeVisible();
+  expect(dialogMessages[0]).toContain("discard the unconfirmed dine-in order");
+
+  await serviceType.getByRole("button", { name: "Takeout" }).click();
+  await expect(page.getByRole("heading", { name: "Takeout Sale" })).toBeVisible();
+  expect(dialogMessages).toHaveLength(2);
 });
 
 test("keeps separate a-la-carte and Unlimited carts while using one menu", async ({ page }) => {
