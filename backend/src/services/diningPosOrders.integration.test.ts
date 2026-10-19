@@ -431,6 +431,50 @@ test("concurrent duplicate commits and retries replay one order without a second
   }), 1);
 });
 
+test("takeout checkout deducts ingredient stock once when the sale is created", async () => {
+  const fixture = await createFixture();
+  const stockBefore = await readStock(fixture);
+  const response = await request("/api/pos/transaction", {
+    customerName: "Takeout stock test",
+    transactionType: "takeout",
+    paymentMethod: "cash",
+    cashReceived: fixture.price * 2,
+    items: [{ productId: fixture.productId, quantity: 2, unitPrice: fixture.price }]
+  });
+  const responseText = await response.text();
+  assert.equal(response.status, 201, responseText);
+  const result = JSON.parse(responseText) as {
+    transaction: {
+      id: string;
+      transaction_number: string;
+      transaction_type: string;
+      dining_session_id?: string | null;
+    };
+  };
+  assert.equal(result.transaction.transaction_type, "takeout");
+  assert.equal(result.transaction.dining_session_id ?? null, null);
+  assert.deepEqual(await readStock(fixture), {
+    onHand: stockBefore.onHand - 4,
+    batchRemaining: stockBefore.batchRemaining - 4
+  });
+  assert.equal(await prisma.inventoryMovement.count({
+    where: {
+      raw_material_id: fixture.materialId,
+      source_reference: result.transaction.transaction_number
+    }
+  }), 1);
+  assert.equal(await prisma.inventoryTransaction.count({
+    where: {
+      raw_material_id: fixture.materialId,
+      reference: `POS Transaction ${result.transaction.transaction_number}`,
+      transaction_type: "deduct"
+    }
+  }), 1);
+  assert.equal(await prisma.posTransaction.count({
+    where: { id: result.transaction.id, dining_session_id: null, transaction_type: "takeout" }
+  }), 1);
+});
+
 test("concurrent orders at separate tables cannot oversell the same locked material", async () => {
   const fixture = await createFixture({ stock: 4 });
   const secondSessionId = await createAdditionalSession();
