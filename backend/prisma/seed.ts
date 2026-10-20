@@ -14,69 +14,59 @@ type ProductSeed = {
   recipe: Array<{ material: string; quantity: number; unit: string }>;
 };
 
-const rawMaterials = [
-  { name: "Rice", unit: "kg", current_stock: 25, reorder_level: 5, cost_per_unit: 85 },
-  { name: "Salmon", unit: "kg", current_stock: 8, reorder_level: 2, cost_per_unit: 950 },
-  { name: "Tuna", unit: "kg", current_stock: 7, reorder_level: 2, cost_per_unit: 820 },
-  { name: "Nori", unit: "sheet", current_stock: 200, reorder_level: 40, cost_per_unit: 6 },
-  { name: "Crabstick", unit: "piece", current_stock: 180, reorder_level: 40, cost_per_unit: 12 },
-  { name: "Cucumber", unit: "kg", current_stock: 6, reorder_level: 2, cost_per_unit: 90 },
-  { name: "Mango", unit: "kg", current_stock: 8, reorder_level: 2, cost_per_unit: 120 },
-  { name: "Ebiko", unit: "kg", current_stock: 4, reorder_level: 1, cost_per_unit: 720 },
-  { name: "Tamago", unit: "piece", current_stock: 80, reorder_level: 20, cost_per_unit: 18 },
-  { name: "Cream cheese", unit: "kg", current_stock: 4, reorder_level: 1, cost_per_unit: 430 },
-  { name: "Tempura flakes", unit: "kg", current_stock: 6, reorder_level: 2, cost_per_unit: 180 },
-  { name: "Unagi", unit: "kg", current_stock: 3, reorder_level: 1, cost_per_unit: 1100 },
-  { name: "Shrimp", unit: "kg", current_stock: 7, reorder_level: 2, cost_per_unit: 520 },
-  { name: "Avocado", unit: "piece", current_stock: 40, reorder_level: 10, cost_per_unit: 55 },
-  { name: "Spring onion", unit: "kg", current_stock: 2, reorder_level: 0.5, cost_per_unit: 160 },
-  { name: "Sesame seeds", unit: "kg", current_stock: 2, reorder_level: 0.5, cost_per_unit: 280 },
-  { name: "Spicy mayo", unit: "L", current_stock: 5, reorder_level: 1, cost_per_unit: 240 },
-  { name: "Teriyaki sauce", unit: "L", current_stock: 5, reorder_level: 1, cost_per_unit: 220 },
-  { name: "Sriracha", unit: "L", current_stock: 4, reorder_level: 1, cost_per_unit: 260 },
-  { name: "Bonito flakes", unit: "kg", current_stock: 2, reorder_level: 0.5, cost_per_unit: 850 },
-  { name: "Lettuce", unit: "kg", current_stock: 4, reorder_level: 1, cost_per_unit: 130 },
-  { name: "Pineapple tidbits", unit: "kg", current_stock: 4, reorder_level: 1, cost_per_unit: 140 },
-  { name: "Kani tempura", unit: "piece", current_stock: 80, reorder_level: 20, cost_per_unit: 18 },
-  { name: "Nachos", unit: "kg", current_stock: 3, reorder_level: 1, cost_per_unit: 190 },
-  { name: "Chili", unit: "kg", current_stock: 2, reorder_level: 0.5, cost_per_unit: 180 },
-  { name: "Tuna sashimi block", unit: "kg", current_stock: 6, reorder_level: 2, cost_per_unit: 900 },
-  { name: "Salmon sashimi block", unit: "kg", current_stock: 6, reorder_level: 2, cost_per_unit: 1050 },
-  { name: "Chicken", unit: "kg", current_stock: 6, reorder_level: 2, cost_per_unit: 240 },
-  { name: "Aonori", unit: "kg", current_stock: 1, reorder_level: 0.25, cost_per_unit: 680 },
-  { name: "Softdrinks", category: "Beverage", unit: "bottle", current_stock: 0, reorder_level: 0, cost_per_unit: 0 }
-];
+type RawMaterialSeed = {
+  name: string;
+  category?: string;
+  unit: string;
+  current_stock: bigint;
+  reorder_level: bigint;
+  cost_per_unit: number;
+  cost_source_amount?: number;
+  cost_source_quantity?: bigint;
+  cost_source_unit?: string;
+};
 
-const seededMaterials = rawMaterials.map((material) => {
-  if (material.name === "Avocado") {
-    return {
-      ...material,
-      unit: "g",
-      current_stock: BigInt(material.current_stock * INVENTORY_STANDARDS.estimatedAvocadoUsableGramsPerFruit),
-      reorder_level: BigInt(material.reorder_level * INVENTORY_STANDARDS.estimatedAvocadoUsableGramsPerFruit),
-      cost_per_unit: Number((material.cost_per_unit / INVENTORY_STANDARDS.estimatedAvocadoUsableGramsPerFruit).toFixed(8)),
-      cost_source_amount: 55,
-      cost_source_quantity: 150,
-      cost_source_unit: "g"
-    };
-  }
-  if (material.unit === "kg" || material.unit === "L") {
-    const factor = 1000;
-    return {
-      ...material,
-      unit: material.unit === "kg" ? "g" : "ml",
-      current_stock: BigInt(material.current_stock * factor),
-      reorder_level: BigInt(material.reorder_level * factor),
-      cost_per_unit: material.cost_per_unit / factor
-    };
-  }
-  return {
-    ...material,
-    unit: material.unit === "pieces" ? "piece" : material.unit === "sheets" ? "sheet" : material.unit,
-    current_stock: BigInt(material.current_stock),
-    reorder_level: BigInt(material.reorder_level)
-  };
-});
+const rawMaterials: RawMaterialSeed[] = [
+  { name: "Rice", unit: "g", current_stock: 25000n, reorder_level: 5000n, cost_per_unit: 0.085 },
+  { name: "Salmon", unit: "g", current_stock: 8000n, reorder_level: 2000n, cost_per_unit: 0.95 },
+  { name: "Tuna", unit: "g", current_stock: 7000n, reorder_level: 2000n, cost_per_unit: 0.82 },
+  { name: "Nori", unit: "sheet", current_stock: 200n, reorder_level: 40n, cost_per_unit: 6 },
+  { name: "Crabstick", unit: "piece", current_stock: 180n, reorder_level: 40n, cost_per_unit: 12 },
+  { name: "Cucumber", unit: "g", current_stock: 6000n, reorder_level: 2000n, cost_per_unit: 0.09 },
+  { name: "Mango", unit: "g", current_stock: 8000n, reorder_level: 2000n, cost_per_unit: 0.12 },
+  { name: "Ebiko", unit: "g", current_stock: 4000n, reorder_level: 1000n, cost_per_unit: 0.72 },
+  { name: "Tamago", unit: "piece", current_stock: 80n, reorder_level: 20n, cost_per_unit: 18 },
+  { name: "Cream cheese", unit: "g", current_stock: 4000n, reorder_level: 1000n, cost_per_unit: 0.43 },
+  { name: "Tempura flakes", unit: "g", current_stock: 6000n, reorder_level: 2000n, cost_per_unit: 0.18 },
+  { name: "Unagi", unit: "g", current_stock: 3000n, reorder_level: 1000n, cost_per_unit: 1.1 },
+  { name: "Shrimp", unit: "g", current_stock: 7000n, reorder_level: 2000n, cost_per_unit: 0.52 },
+  {
+    name: "Avocado",
+    unit: "g",
+    current_stock: 6000n,
+    reorder_level: 1500n,
+    cost_per_unit: 0.36666667,
+    cost_source_amount: 55,
+    cost_source_quantity: 150n,
+    cost_source_unit: "g"
+  },
+  { name: "Spring onion", unit: "g", current_stock: 2000n, reorder_level: 500n, cost_per_unit: 0.16 },
+  { name: "Sesame seeds", unit: "g", current_stock: 2000n, reorder_level: 500n, cost_per_unit: 0.28 },
+  { name: "Spicy mayo", unit: "ml", current_stock: 5000n, reorder_level: 1000n, cost_per_unit: 0.24 },
+  { name: "Teriyaki sauce", unit: "ml", current_stock: 5000n, reorder_level: 1000n, cost_per_unit: 0.22 },
+  { name: "Sriracha", unit: "ml", current_stock: 4000n, reorder_level: 1000n, cost_per_unit: 0.26 },
+  { name: "Bonito flakes", unit: "g", current_stock: 2000n, reorder_level: 500n, cost_per_unit: 0.85 },
+  { name: "Lettuce", unit: "g", current_stock: 4000n, reorder_level: 1000n, cost_per_unit: 0.13 },
+  { name: "Pineapple tidbits", unit: "g", current_stock: 4000n, reorder_level: 1000n, cost_per_unit: 0.14 },
+  { name: "Kani tempura", unit: "piece", current_stock: 80n, reorder_level: 20n, cost_per_unit: 18 },
+  { name: "Nachos", unit: "g", current_stock: 3000n, reorder_level: 1000n, cost_per_unit: 0.19 },
+  { name: "Chili", unit: "g", current_stock: 2000n, reorder_level: 500n, cost_per_unit: 0.18 },
+  { name: "Tuna sashimi block", unit: "g", current_stock: 6000n, reorder_level: 2000n, cost_per_unit: 0.9 },
+  { name: "Salmon sashimi block", unit: "g", current_stock: 6000n, reorder_level: 2000n, cost_per_unit: 1.05 },
+  { name: "Chicken", unit: "g", current_stock: 6000n, reorder_level: 2000n, cost_per_unit: 0.24 },
+  { name: "Aonori", unit: "g", current_stock: 1000n, reorder_level: 250n, cost_per_unit: 0.68 },
+  { name: "Softdrinks", category: "Beverage", unit: "bottle", current_stock: 0n, reorder_level: 0n, cost_per_unit: 0 }
+];
 
 const classicBase = [
   { material: "Rice", quantity: 200, unit: "g" },
@@ -87,57 +77,6 @@ const hosoBase = [
   { material: "Rice", quantity: 100, unit: "g" },
   { material: "Nori", quantity: 1, unit: "sheet" }
 ];
-
-function normalizeSeedIngredient(ingredient: { material: string; quantity: number; unit: string }, productName: string) {
-  if (productName === "Baked Sushi California Small" || productName === "Baked Sushi California Medium") {
-    const isMedium = productName.endsWith("Medium");
-    const bakedAmounts: Record<string, number> = {
-      Ebiko: isMedium ? 30 : 20,
-      Nori: isMedium ? 2 : 1,
-      Rice: isMedium ? 300 : 200
-    };
-    if (ingredient.material in bakedAmounts) {
-      const unit = ingredient.material === "Nori" ? "sheet" : "g";
-      return { quantity_per_yield: BigInt(bakedAmounts[ingredient.material]), unit };
-    }
-  }
-  if (ingredient.material === "Spicy mayo") {
-    return { quantity_per_yield: BigInt(INVENTORY_STANDARDS.ownerConfirmedSpicyMayoMlPerServing), unit: "ml" };
-  }
-  if (ingredient.material === "Aonori") {
-    return { quantity_per_yield: BigInt(INVENTORY_STANDARDS.estimatedAonoriGramsPerServing), unit: "g" };
-  }
-  if (ingredient.material === "Teriyaki sauce") {
-    return { quantity_per_yield: BigInt(INVENTORY_STANDARDS.estimatedTeriyakiSauceMlPerServing), unit: "ml" };
-  }
-  if (ingredient.material === "Tempura flakes") {
-    return { quantity_per_yield: BigInt(INVENTORY_STANDARDS.estimatedTempuraFlakesGramsPerServing), unit: "g" };
-  }
-  if (ingredient.material === "Crabstick") {
-    const quantity = productName === "Large Classic Platter (71pcs)"
-      ? 0
-      : productName === "Medium Classic Platter (40pcs)"
-        ? 0
-        : productName === "Baked Sushi California Small"
-          ? 2
-          : productName === "Baked Sushi California Medium"
-            ? 3
-            : productName.endsWith("Hoso")
-              ? 3
-              : 4;
-    return { quantity_per_yield: BigInt(quantity), unit: "piece" };
-  }
-  if (ingredient.material === "Kani tempura") {
-    return { quantity_per_yield: 1n, unit: "piece" };
-  }
-  if (ingredient.unit === "kg") {
-    return { quantity_per_yield: BigInt(Math.round(ingredient.quantity * 1000)), unit: "g" };
-  }
-  if (ingredient.unit === "L") {
-    return { quantity_per_yield: BigInt(Math.round(ingredient.quantity * 1000)), unit: "ml" };
-  }
-  return { quantity_per_yield: BigInt(ingredient.quantity), unit: ingredient.unit === "sheets" ? "sheet" : ingredient.unit };
-}
 
 const defaultRoll = (protein: string, secondary: string) => {
   const ingredient = (material: string, quantity: number, unit: string) => ({ material, quantity, unit });
@@ -154,6 +93,13 @@ const defaultRoll = (protein: string, secondary: string) => {
   return [...classicBase, proteinIngredient, secondaryIngredient];
 };
 
+const bakedRoll = (isMedium: boolean) => [
+  { material: "Rice", quantity: isMedium ? 300 : 200, unit: "g" },
+  { material: "Nori", quantity: isMedium ? 2 : 1, unit: "sheet" },
+  { material: "Crabstick", quantity: isMedium ? 3 : 2, unit: "piece" },
+  { material: "Ebiko", quantity: isMedium ? 30 : 20, unit: "g" }
+];
+
 const products: ProductSeed[] = [
   {
     name: "California Maki",
@@ -163,16 +109,16 @@ const products: ProductSeed[] = [
     recipe: [
       ...classicBase,
       { material: "Crabstick", quantity: 4, unit: "piece" },
-      { material: "Cucumber", quantity: 0.03, unit: "kg" },
-      { material: "Mango", quantity: 0.04, unit: "kg" },
-      { material: "Ebiko", quantity: 0.01, unit: "kg" }
+      { material: "Cucumber", quantity: 30, unit: "g" },
+      { material: "Mango", quantity: 40, unit: "g" },
+      { material: "Ebiko", quantity: 10, unit: "g" }
     ]
   },
   {
     name: "Mango Roll",
     category: "Classic Roll",
     price: 220,
-    recipe: [...classicBase, { material: "Crabstick", quantity: 4, unit: "piece" }, { material: "Mango", quantity: 0.04, unit: "kg" }]
+    recipe: [...classicBase, { material: "Crabstick", quantity: 4, unit: "piece" }, { material: "Mango", quantity: 40, unit: "g" }]
   },
   {
     name: "Volcano Roll",
@@ -181,9 +127,9 @@ const products: ProductSeed[] = [
     recipe: [
       ...classicBase,
       { material: "Crabstick", quantity: 3, unit: "piece" },
-      { material: "Mango", quantity: 0.03, unit: "kg" },
-      { material: "Cucumber", quantity: 0.03, unit: "kg" },
-      { material: "Ebiko", quantity: 0.01, unit: "kg" }
+      { material: "Mango", quantity: 30, unit: "g" },
+      { material: "Cucumber", quantity: 30, unit: "g" },
+      { material: "Ebiko", quantity: 10, unit: "g" }
     ]
   },
   {
@@ -192,9 +138,9 @@ const products: ProductSeed[] = [
     price: 220,
     recipe: [
       ...classicBase,
-      { material: "Tuna", quantity: 0.03, unit: "kg" },
-      { material: "Spicy mayo", quantity: 0.01, unit: "L" },
-      { material: "Pineapple tidbits", quantity: 0.02, unit: "kg" }
+      { material: "Tuna", quantity: 30, unit: "g" },
+      { material: "Spicy mayo", quantity: 10, unit: "ml" },
+      { material: "Pineapple tidbits", quantity: 20, unit: "g" }
     ]
   },
   {
@@ -204,9 +150,9 @@ const products: ProductSeed[] = [
     recipe: [
       ...classicBase,
       { material: "Crabstick", quantity: 4, unit: "piece" },
-      { material: "Cucumber", quantity: 0.03, unit: "kg" },
-      { material: "Mango", quantity: 0.02, unit: "kg" },
-      { material: "Tempura flakes", quantity: 0.02, unit: "kg" }
+      { material: "Cucumber", quantity: 30, unit: "g" },
+      { material: "Mango", quantity: 20, unit: "g" },
+      { material: "Tempura flakes", quantity: 20, unit: "g" }
     ]
   },
   {
@@ -215,9 +161,9 @@ const products: ProductSeed[] = [
     price: 240,
     recipe: [
       ...classicBase,
-      { material: "Chicken", quantity: 0.03, unit: "kg" },
-      { material: "Cream cheese", quantity: 0.02, unit: "kg" },
-      { material: "Teriyaki sauce", quantity: 0.01, unit: "L" }
+      { material: "Chicken", quantity: 30, unit: "g" },
+      { material: "Cream cheese", quantity: 20, unit: "g" },
+      { material: "Teriyaki sauce", quantity: 10, unit: "ml" }
     ]
   },
   {
@@ -226,12 +172,18 @@ const products: ProductSeed[] = [
     price: 240,
     recipe: [
       ...classicBase,
-      { material: "Tuna", quantity: 0.03, unit: "kg" },
-      { material: "Spicy mayo", quantity: 0.01, unit: "L" },
-      { material: "Aonori", quantity: 0.005, unit: "kg" }
+      { material: "Tuna", quantity: 30, unit: "g" },
+      { material: "Spicy mayo", quantity: 10, unit: "ml" },
+      // Estimated at 1 g per serving; confirm with the owner or kitchen.
+      { material: "Aonori", quantity: 1, unit: "g" }
     ]
   },
-  { name: "Mango Hoso", category: "Fried Roll", price: 250, recipe: defaultRoll("Crabstick", "Mango") },
+  {
+    name: "Mango Hoso",
+    category: "Fried Roll",
+    price: 250,
+    recipe: [...classicBase, { material: "Crabstick", quantity: 3, unit: "piece" }, { material: "Mango", quantity: 20, unit: "g" }]
+  },
   { name: "Bomb Hoso", category: "Fried Roll", price: 260, recipe: defaultRoll("Tuna", "Spicy mayo") },
   { name: "Futo California", category: "Fried Roll", price: 200, recipe: defaultRoll("Crabstick", "Mango") },
   { name: "Futo California", category: "Futo Maki", price: 190, recipe: defaultRoll("Crabstick", "Cucumber") },
@@ -239,8 +191,8 @@ const products: ProductSeed[] = [
   { name: "Futo Salmon", category: "Futo Maki", price: 240, recipe: defaultRoll("Salmon", "Cream cheese") },
   { name: "Futo Crab Mango", category: "Futo Maki", price: 210, recipe: defaultRoll("Crabstick", "Mango") },
   { name: "Futo Dynamite", category: "Futo Maki", price: 210, recipe: defaultRoll("Kani tempura", "Spicy mayo") },
-  { name: "Tuna Hoso", category: "Hoso Maki", price: 160, recipe: [...hosoBase, { material: "Tuna", quantity: 0.03, unit: "kg" }] },
-  { name: "Salmon Hoso", category: "Hoso Maki", price: 180, recipe: [...hosoBase, { material: "Salmon", quantity: 0.03, unit: "kg" }] },
+  { name: "Tuna Hoso", category: "Hoso Maki", price: 160, recipe: [...hosoBase, { material: "Tuna", quantity: 30, unit: "g" }] },
+  { name: "Salmon Hoso", category: "Hoso Maki", price: 180, recipe: [...hosoBase, { material: "Salmon", quantity: 30, unit: "g" }] },
   { name: "Kani Hoso", category: "Hoso Maki", price: 150, recipe: [...hosoBase, { material: "Crabstick", quantity: 3, unit: "piece" }] },
   { name: "Tamago Hoso", category: "Hoso Maki", price: 140, recipe: [...hosoBase, { material: "Tamago", quantity: 3, unit: "piece" }] },
   { name: "Unagi Roll", category: "Special Roll", price: 290, recipe: defaultRoll("Unagi", "Cucumber") },
@@ -257,42 +209,56 @@ const products: ProductSeed[] = [
     name: "Salmon Nigiri (2pcs)",
     category: "Nigiri",
     price: 170,
-    recipe: [{ material: "Rice", quantity: 0.04, unit: "kg" }, { material: "Salmon", quantity: 0.04, unit: "kg" }]
+    recipe: [{ material: "Rice", quantity: 40, unit: "g" }, { material: "Salmon", quantity: 40, unit: "g" }]
   },
   {
     name: "Tuna Nigiri (2pcs)",
     category: "Nigiri",
     price: 150,
-    recipe: [{ material: "Rice", quantity: 0.04, unit: "kg" }, { material: "Tuna", quantity: 0.04, unit: "kg" }]
+    recipe: [{ material: "Rice", quantity: 40, unit: "g" }, { material: "Tuna", quantity: 40, unit: "g" }]
   },
   {
     name: "Tamago Sushi (3pcs)",
     category: "Nigiri",
     price: 80,
-    recipe: [{ material: "Rice", quantity: 0.06, unit: "kg" }, { material: "Tamago", quantity: 3, unit: "piece" }]
+    recipe: [{ material: "Rice", quantity: 60, unit: "g" }, { material: "Tamago", quantity: 3, unit: "piece" }]
   },
   {
     name: "Kani Sushi (4pcs)",
     category: "Nigiri",
     price: 100,
-    recipe: [{ material: "Rice", quantity: 0.08, unit: "kg" }, { material: "Crabstick", quantity: 4, unit: "piece" }]
+    recipe: [{ material: "Rice", quantity: 80, unit: "g" }, { material: "Crabstick", quantity: 4, unit: "piece" }]
   },
   {
     name: "Unagi Nigiri (3pcs)",
     category: "Nigiri",
     price: 230,
-    recipe: [{ material: "Rice", quantity: 0.06, unit: "kg" }, { material: "Unagi", quantity: 0.045, unit: "kg" }]
+    recipe: [{ material: "Rice", quantity: 60, unit: "g" }, { material: "Unagi", quantity: 45, unit: "g" }]
   },
-  { name: "Salmon Sashimi 100g", category: "Sashimi", price: 260, recipe: [{ material: "Salmon sashimi block", quantity: 0.1, unit: "kg" }] },
-  { name: "Salmon Sashimi 500g", category: "Sashimi", price: 1200, recipe: [{ material: "Salmon sashimi block", quantity: 0.5, unit: "kg" }] },
-  { name: "Salmon Sashimi 1000g", category: "Sashimi", price: 2300, recipe: [{ material: "Salmon sashimi block", quantity: 1, unit: "kg" }] },
-  { name: "Tuna Sashimi 100g", category: "Sashimi", price: 160, recipe: [{ material: "Tuna sashimi block", quantity: 0.1, unit: "kg" }] },
-  { name: "Tuna Sashimi 500g", category: "Sashimi", price: 700, recipe: [{ material: "Tuna sashimi block", quantity: 0.5, unit: "kg" }] },
-  { name: "Tuna Sashimi 1000g", category: "Sashimi", price: 1300, recipe: [{ material: "Tuna sashimi block", quantity: 1, unit: "kg" }] },
-  { name: "Baked Sushi California Small", category: "Baked Sushi", price: 320, recipe: defaultRoll("Crabstick", "Ebiko") },
-  { name: "Baked Sushi California Medium", category: "Baked Sushi", price: 600, recipe: defaultRoll("Crabstick", "Ebiko") },
-  { name: "Large Classic Platter (71pcs)", category: "Platter", price: 1400, is_available: false, recipe: defaultRoll("Salmon", "Crabstick") },
-  { name: "Medium Classic Platter (40pcs)", category: "Platter", price: 750, is_available: false, recipe: defaultRoll("Tuna", "Crabstick") },
+  { name: "Salmon Sashimi 100g", category: "Sashimi", price: 260, recipe: [{ material: "Salmon sashimi block", quantity: 100, unit: "g" }] },
+  { name: "Salmon Sashimi 500g", category: "Sashimi", price: 1200, recipe: [{ material: "Salmon sashimi block", quantity: 500, unit: "g" }] },
+  { name: "Salmon Sashimi 1000g", category: "Sashimi", price: 2300, recipe: [{ material: "Salmon sashimi block", quantity: 1000, unit: "g" }] },
+  { name: "Tuna Sashimi 100g", category: "Sashimi", price: 160, recipe: [{ material: "Tuna sashimi block", quantity: 100, unit: "g" }] },
+  { name: "Tuna Sashimi 500g", category: "Sashimi", price: 700, recipe: [{ material: "Tuna sashimi block", quantity: 500, unit: "g" }] },
+  { name: "Tuna Sashimi 1000g", category: "Sashimi", price: 1300, recipe: [{ material: "Tuna sashimi block", quantity: 1000, unit: "g" }] },
+  { name: "Baked Sushi California Small", category: "Baked Sushi", price: 320, recipe: bakedRoll(false) },
+  { name: "Baked Sushi California Medium", category: "Baked Sushi", price: 600, recipe: bakedRoll(true) },
+  {
+    name: "Large Classic Platter (71pcs)",
+    category: "Platter",
+    price: 1400,
+    is_available: false,
+    // Keep unavailable until platter composition and component deduction are implemented.
+    recipe: [...classicBase, { material: "Salmon", quantity: 30, unit: "g" }, { material: "Crabstick", quantity: 0, unit: "piece" }]
+  },
+  {
+    name: "Medium Classic Platter (40pcs)",
+    category: "Platter",
+    price: 750,
+    is_available: false,
+    // Keep unavailable until platter composition and component deduction are implemented.
+    recipe: [...classicBase, { material: "Tuna", quantity: 30, unit: "g" }, { material: "Crabstick", quantity: 0, unit: "piece" }]
+  },
   { name: "Kani Spring Roll (3pcs)", category: "Spring Roll", price: 150, recipe: defaultRoll("Crabstick", "Lettuce") },
   { name: "Tuna Gyozai (4pcs)", category: "Gyozai", price: 160, recipe: defaultRoll("Tuna", "Spring onion") },
   { name: "Bottled Water", category: "Beverage", price: 20, recipe: [] },
@@ -351,6 +317,11 @@ async function main() {
   await prisma.unlimitedSetting.deleteMany();
   await prisma.unlimitedSession.deleteMany();
   await prisma.reservation.deleteMany();
+  await prisma.diningOrder.deleteMany();
+  await prisma.diningTableSession.deleteMany();
+  await prisma.tableCombinationMember.deleteMany();
+  await prisma.tableCombination.deleteMany();
+  await prisma.table.updateMany({ data: { linked_to_table_id: null } });
   await prisma.table.deleteMany();
   await prisma.recipeIngredient.deleteMany();
   await prisma.recipe.deleteMany();
@@ -380,7 +351,7 @@ async function main() {
     })
   );
 
-  await prisma.rawMaterial.createMany({ data: seededMaterials });
+  await prisma.rawMaterial.createMany({ data: rawMaterials });
 
   const materials = await prisma.rawMaterial.findMany();
   const materialByName = new Map(materials.map((material) => [material.name, material.id]));
@@ -428,9 +399,8 @@ async function main() {
           }
 
           return {
-            recipe_id: recipe.id,
-            raw_material_id: rawMaterialId,
-            ...normalizeSeedIngredient(ingredient, product.name),
+            quantity_per_yield: BigInt(ingredient.quantity),
+            unit: ingredient.unit,
             recipe_id: recipe.id,
             raw_material_id: rawMaterialId
           };
