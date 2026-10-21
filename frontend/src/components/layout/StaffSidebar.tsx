@@ -8,9 +8,7 @@ import {
   Lock,
   LogOut,
   Package,
-  PartyPopper,
   Settings,
-  ShoppingBag,
   Shield,
   User,
   Users
@@ -32,9 +30,7 @@ const menuItems: MenuItem[] = [
   { label: "Inventory", to: "/staff/inventory", icon: Package, roles: ["admin", "inventory_manager"] },
   { label: "POS", to: "/staff/pos", icon: CreditCard, roles: ["admin", "cashier"] },
   { label: "Kitchen", to: "/staff/kitchen", icon: ChefHat, roles: ["admin", "cashier", "chef"] },
-  { label: "Pickup", to: "/staff/takeout", icon: ShoppingBag, roles: ["admin", "cashier", "receptionist", "chef"] },
-  { label: "Dine-in", to: "/staff/reservations", icon: CalendarDays, roles: ["admin"] },
-  { label: "Catering", to: "/staff/catering", icon: PartyPopper, roles: ["admin", "event_coordinator"] },
+  { label: "Reservations", to: "/staff/reservations", icon: CalendarDays, roles: ["admin", "cashier", "receptionist", "event_coordinator", "chef"] },
   { label: "Analytics", to: "/staff/analytics", icon: BarChart3, roles: ["admin", "inventory_manager"] },
   { label: "Settings", to: "/staff/settings", icon: Settings, roles: ["admin", "inventory_manager", "cashier", "receptionist", "event_coordinator", "chef"] }
 ];

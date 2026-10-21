@@ -4299,13 +4299,136 @@ app.get("/api/staff/notifications", async (req, res, next) => {
   }
 });
 
-app.get("/api/staff/reservations/all", async (req, res, next) => {
+app.get("/api/staff/reservations/overview", async (req, res, next) => {
   try {
-    const user = requireRole(req, res, ["admin", "receptionist"]);
-
+    const user = requireRole(req, res, ["admin", "receptionist", "cashier", "event_coordinator", "chef"]);
     if (!user) {
       return;
     }
+    const canViewTables = ["admin", "receptionist"].includes(user.role);
+    const canViewCatering = ["admin", "event_coordinator"].includes(user.role);
+
+    const [tableReservations, cateringReservations] = await Promise.all([
+      canViewTables ? prisma.reservation.findMany({
+        select: {
+          id: true,
+          booking_id: true,
+          customer_name: true,
+          date: true,
+          time: true,
+          party_size: true,
+          reservation_type: true,
+          status: true,
+          table_assignments: {
+            where: { status: { in: ["assigned", "seated"] } },
+            orderBy: { table: { table_number: "asc" } },
+            select: { table: { select: { table_number: true } } }
+          }
+        },
+        orderBy: [{ date: "asc" }, { time: "asc" }]
+      }) : Promise.resolve([]),
+      canViewCatering ? prisma.cateringReservation.findMany({
+        where: { confirmed_date: { not: null } },
+        select: {
+          id: true,
+          reservation_id: true,
+          customer_name: true,
+          confirmed_date: true,
+          event_time: true,
+          headcount: true,
+          status: true,
+          package: { select: { name: true } }
+        },
+        orderBy: [{ confirmed_date: "asc" }, { event_time: "asc" }]
+      }) : Promise.resolve([])
+    ]);
+
+    const reservations = [
+      ...tableReservations.map((reservation) => ({
+        id: reservation.id,
+        type: "dine_in" as const,
+        reference: reservation.booking_id,
+        customer_name: reservation.customer_name,
+        date: reservation.date,
+        time: reservation.time,
+        guests: reservation.party_size,
+        reservation_type: reservation.reservation_type,
+        status: reservation.status,
+        table_numbers: reservation.table_assignments.map((assignment) => assignment.table.table_number)
+      })),
+      ...cateringReservations.map((reservation) => ({
+        id: reservation.id,
+        type: "catering" as const,
+        reference: reservation.reservation_id ?? reservation.id,
+        customer_name: reservation.customer_name ?? "Customer",
+        date: reservation.confirmed_date!,
+        time: reservation.event_time ?? "",
+        guests: reservation.headcount ?? 0,
+        reservation_type: "catering",
+        status: reservation.status ?? "pending",
+        table_numbers: [] as number[],
+        package_name: reservation.package?.name ?? null
+      }))
+    ].sort((first, second) =>
+      first.date.getTime() - second.date.getTime() ||
+      first.time.localeCompare(second.time) ||
+      first.reference.localeCompare(second.reference)
+    );
+
+    return res.json({ reservations });
+  } catch (error) {
+    return next(error);
+  }
+});
+
+app.get("/api/staff/reservations/overview/pickup", async (req, res, next) => {
+  try {
+    const user = requireRole(req, res, ["admin", "receptionist", "cashier", "chef"]);
+    if (!user) return;
+    const orders = await prisma.takeoutOrder.findMany({
+      where: { status: { notIn: ["cancelled", "expired"] } },
+      select: {
+        order_number: true,
+        status: true,
+        payment_plan: true,
+        payment_status: true,
+        payment_method: true,
+        customer_name: true,
+        created_at: true,
+        total: true,
+        items: {
+          orderBy: { created_at: "asc" },
+          select: { name_snapshot: true, quantity: true, total_price: true }
+        }
+      },
+      orderBy: [{ created_at: "asc" }, { order_number: "asc" }]
+    });
+    return res.json({
+      orders: orders.map((order) => ({
+        order_number: order.order_number,
+        status: order.status === "released" ? "completed" : order.status,
+        payment_plan: order.payment_plan,
+        payment_status: order.payment_status,
+        payment_method: order.payment_method,
+        customer_name: order.customer_name,
+        created_at: order.created_at,
+        total: order.total,
+        items: order.items.map((item) => ({
+          name: item.name_snapshot,
+          quantity: item.quantity,
+          total_price: item.total_price
+        }))
+      }))
+    });
+  } catch (error) {
+    return next(error);
+  }
+});
+
+app.get("/api/staff/reservations/all", async (req, res, next) => {
+  try {
+    const user = requireRole(req, res, ["admin", "receptionist"]);
+    if (!user) return;
 
     const date = typeof req.query.date === "string" ? manilaDateToUtc(req.query.date) : undefined;
     const status = typeof req.query.status === "string" ? req.query.status : undefined;
@@ -4319,6 +4442,11 @@ app.get("/api/staff/reservations/all", async (req, res, next) => {
         unlimited_package: true,
         payments: { orderBy: { received_at: "asc" } },
         ingredient_locks: { include: { raw_material: true }, orderBy: { created_at: "asc" } },
+        table_assignments: {
+          where: { status: { in: ["assigned", "seated"] } },
+          orderBy: { table: { table_number: "asc" } },
+          select: { table: { select: { table_number: true } } }
+        },
         activity: {
           where: { event_type: "late_arrival_still_coming" },
           select: { id: true },
@@ -4355,6 +4483,7 @@ app.get("/api/staff/reservations/all", async (req, res, next) => {
         date: reservation.date,
         time: reservation.time,
         guests: reservation.party_size,
+        table_numbers: reservation.table_assignments.map((assignment) => assignment.table.table_number),
         reservation_type: reservation.reservation_type,
         selected_products: reservation.selected_products ?? [],
         ingredient_locks: reservation.ingredient_locks,
@@ -4384,6 +4513,7 @@ app.get("/api/staff/reservations/all", async (req, res, next) => {
         ingredient_locks: reservation.ingredient_locks,
         time: "",
         guests: reservation.headcount,
+        table_numbers: [],
         status: reservation.status,
         payment_plan: reservation.payment_plan,
         downpayment_amount: reservation.downpayment_amount,
@@ -4804,41 +4934,15 @@ app.put("/api/staff/reservations/:id/still-coming", async (req, res, next) => {
   }
 });
 
-async function markDineInReservationSeated(req: Request, res: Response, next: NextFunction) {
-  try {
+for (const action of ["seat", "arrive"] as const) {
+  app.put(`/api/staff/reservations/:id/${action}`, (req, res) => {
     const user = requireRole(req, res, ["admin", "receptionist"]);
-
-    if (!user) {
-      return;
-    }
-
-    const reservation = await prisma.$transaction(async (tx) => {
-      await lockDineInReservationForUpdate(tx, req.params.id);
-      const current = await tx.reservation.findUnique({ where: { id: req.params.id } });
-      if (!current) throw new InventoryError("Reservation not found.", "BOOKING_NOT_FOUND", 404);
-      if (current.status !== "confirmed") {
-        throw new InventoryError("Only a confirmed booking can be marked arrived.", "BOOKING_NOT_CONFIRMED", 409);
-      }
-      const seated = await tx.reservation.update({ where: { id: current.id }, data: { status: "seated" } });
-      await addReservationActivity(tx, {
-        reservationId: current.id,
-        eventType: "status_changed",
-        fromStatus: current.status,
-        toStatus: seated.status,
-        actorType: "staff",
-        actorId: user.sub,
-        reason: "Guests arrived"
-      });
-      return seated;
+    if (!user) return;
+    return res.status(410).json({
+      message: "Reservations can only be seated from the POS."
     });
-    return res.json({ reservation });
-  } catch (error) {
-    return next(error);
-  }
+  });
 }
-
-app.put("/api/staff/reservations/:id/seat", markDineInReservationSeated);
-app.put("/api/staff/reservations/:id/arrive", markDineInReservationSeated);
 
 app.put("/api/staff/reservations/:id/complete", async (req, res, next) => {
   try {

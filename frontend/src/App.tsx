@@ -16,7 +16,6 @@ import Menu from "./pages/customer/Menu";
 import TableReservationForm from "./pages/customer/TableReservationForm";
 import ReservationStatus from "./pages/customer/ReservationStatus";
 import TakeoutOrder from "./pages/customer/TakeoutOrder";
-import CateringReservations from "./pages/staff/catering/CateringReservations";
 import InventoryPage from "./pages/staff/inventory";
 import CateringOptionPhotos from "./pages/staff/inventory/CateringOptionPhotos";
 import AnalyticsPage from "./pages/staff/analytics";
@@ -27,7 +26,7 @@ import PosPage from "./pages/staff/pos";
 import DiningService from "./pages/staff/pos/DiningService";
 import PosHistory from "./pages/staff/pos/PosHistory";
 import DineInReservations from "./pages/staff/reservations/DineInReservations";
-import TakeoutOrders from "./pages/staff/takeout/TakeoutOrders";
+import CateringReservations from "./pages/staff/catering/CateringReservations";
 
 function StaffPage({ roles, children }: { roles: string[]; children: JSX.Element }) {
   useSessionTimeout();
@@ -89,7 +88,7 @@ export default function App() {
       <Route path="/staff/pos" element={<StaffPage roles={["admin", "cashier"]}><PosPage /></StaffPage>} />
       <Route path="/staff/pos/dining" element={<Navigate to="/staff/pos" replace />} />
       <Route path="/staff/kitchen" element={<StaffPage roles={["admin", "cashier", "chef"]}><DiningService mode="kitchen" /></StaffPage>} />
-      <Route path="/staff/takeout" element={<StaffPage roles={["admin", "cashier", "receptionist", "chef"]}><TakeoutOrders /></StaffPage>} />
+      <Route path="/staff/takeout" element={<Navigate to="/staff/reservations?view=pickup" replace />} />
       <Route path="/staff/pos/history" element={<StaffPage roles={["admin", "cashier"]}><PosHistory /></StaffPage>} />
       <Route path="/staff/pos/unlimited-settings" element={<StaffPage roles={["admin", "cashier"]}><UnlimitedSettings /></StaffPage>} />
       <Route path="/admin/unlimited-settings" element={<Navigate to="/staff/pos/unlimited-settings" replace />} />
@@ -98,7 +97,7 @@ export default function App() {
       <Route
         path="/staff/reservations"
         element={
-          <StaffPage roles={["admin"]}>
+          <StaffPage roles={["admin", "receptionist", "cashier", "event_coordinator", "chef"]}>
             <DineInReservations />
           </StaffPage>
         }
