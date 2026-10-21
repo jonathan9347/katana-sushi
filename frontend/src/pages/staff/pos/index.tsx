@@ -8,6 +8,7 @@ import { PosProduct, usePosCart } from "./store";
 import { api } from "../../../lib/api";
 import { defaultSystemSettings, fetchSystemSettings, type SystemSettings } from "../../../lib/systemSettings";
 import { useToast } from "../../../hooks/useToast";
+import { formatManilaDateTime } from "../../../lib/dateTime";
 import { Button } from "../../../components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "../../../components/ui/card";
 import { Select } from "../../../components/ui/select";
@@ -37,12 +38,13 @@ type PosTransaction = {
 
 type PickupOrder = {
   order_number: string;
-  status: "ready" | "completed";
+  status: "preparing" | "ready" | "completed";
   payment_plan: "pay_now" | "pay_at_pickup";
   payment_status: string;
   payment_method: string | null;
   customer_name: string;
   created_at: string;
+  pickup_time: string | null;
   total: number;
   items: Array<{ name: string; quantity: number; unit_price: number; total_price: number }>;
 };
@@ -104,7 +106,7 @@ export default function PosPage() {
     queryKey: ["pos", "pickup-orders", pickupSearch.trim()],
     queryFn: async () => {
       const response = await api.get<{ orders: PickupOrder[] }>("/api/pos/pickup-orders", {
-        params: { name: pickupSearch.trim() }
+        params: { orderId: pickupSearch.trim() }
       });
       return response.data.orders;
     },
@@ -188,7 +190,7 @@ export default function PosPage() {
   const pickupCompletionMutation = useMutation({
     mutationFn: async (payment: { paymentMethod?: "cash"; cashReceived?: number }) => {
       if (!selectedPickupOrder) {
-        throw new Error("Select a ready pickup order first.");
+        throw new Error("Select a preparing or ready pickup order first.");
       }
       const response = await api.post<{ order: PickupOrder }>(
         `/api/pos/pickup-orders/${encodeURIComponent(selectedPickupOrder.order_number)}/complete`,
@@ -331,7 +333,7 @@ export default function PosPage() {
           </div>}
           <div className="mt-2 space-y-1 text-xs text-slate-500">
             {customerType === "new_customer" && <p id="existing-table-unavailable">Existing table opens the table board.</p>}
-            {isPickupCustomer && <p>Search for a staff-approved, ready pickup order by customer name.</p>}
+            {isPickupCustomer && <p>Search for a staff-approved pickup order by order ID.</p>}
           </div>
         </section>
 
@@ -361,11 +363,11 @@ export default function PosPage() {
           <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(320px,0.8fr)]">
             <Card className="min-w-0">
               <CardHeader>
-                <CardTitle>Find ready pickup orders</CardTitle>
+                <CardTitle>Find pickup orders</CardTitle>
               </CardHeader>
               <CardContent className="grid gap-4">
                 <label className="grid gap-1 text-sm font-medium text-slate-700">
-                  <span>Customer name</span>
+                  <span>Order ID</span>
                   <input
                     className="h-11 rounded-md border border-slate-300 px-3 text-sm outline-none focus:border-red-700 focus:ring-2 focus:ring-red-100"
                     autoComplete="off"
@@ -378,12 +380,12 @@ export default function PosPage() {
                   />
                 </label>
                 {pickupSearch.trim().length < 2 && (
-                  <p className="text-sm text-slate-500">Enter at least 2 characters to search approved, ready pickup orders.</p>
+                  <p className="text-sm text-slate-500">Enter at least 2 characters of the order ID. Preparing and Ready orders are available.</p>
                 )}
                 {pickupOrdersQuery.isLoading && <p className="text-sm text-slate-500">Searching pickup orders...</p>}
                 {pickupOrdersQuery.isError && <p role="alert" className="text-sm text-red-700">Unable to search pickup orders. Please retry.</p>}
                 {pickupSearch.trim().length >= 2 && pickupOrdersQuery.isSuccess && pickupOrdersQuery.data.length === 0 && (
-                  <p className="text-sm text-slate-500">No ready pickup orders match that name.</p>
+                  <p className="text-sm text-slate-500">No preparing or ready pickup orders match that ID.</p>
                 )}
                 <div className="grid gap-2">
                   {pickupOrdersQuery.data?.map((order) => (
@@ -395,8 +397,8 @@ export default function PosPage() {
                       className={`flex items-center justify-between gap-3 rounded-md border p-3 text-left ${selectedPickupOrder?.order_number === order.order_number ? "border-red-700 bg-red-50" : "border-slate-200 bg-white hover:bg-slate-50"}`}
                     >
                       <span>
-                        <span className="block font-semibold text-slate-950">{order.customer_name}</span>
-                        <span className="block text-xs text-slate-500">{order.order_number} · Ready</span>
+                        <span className="block font-semibold text-slate-950">{order.order_number}</span>
+                        <span className="block text-xs capitalize text-slate-500">{order.status}</span>
                       </span>
                       <span className="text-sm font-bold text-slate-900">{money(order.total)}</span>
                     </button>
@@ -412,14 +414,21 @@ export default function PosPage() {
               <CardContent className="grid content-start gap-4">
                 {!selectedPickupOrder ? (
                   <p className="rounded-md border border-dashed border-slate-300 p-6 text-center text-sm text-slate-500">
-                    Select a ready pickup order to load its cart.
+                    Select a preparing or ready pickup order to load its cart.
                   </p>
                 ) : (
                   <>
                     <div>
                       <p className="font-semibold text-slate-950">{selectedPickupOrder.customer_name}</p>
                       <p className="text-sm text-slate-500">{selectedPickupOrder.order_number}</p>
-                      <p className="mt-2 text-sm font-semibold text-emerald-800">Ready for pickup</p>
+                      <p className={`mt-2 text-sm font-semibold ${selectedPickupOrder.status === "ready" ? "text-emerald-800" : "text-amber-800"}`}>
+                        {selectedPickupOrder.status === "ready" ? "Ready for pickup" : "Preparing"}
+                      </p>
+                      {selectedPickupOrder.pickup_time ? (
+                        <p className="text-sm text-slate-600">
+                          Pickup Time: {formatManilaDateTime(selectedPickupOrder.pickup_time, { hour: "numeric", minute: "2-digit" })}
+                        </p>
+                      ) : null}
                     </div>
                     <div className="grid gap-2">
                       {selectedPickupOrder.items.map((item, index) => (

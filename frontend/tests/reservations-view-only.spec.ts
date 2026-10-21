@@ -53,12 +53,13 @@ test("unified reservations page lists all three views and keeps pickup actions",
           orders: [{
             order_number: "PICKUP-TEST",
             status: pickupStatus,
-            payment_plan: "pay_now",
-            payment_status: "paid",
-            payment_method: "gcash",
+            payment_plan: "pay_at_pickup",
+            payment_status: "unpaid",
+            payment_method: null,
             customer_name: "Pickup Guest",
             customer_phone: "09123456789",
             created_at: date,
+            ready_at: pickupStatus === "ready" ? date : null,
             total: 250,
             items: [{ name: "Salmon Roll", quantity: 2, total_price: 250 }]
           }]
@@ -104,10 +105,12 @@ test("unified reservations page lists all three views and keeps pickup actions",
   });
   await page.reload();
   await expect(page.getByText("Pickup Guest")).toBeVisible();
-  await page.getByRole("button", { name: "Approve & start preparing" }).click();
+  await expect(page.getByRole("button", { name: "Decline" })).toBeVisible();
+  await page.getByRole("button", { name: "Approve" }).click();
   await expect(page.getByRole("button", { name: "Mark ready" })).toBeVisible();
   await page.getByRole("button", { name: "Mark ready" }).click();
   await expect(page.getByText("Ready for pickup")).toBeVisible();
+  await expect(page.getByText(/Pickup Time:/)).toBeVisible();
 
   await page.evaluate(() => {
     localStorage.setItem("test-role", "admin");

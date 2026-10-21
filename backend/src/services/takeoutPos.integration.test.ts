@@ -50,15 +50,12 @@ async function request(
 async function createOrder(input: {
   name: string;
   status: string;
-  paymentPlan: "pay_now" | "pay_at_pickup";
   paymentStatus: string;
-  paymentMethod?: string;
 }): Promise<{
   orderNumber: string;
   stockBefore: number;
   materialId: string;
   productId: string;
-  lockId: string;
 }> {
   fixtureSequence += 1;
   const suffix = `${testRunKey}-${fixtureSequence}`;
@@ -105,16 +102,16 @@ async function createOrder(input: {
     }
   });
   const orderNumber = `KTO-PHASE4-${suffix}`;
-  const order = await prisma.takeoutOrder.create({
+  await prisma.takeoutOrder.create({
     data: {
       order_number: orderNumber,
       idempotency_key: `phase4-pickup-${suffix}`,
       customer_name: input.name,
       customer_phone: "09123456789",
       status: input.status,
-      payment_plan: input.paymentPlan,
+      payment_plan: "pay_at_pickup",
       payment_status: input.paymentStatus,
-      payment_method: input.paymentMethod ?? null,
+      payment_method: null,
       subtotal: 20,
       total: 20,
       items: {
@@ -125,24 +122,15 @@ async function createOrder(input: {
           unit_price: 10,
           total_price: 20
         }
-      },
-      ingredient_locks: {
-        create: {
-          raw_material_id: material.id,
-          reserved_quantity: 4n,
-          unit: "g"
-        }
       }
-    },
-    include: { ingredient_locks: true }
+    }
   });
 
   return {
     orderNumber,
     stockBefore,
     materialId: material.id,
-    productId: product.id,
-    lockId: order.ingredient_locks[0].id
+    productId: product.id
   };
 }
 
@@ -191,198 +179,256 @@ after(async () => {
   await prisma.$disconnect();
 });
 
-test("POS pickup search is cashier-only and returns only ready, payable orders", async () => {
-  const name = `Search Pickup ${testRunKey}`;
+test("new pickup orders do not lock stock and online payment is rejected", async () => {
+  const fixture = await createOrder({
+    name: `Order Creation Fixture ${testRunKey}`,
+    status: "pending_approval",
+    paymentStatus: "unpaid"
+  });
+  const accepted = await request("/api/takeout/orders", {
+    body: {
+      customer_name: `New Pickup ${testRunKey}`,
+      customer_phone: "09123456789",
+      payment_plan: "pay_at_pickup",
+      idempotency_key: `phase4-pickup-submit-${testRunKey}`,
+      items: [{ product_id: fixture.productId, quantity: 1 }]
+    }
+  });
+  assert.equal(accepted.status, 201, await accepted.clone().text());
+  const acceptedBody = await accepted.json() as {
+    order: { order_number: string; status: string; payment_status: string; ready_at: string | null };
+    payment: unknown;
+  };
+  assert.equal(acceptedBody.order.status, "pending_approval");
+  assert.equal(acceptedBody.order.payment_status, "unpaid");
+  assert.equal(acceptedBody.order.ready_at, null);
+  assert.equal(acceptedBody.payment, null);
+  assert.equal(await prisma.takeoutIngredientLock.count({
+    where: { order: { order_number: acceptedBody.order.order_number }, is_released: false }
+  }), 0);
+  assert.equal(await prisma.inventoryMovement.count({
+    where: { source_reference: acceptedBody.order.order_number, action: "Reserved" }
+  }), 0);
+
+  const onlineOrder = await request("/api/takeout/orders", {
+    body: {
+      customer_name: `Online Pickup ${testRunKey}`,
+      customer_phone: "09123456789",
+      payment_plan: "pay_now",
+      payment_method: "gcash",
+      idempotency_key: `phase4-pickup-online-${testRunKey}`,
+      items: [{ product_id: fixture.productId, quantity: 1 }]
+    }
+  });
+  assert.equal(onlineOrder.status, 400);
+
+  const intent = await request("/api/payments/create-intent", {
+    body: {
+      amount: 10,
+      paymentMethod: "gcash",
+      bookingId: acceptedBody.order.order_number,
+      reservationType: "takeout"
+    }
+  });
+  assert.equal(intent.status, 400);
+});
+
+test("declining a pending pickup order leaves stock untouched", async () => {
+  const fixture = await createOrder({
+    name: `Declined Pickup ${testRunKey}`,
+    status: "pending_approval",
+    paymentStatus: "unpaid"
+  });
+  const path = `/api/admin/takeout/orders/${encodeURIComponent(fixture.orderNumber)}/status`;
+  const response = await request(path, {
+    method: "PATCH",
+    body: { status: "declined" },
+    token: cashierToken
+  });
+  assert.equal(response.status, 200, await response.clone().text());
+  assert.equal((await prisma.takeoutOrder.findUniqueOrThrow({
+    where: { order_number: fixture.orderNumber }
+  })).status, "declined");
+  assert.equal(await prisma.takeoutIngredientLock.count({
+    where: { order: { order_number: fixture.orderNumber } }
+  }), 0);
+  assert.equal(Number((await prisma.rawMaterial.findUniqueOrThrow({
+    where: { id: fixture.materialId },
+    select: { current_stock: true }
+  })).current_stock), fixture.stockBefore);
+  assert.equal(await prisma.inventoryMovement.count({
+    where: { source_reference: fixture.orderNumber }
+  }), 0);
+});
+
+test("POS pickup search is cashier-only, uses order ID, and includes Preparing and Ready", async () => {
   const ready = await createOrder({
-    name,
+    name: `Ready Search Pickup ${testRunKey}`,
     status: "ready",
-    paymentPlan: "pay_at_pickup",
     paymentStatus: "unpaid"
   });
-  await createOrder({
-    name,
+  const preparing = await createOrder({
+    name: `Preparing Search Pickup ${testRunKey}`,
     status: "preparing",
-    paymentPlan: "pay_at_pickup",
     paymentStatus: "unpaid"
-  });
-  await createOrder({
-    name,
-    status: "ready",
-    paymentPlan: "pay_now",
-    paymentStatus: "pending"
   });
 
-  const anonymous = await request(`/api/pos/pickup-orders?name=${encodeURIComponent(name)}`, { method: "GET" });
+  const anonymous = await request(`/api/pos/pickup-orders?orderId=${encodeURIComponent(ready.orderNumber)}`, { method: "GET" });
   assert.equal(anonymous.status, 401);
 
-  const chef = await request(`/api/pos/pickup-orders?name=${encodeURIComponent(name)}`, {
+  const chef = await request(`/api/pos/pickup-orders?orderId=${encodeURIComponent(ready.orderNumber)}`, {
     method: "GET",
     token: chefToken
   });
   assert.equal(chef.status, 403);
 
-  const tooShort = await request("/api/pos/pickup-orders?name=S", {
+  const tooShort = await request("/api/pos/pickup-orders?orderId=S", {
     method: "GET",
     token: cashierToken
   });
   assert.deepEqual((await tooShort.json() as { orders: unknown[] }).orders, []);
 
-  const response = await request(`/api/pos/pickup-orders?name=${encodeURIComponent(name.toLowerCase())}`, {
+  const response = await request(`/api/pos/pickup-orders?orderId=${encodeURIComponent(ready.orderNumber)}`, {
     method: "GET",
     token: cashierToken
   });
   assert.equal(response.status, 200);
-  const result = await response.json() as { orders: Array<{ order_number: string; status: string }> };
+  const result = await response.json() as { orders: Array<{ order_number: string; status: string; pickup_time: string | null }> };
   assert.deepEqual(result.orders.map((order) => order.order_number), [ready.orderNumber]);
   assert.equal(result.orders[0].status, "ready");
 
-  const adminResponse = await request(`/api/pos/pickup-orders?name=${encodeURIComponent(name)}`, {
+  const preparingResponse = await request(`/api/pos/pickup-orders?orderId=${encodeURIComponent(preparing.orderNumber)}`, {
+    method: "GET",
+    token: cashierToken
+  });
+  assert.equal(preparingResponse.status, 200);
+  const preparingResult = await preparingResponse.json() as { orders: Array<{ order_number: string; status: string }> };
+  assert.deepEqual(preparingResult.orders.map((order) => order.order_number), [preparing.orderNumber]);
+  assert.equal(preparingResult.orders[0].status, "preparing");
+
+  const adminResponse = await request(`/api/pos/pickup-orders?orderId=${encodeURIComponent(ready.orderNumber)}`, {
     method: "GET",
     token: adminToken
   });
   assert.equal(adminResponse.status, 200);
 });
 
-test("unpaid ready pickup order is paid and stock is deducted once at POS completion", async () => {
-  const fixture = await createOrder({
-    name: `Unpaid Pickup ${testRunKey}`,
-    status: "ready",
-    paymentPlan: "pay_at_pickup",
-    paymentStatus: "unpaid"
-  });
-  const path = `/api/pos/pickup-orders/${encodeURIComponent(fixture.orderNumber)}/complete`;
+test("cash checkout deducts approved stock exactly once from Preparing and Ready", async () => {
+  for (const checkoutStatus of ["preparing", "ready"] as const) {
+    const fixture = await createOrder({
+      name: `${checkoutStatus} Pickup ${testRunKey}`,
+      status: "pending_approval",
+      paymentStatus: "unpaid"
+    });
+    const statusPath = `/api/admin/takeout/orders/${encodeURIComponent(fixture.orderNumber)}/status`;
+    const approval = await request(statusPath, {
+      method: "PATCH",
+      body: { status: "preparing" },
+      token: cashierToken
+    });
+    assert.equal(approval.status, 200, await approval.clone().text());
+    assert.equal((await approval.json() as { order: { status: string } }).order.status, "preparing");
 
-  const chefCheckout = await request(path, {
-    body: { paymentMethod: "cash", cashReceived: 25 },
-    token: chefToken
-  });
-  assert.equal(chefCheckout.status, 403);
-  const noPayment = await request(path, { body: {}, token: cashierToken });
-  assert.equal(noPayment.status, 400);
-  const insufficientCash = await request(path, {
-    body: { paymentMethod: "cash", cashReceived: 19.99 },
-    token: cashierToken
-  });
-  assert.equal(insufficientCash.status, 400);
+    const lock = await prisma.takeoutIngredientLock.findFirstOrThrow({
+      where: { order: { order_number: fixture.orderNumber }, is_released: false }
+    });
+    assert.equal(Number(lock.reserved_quantity), 4);
+    assert.equal(await prisma.inventoryMovement.count({
+      where: { source_reference: fixture.orderNumber, source_type: "takeout", action: "Reserved" }
+    }), 1);
 
-  const responses = await Promise.all([
-    request(path, { body: { paymentMethod: "cash", cashReceived: 25 }, token: cashierToken }),
-    request(path, { body: { paymentMethod: "cash", cashReceived: 25 }, token: cashierToken })
-  ]);
-  assert.deepEqual(responses.map((response) => response.status).sort(), [200, 409]);
-  const completedResponse = responses.find((response) => response.status === 200);
-  assert.ok(completedResponse);
-  assert.equal((await completedResponse.json() as { order: { status: string } }).order.status, "completed");
-  const [order, material, batch, lock, transaction] = await Promise.all([
-    prisma.takeoutOrder.findUniqueOrThrow({ where: { order_number: fixture.orderNumber } }),
-    prisma.rawMaterial.findUniqueOrThrow({ where: { id: fixture.materialId } }),
-    prisma.materialBatch.findFirstOrThrow({ where: { raw_material_id: fixture.materialId } }),
-    prisma.takeoutIngredientLock.findUniqueOrThrow({ where: { id: fixture.lockId } }),
-    prisma.posTransaction.findFirstOrThrow({
-      where: { transaction_type: "takeout", items: { some: { selling_product_id: fixture.productId } } },
-      include: { items: true }
-    })
-  ]);
-  assert.equal(order.status, "released");
-  assert.equal(order.payment_status, "paid");
-  assert.equal(order.payment_method, "cash");
-  assert.equal(transaction.transaction_type, "takeout");
-  assert.equal(transaction.payment_method, "cash");
-  assert.equal(transaction.cash_received, 25);
-  assert.equal(transaction.change_due, 5);
-  assert.equal(transaction.items.length, 1);
-  assert.equal(transaction.items[0].name_snapshot?.includes("Phase 4 Pickup Product"), true);
-  assert.equal(Number(material.current_stock), fixture.stockBefore - 4);
-  assert.equal(Number(batch.remaining_quantity), fixture.stockBefore - 4);
-  assert.equal(lock.is_released, true);
-  assert.equal(await prisma.inventoryMovement.count({
-    where: { source_reference: transaction.transaction_number, source_type: "POS", action: "Used" }
-  }), 1);
-
-  const retry = await request(path, {
-    body: { paymentMethod: "cash", cashReceived: 25 },
-    token: cashierToken
-  });
-  assert.equal(retry.status, 409);
-  assert.equal(Number((await prisma.rawMaterial.findUniqueOrThrow({
-    where: { id: fixture.materialId },
-    select: { current_stock: true }
-  })).current_stock), fixture.stockBefore - 4);
-  assert.equal(await prisma.inventoryMovement.count({
-    where: { source_reference: transaction.transaction_number, source_type: "POS", action: "Used" }
-  }), 1);
-  assert.equal(await prisma.posTransaction.count({
-    where: { transaction_number: transaction.transaction_number }
-  }), 1);
-
-  const refund = await request(`/api/pos/refund/${transaction.id}`, {
-    method: "POST",
-    body: {},
-    token: adminToken
-  });
-  assert.equal(refund.status, 200, await refund.clone().text());
-  assert.equal(Number((await prisma.rawMaterial.findUniqueOrThrow({
-    where: { id: fixture.materialId },
-    select: { current_stock: true }
-  })).current_stock), fixture.stockBefore);
-  assert.equal(await prisma.inventoryMovement.count({
-    where: {
-      source_reference: transaction.transaction_number,
-      source_type: "POS",
-      action: "Adjusted"
+    if (checkoutStatus === "ready") {
+      const beforeReady = Date.now();
+      const readyResponse = await request(statusPath, {
+        method: "PATCH",
+        body: { status: "ready" },
+        token: cashierToken
+      });
+      assert.equal(readyResponse.status, 200, await readyResponse.clone().text());
+      const readyOrder = await readyResponse.json() as { order: { status: string; ready_at: string } };
+      assert.equal(readyOrder.order.status, "ready");
+      assert.ok(Date.parse(readyOrder.order.ready_at) >= beforeReady);
+      assert.equal(
+        (await prisma.takeoutOrder.findUniqueOrThrow({ where: { order_number: fixture.orderNumber } })).ready_at?.toISOString(),
+        readyOrder.order.ready_at
+      );
+    } else {
+      assert.equal(
+        (await prisma.takeoutOrder.findUniqueOrThrow({ where: { order_number: fixture.orderNumber } })).ready_at,
+        null
+      );
     }
-  }), 1);
-});
 
-test("online-paid ready pickup order completes without collecting payment again", async () => {
-  const fixture = await createOrder({
-    name: `Paid Pickup ${testRunKey}`,
-    status: "ready",
-    paymentPlan: "pay_now",
-    paymentStatus: "paid",
-    paymentMethod: "gcash"
-  });
-  const response = await request(
-    `/api/pos/pickup-orders/${encodeURIComponent(fixture.orderNumber)}/complete`,
-    { body: {}, token: cashierToken }
-  );
-  assert.equal(response.status, 200, await response.clone().text());
-  assert.equal((await response.json() as { order: { status: string } }).order.status, "completed");
+    const path = `/api/pos/pickup-orders/${encodeURIComponent(fixture.orderNumber)}/complete`;
+    const chefCheckout = await request(path, {
+      body: { paymentMethod: "cash", cashReceived: 25 },
+      token: chefToken
+    });
+    assert.equal(chefCheckout.status, 403);
+    const noPayment = await request(path, { body: {}, token: cashierToken });
+    assert.equal(noPayment.status, 400);
+    const insufficientCash = await request(path, {
+      body: { paymentMethod: "cash", cashReceived: 19.99 },
+      token: cashierToken
+    });
+    assert.equal(insufficientCash.status, 400);
 
-  const [order, material, transaction] = await Promise.all([
-    prisma.takeoutOrder.findUniqueOrThrow({ where: { order_number: fixture.orderNumber } }),
-    prisma.rawMaterial.findUniqueOrThrow({ where: { id: fixture.materialId } }),
-    prisma.posTransaction.findFirstOrThrow({
-      where: { transaction_type: "takeout", items: { some: { selling_product_id: fixture.productId } } }
-    })
-  ]);
-  assert.equal(order.status, "released");
-  assert.equal(order.payment_status, "paid");
-  assert.equal(order.payment_method, "gcash");
-  assert.equal(transaction.payment_method, "gcash");
-  assert.equal(transaction.cash_received, null);
-  assert.equal(transaction.change_due, null);
-  assert.equal(Number(material.current_stock), fixture.stockBefore - 4);
+    const responses = await Promise.all([
+      request(path, { body: { paymentMethod: "cash", cashReceived: 25 }, token: cashierToken }),
+      request(path, { body: { paymentMethod: "cash", cashReceived: 25 }, token: cashierToken })
+    ]);
+    assert.deepEqual(responses.map((response) => response.status).sort(), [200, 409]);
+    const completedResponse = responses.find((response) => response.status === 200);
+    assert.ok(completedResponse);
+    assert.equal((await completedResponse.json() as { order: { status: string } }).order.status, "completed");
+    const [order, material, batch, updatedLock, transaction] = await Promise.all([
+      prisma.takeoutOrder.findUniqueOrThrow({ where: { order_number: fixture.orderNumber } }),
+      prisma.rawMaterial.findUniqueOrThrow({ where: { id: fixture.materialId } }),
+      prisma.materialBatch.findFirstOrThrow({ where: { raw_material_id: fixture.materialId } }),
+      prisma.takeoutIngredientLock.findUniqueOrThrow({ where: { id: lock.id } }),
+      prisma.posTransaction.findFirstOrThrow({
+        where: { transaction_type: "takeout", items: { some: { selling_product_id: fixture.productId } } },
+        include: { items: true }
+      })
+    ]);
+    assert.equal(order.status, "released");
+    assert.equal(order.payment_status, "paid");
+    assert.equal(order.payment_method, "cash");
+    assert.equal(transaction.transaction_type, "takeout");
+    assert.equal(transaction.payment_method, "cash");
+    assert.equal(transaction.cash_received, 25);
+    assert.equal(transaction.change_due, 5);
+    assert.equal(transaction.items.length, 1);
+    assert.equal(transaction.items[0].name_snapshot?.includes("Phase 4 Pickup Product"), true);
+    assert.equal(Number(material.current_stock), fixture.stockBefore - 4);
+    assert.equal(Number(batch.remaining_quantity), fixture.stockBefore - 4);
+    assert.equal(updatedLock.is_released, true);
+    assert.equal(await prisma.inventoryMovement.count({
+      where: { source_reference: transaction.transaction_number, source_type: "POS", action: "Used" }
+    }), 1);
 
-  const duplicatePayment = await request(
-    `/api/pos/pickup-orders/${encodeURIComponent(fixture.orderNumber)}/complete`,
-    { body: { paymentMethod: "cash", cashReceived: 20 }, token: cashierToken }
-  );
-  assert.equal(duplicatePayment.status, 409);
-  assert.equal(Number((await prisma.rawMaterial.findUniqueOrThrow({
-    where: { id: fixture.materialId },
-    select: { current_stock: true }
-  })).current_stock), fixture.stockBefore - 4);
-  assert.equal(await prisma.posTransaction.count({
-    where: { transaction_number: transaction.transaction_number }
-  }), 1);
+    const retry = await request(path, {
+      body: { paymentMethod: "cash", cashReceived: 25 },
+      token: cashierToken
+    });
+    assert.equal(retry.status, 409);
+    assert.equal(Number((await prisma.rawMaterial.findUniqueOrThrow({
+      where: { id: fixture.materialId },
+      select: { current_stock: true }
+    })).current_stock), fixture.stockBefore - 4);
+    assert.equal(await prisma.inventoryMovement.count({
+      where: { source_reference: transaction.transaction_number, source_type: "POS", action: "Used" }
+    }), 1);
+    assert.equal(await prisma.posTransaction.count({
+      where: { transaction_number: transaction.transaction_number }
+    }), 1);
+  }
 });
 
 test("staff approval starts preparation and staff cannot complete pickup handover", async () => {
   const fixture = await createOrder({
     name: `Approval Pickup ${testRunKey}`,
     status: "pending_approval",
-    paymentPlan: "pay_at_pickup",
     paymentStatus: "unpaid"
   });
   const statusPath = `/api/admin/takeout/orders/${encodeURIComponent(fixture.orderNumber)}/status`;

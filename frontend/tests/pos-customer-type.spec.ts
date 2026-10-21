@@ -37,7 +37,7 @@ test("keeps takeout as the default and enables Pickup customer", async ({ page }
 
   await customerType.getByRole("button", { name: "Pickup customer" }).click();
   await expect(page.getByRole("heading", { name: "Pickup customer" })).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Find ready pickup orders" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Find pickup orders" })).toBeVisible();
 
   await customerType.getByRole("button", { name: "New customer" }).click();
   await customerType.getByRole("group", { name: "New customer service type" }).getByRole("button", { name: "Dine in" }).click();

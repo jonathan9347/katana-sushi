@@ -40,6 +40,13 @@ router.post("/payments/create-intent", async (req, res) => {
       })
       .parse(req.body) as CreatePaymentIntentParams;
 
+    if (body.reservationType === "takeout") {
+      return res.status(400).json({
+        success: false,
+        message: "Pickup orders are paid in cash at the counter."
+      });
+    }
+
     const result = await paymentService.createPaymentIntent(body);
     return res.json(result);
   } catch (error) {
@@ -102,83 +109,16 @@ router.post("/payments/verify", async (req, res) => {
 
     const takeoutOrder = await prisma.takeoutOrder.findUnique({
       where: { order_number: body.bookingId },
-      select: {
-        id: true,
-        order_number: true,
-        status: true,
-        payment_status: true,
-        payment_intent_reference_id: true,
-        payment_transaction_id: true,
-        total: true
-      }
+      select: { id: true }
     });
-    if (takeoutOrder && takeoutOrder.payment_intent_reference_id !== body.referenceId) {
+    if (takeoutOrder) {
       return res.status(400).json({
         success: false,
-        message: "Payment reference does not match this pickup order."
+        message: "Pickup orders are paid in cash at the counter."
       });
-    }
-    if (takeoutOrder) {
-      const intent = await paymentService.getPaymentStatus(body.referenceId);
-      if (
-        !intent ||
-        intent.bookingId !== takeoutOrder.order_number ||
-        intent.reservationType !== "takeout" ||
-        Math.abs(intent.amount - takeoutOrder.total) > 0.01
-      ) {
-        return res.status(400).json({
-          success: false,
-          message: "Payment details do not match this pickup order."
-        });
-      }
     }
 
     const result = await paymentService.verifyPayment(body);
-
-    if (takeoutOrder && result.success) {
-      const paidAt = result.paidAt ?? new Date();
-      await prisma.$transaction(async (tx) => {
-        const updated = await tx.takeoutOrder.updateMany({
-          where: {
-            id: takeoutOrder.id,
-            payment_intent_reference_id: body.referenceId,
-            payment_transaction_id: null
-          },
-          data: {
-            payment_status: "paid",
-            payment_transaction_id: result.transactionId,
-            paid_at: paidAt,
-            status: takeoutOrder.status === "pending_payment" || takeoutOrder.status === "payment_failed"
-              ? "pending_approval"
-              : takeoutOrder.status
-          }
-        });
-        if (updated.count === 0) {
-          const latest = await tx.takeoutOrder.findUnique({
-            where: { id: takeoutOrder.id },
-            select: { payment_status: true, payment_transaction_id: true }
-          });
-          if (
-            latest?.payment_status !== "paid" ||
-            latest.payment_transaction_id !== result.transactionId
-          ) {
-            throw new Error("Pickup order payment changed while confirmation was being processed.");
-          }
-        }
-      });
-    } else if (takeoutOrder && result.status === "failed") {
-      await prisma.takeoutOrder.updateMany({
-        where: {
-          id: takeoutOrder.id,
-          payment_intent_reference_id: body.referenceId,
-          payment_status: "pending"
-        },
-        data: {
-          payment_status: "failed",
-          status: "payment_failed"
-        }
-      });
-    }
 
     if (!result.success) {
       return res.status(400).json(result);

@@ -3,7 +3,7 @@ import { Link, useSearchParams } from "react-router-dom";
 import { CalendarPlus, Check, CheckCircle2, Clock3, Search, XCircle } from "lucide-react";
 import BackToHome from "../../components/layout/BackToHome";
 import { api } from "../../lib/api";
-import { formatManilaDate, formatTime12, manilaDateKey, todayManilaDateKey } from "../../lib/dateTime";
+import { formatManilaDate, formatManilaDateTime, formatTime12, manilaDateKey, todayManilaDateKey } from "../../lib/dateTime";
 import { formatCateringEventType } from "../../lib/reservationDetails";
 import { formatCateringPackageSnapshots } from "../../lib/cateringPackageSnapshot";
 import { getApiErrorMessage } from "../../lib/errors";
@@ -26,6 +26,7 @@ type StatusResult = {
   net_paid?: number;
   remaining_balance?: number;
   payment_status?: string;
+  ready_at?: string | null;
   full_payment_paid?: boolean;
   remaining_paid_at_venue?: boolean;
   special_requests?: string | null;
@@ -53,7 +54,7 @@ export default function ReservationStatus() {
       <Check className="h-6 w-6 text-green-500" strokeWidth={3} />
     ) : result?.status === "approved" || result?.status === "confirmed" ? (
       <CheckCircle2 className="h-6 w-6 text-emerald-400" />
-    ) : ["rejected", "cancelled", "canceled", "expired", "no_show", "no-show"].includes(result?.status ?? "") ? (
+    ) : ["rejected", "declined", "cancelled", "canceled", "expired", "no_show", "no-show"].includes(result?.status ?? "") ? (
       <XCircle className="h-6 w-6 text-katana-red" />
     ) : (
       <Clock3 className="h-6 w-6 text-amber-400" />
@@ -81,6 +82,7 @@ export default function ReservationStatus() {
             status: string;
             payment_plan: "pay_now" | "pay_at_pickup";
             payment_status: string;
+            ready_at: string | null;
             total: number;
             items: NonNullable<StatusResult["order_items"]>;
           };
@@ -89,6 +91,7 @@ export default function ReservationStatus() {
           status: response.data.order.status,
           payment_plan: response.data.order.payment_plan,
           payment_status: response.data.order.payment_status,
+          ready_at: response.data.order.ready_at,
           total_price: response.data.order.total,
           order_items: response.data.order.items,
           is_takeout: true
@@ -220,6 +223,12 @@ export default function ReservationStatus() {
               {result.is_takeout && result.status === "ready" && (
                 <p className="mt-4 rounded-xl border border-emerald-400/50 bg-emerald-500/15 px-4 py-3 font-bold text-[var(--customer-text)]" role="status">
                   Your order is ready for pickup.
+                  {result.ready_at ? ` Pickup Time: ${formatManilaDateTime(result.ready_at, { hour: "numeric", minute: "2-digit" })}.` : ""}
+                </p>
+              )}
+              {result.is_takeout && result.status === "declined" && (
+                <p className="mt-4 rounded-xl border border-red-400/50 bg-red-500/10 px-4 py-3 font-semibold text-[var(--customer-text)]" role="status">
+                  Your pickup order was declined by staff.
                 </p>
               )}
               {result.is_takeout && result.status === "pending_approval" && (

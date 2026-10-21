@@ -4,7 +4,7 @@ import { Link } from "react-router-dom";
 import BackToHome from "../../components/layout/BackToHome";
 import { Dialog } from "../../components/ui/dialog";
 import { api, resolveImageUrl } from "../../lib/api";
-import { verifyPayment } from "../../lib/payment";
+import { formatManilaDateTime } from "../../lib/dateTime";
 import "./ReservationForm.css";
 
 type TakeoutProduct = {
@@ -22,6 +22,7 @@ type TakeoutOrderSummary = {
   status: string;
   payment_plan: "pay_now" | "pay_at_pickup";
   payment_status: string;
+  ready_at?: string | null;
   subtotal: number;
   total: number;
   items: Array<{ name: string; quantity: number; unit_price: number; total_price: number }>;
@@ -30,22 +31,14 @@ type TakeoutOrderSummary = {
 
 type CheckoutResponse = {
   order: TakeoutOrderSummary;
-  payment: {
-    success: boolean;
-    referenceId: string;
-    qrCode?: string;
-    paymentUrl?: string;
-    instructions?: string;
-    expiresAt?: string;
-  } | null;
+  payment: null;
 };
 
-type PaymentPlan = "pay_now" | "pay_at_pickup";
-type PaymentMethod = "gcash" | "bank_transfer";
 type CartLine = { product: TakeoutProduct; quantity: number };
 
 function takeoutStatusLabel(status: string) {
   if (status === "pending_approval") return "Awaiting staff approval";
+  if (status === "declined") return "Declined";
   if (status === "completed" || status === "released") return "Completed";
   return status.replace(/_/g, " ");
 }
@@ -95,8 +88,6 @@ export default function TakeoutOrder() {
   const [quantities, setQuantities] = useState<Record<string, number>>({});
   const [customerName, setCustomerName] = useState("");
   const [customerPhone, setCustomerPhone] = useState("");
-  const [paymentPlan, setPaymentPlan] = useState<PaymentPlan>("pay_at_pickup");
-  const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>("gcash");
   const [menuSearch, setMenuSearch] = useState("");
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [mobileCartOpen, setMobileCartOpen] = useState(false);
@@ -123,7 +114,7 @@ export default function TakeoutOrder() {
   }, []);
 
   useEffect(() => {
-    if (!order || !customerPhone || ["released", "completed", "cancelled", "expired"].includes(order.status)) return;
+    if (!order || !customerPhone || ["released", "completed", "declined", "cancelled", "expired"].includes(order.status)) return;
     let active = true;
     const poll = async () => {
       try {
@@ -200,8 +191,7 @@ export default function TakeoutOrder() {
     const signature = JSON.stringify({
       customer_name: customerName.trim(),
       customer_phone: customerPhone,
-      payment_plan: paymentPlan,
-      payment_method: paymentPlan === "pay_now" ? paymentMethod : undefined,
+      payment_plan: "pay_at_pickup",
       items
     });
 
@@ -209,35 +199,14 @@ export default function TakeoutOrder() {
       const response = await api.post<CheckoutResponse>("/api/takeout/orders", {
         customer_name: customerName.trim(),
         customer_phone: customerPhone,
-        payment_plan: paymentPlan,
-        payment_method: paymentPlan === "pay_now" ? paymentMethod : undefined,
+        payment_plan: "pay_at_pickup",
         idempotency_key: getCheckoutKey(signature),
         items
       });
-      let createdOrder = response.data.order;
-      if (paymentPlan === "pay_now" && response.data.payment) {
-        const verified = await verifyPayment({
-          referenceId: response.data.payment.referenceId,
-          bookingId: createdOrder.order_number,
-          gatewayData: {
-            amount: createdOrder.total,
-            paymentMethod,
-            paymentPlan: "full_payment",
-            reservationType: "takeout"
-          }
-        });
-        if (!verified.success || verified.status !== "paid") {
-          throw new Error(verified.message || "Payment verification is still pending.");
-        }
-        createdOrder = { ...createdOrder, status: "pending_approval", payment_status: "paid" };
-      }
+      const createdOrder = response.data.order;
       setOrder(createdOrder);
       sessionStorage.removeItem("katana:takeout-checkout");
-      setMessage(
-        response.data.payment?.instructions
-          ? `${response.data.payment.instructions} Your order is awaiting staff approval.`
-          : "Your pickup order was received and is awaiting staff approval."
-      );
+      setMessage("Your pickup order was received and is awaiting staff approval. Pay in cash at the counter.");
     } catch (error) {
       setMessage(getErrorMessage(error));
     } finally {
@@ -270,6 +239,7 @@ export default function TakeoutOrder() {
           {order.status === "ready" && (
             <p className="mt-4 rounded-xl border border-emerald-400/50 bg-emerald-500/15 px-4 py-3 font-bold text-[var(--customer-text)]" role="status">
               Your order is ready for pickup.
+              {order.ready_at ? ` Pickup Time: ${formatManilaDateTime(order.ready_at, { hour: "numeric", minute: "2-digit" })}.` : ""}
             </p>
           )}
           <p className="mt-3 text-sm capitalize text-[var(--customer-muted)]">Status: {takeoutStatusLabel(order.status)}</p>
@@ -278,7 +248,7 @@ export default function TakeoutOrder() {
               Your order was received and is waiting for staff to approve it.
             </p>
           )}
-          <p className="mt-1 text-sm capitalize text-[var(--customer-muted)]">Payment: {order.payment_status.replace(/_/g, " ")}</p>
+          <p className="mt-1 text-sm text-[var(--customer-muted)]">Payment: pay in cash at the counter.</p>
           <div className="reservation-panel-sections mt-5">
             <section className="reservation-panel-section" aria-label="Pickup order summary">
               <div className="reservation-order-items">
@@ -294,7 +264,7 @@ export default function TakeoutOrder() {
               </div>
             </section>
           </div>
-          {order.payment_plan === "pay_at_pickup" && ["confirmed", "preparing", "ready"].includes(order.status) && (
+          {order.payment_plan === "pay_at_pickup" && ["pending_approval", "confirmed", "preparing", "ready"].includes(order.status) && (
             <button type="button" onClick={() => void cancelOrder()} className="customer-btn-secondary mt-5">
               Cancel order
             </button>
@@ -432,18 +402,9 @@ export default function TakeoutOrder() {
                     <div className="reservation-order-total"><span>Total</span><strong>{formatMoney(total)}</strong></div>
                   </div>
                 </section>
-                <section className="reservation-panel-section" aria-label="Pickup payment option">
-                  <h3 className="customer-label mb-2">Payment choice</h3>
-                  <div className="reservation-payment-options">
-                    <label className={`reservation-payment-option ${paymentPlan === "pay_at_pickup" ? "is-selected" : ""}`}>
-                      <input type="radio" name="takeout-payment-plan" checked={paymentPlan === "pay_at_pickup"} onChange={() => setPaymentPlan("pay_at_pickup")} />
-                      <span className="reservation-payment-option-title">Pay at pickup</span>
-                    </label>
-                    <label className={`reservation-payment-option ${paymentPlan === "pay_now" ? "is-selected" : ""}`}>
-                      <input type="radio" name="takeout-payment-plan" checked={paymentPlan === "pay_now"} onChange={() => setPaymentPlan("pay_now")} />
-                      <span className="reservation-payment-option-title">Pay in full now</span>
-                    </label>
-                  </div>
+                <section className="reservation-panel-section" aria-label="Pickup payment">
+                  <h3 className="customer-label mb-2">Payment</h3>
+                  <p className="text-sm">Pay in cash when you arrive at the counter.</p>
                 </section>
               </div>
               <div className="reservation-checkout-submit">
@@ -503,25 +464,16 @@ export default function TakeoutOrder() {
                 Phone number *
                 <input className="customer-input" type="tel" inputMode="numeric" autoComplete="tel" pattern="[0-9]{1,11}" maxLength={11} value={customerPhone} onChange={(event) => setCustomerPhone(event.target.value.replace(/\D/g, "").slice(0, 11))} required />
               </label>
-              {paymentPlan === "pay_now" && (
-                <label className="grid gap-1 text-sm font-semibold text-[var(--customer-text)]">
-                  Online payment method *
-                  <select className="customer-input" value={paymentMethod} onChange={(event) => setPaymentMethod(event.target.value as PaymentMethod)}>
-                    <option value="gcash">GCash</option>
-                    <option value="bank_transfer">Bank transfer</option>
-                  </select>
-                </label>
-              )}
               <div className="reservation-details-dialog-summary rounded-lg p-3 text-sm">
                 <p className="font-bold">Pickup order</p>
                 <p className="mt-1">Total: {formatMoney(total)}</p>
-                <p className="mt-1">{paymentPlan === "pay_now" ? "Pay in full now" : "Pay at pickup"}</p>
+                <p className="mt-1">Pay in cash at the counter when you arrive.</p>
               </div>
               {message && <p className="reservation-checkout-alert" role="alert">{message}</p>}
               <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
                 <button type="button" className="customer-btn-secondary" onClick={() => setDetailsOpen(false)} disabled={submitting}>Back</button>
                 <button type="submit" className="customer-btn-primary" disabled={submitting}>
-                  {submitting ? "Submitting..." : paymentPlan === "pay_now" ? `Pay ${formatMoney(total)} & confirm order` : "Confirm pickup order"}
+                  {submitting ? "Submitting..." : "Confirm pickup order"}
                 </button>
               </div>
             </form>

@@ -27,12 +27,13 @@ type StaffReservation = {
 
 type PickupOrder = {
   order_number: string;
-  status: "pending_payment" | "payment_failed" | "pending_approval" | "confirmed" | "preparing" | "ready" | "released" | "completed" | "cancelled" | "expired";
+  status: "pending_payment" | "payment_failed" | "pending_approval" | "confirmed" | "preparing" | "ready" | "released" | "completed" | "declined" | "cancelled" | "expired";
   payment_plan: "pay_now" | "pay_at_pickup";
   payment_status: string;
   payment_method: string | null;
   customer_name: string;
   created_at: string;
+  ready_at: string | null;
   total: number;
   items: Array<{ name: string; quantity: number; total_price: number }>;
 };
@@ -105,7 +106,7 @@ export default function DineInReservations() {
     refetchInterval: 15_000
   });
   const pickupStatusMutation = useMutation({
-    mutationFn: async (input: { order: PickupOrder; status: "confirmed" | "preparing" | "ready" }) => {
+    mutationFn: async (input: { order: PickupOrder; status: "preparing" | "ready" | "declined" }) => {
       await api.patch(`/api/admin/takeout/orders/${encodeURIComponent(input.order.order_number)}/status`, {
         status: input.status
       });
@@ -191,7 +192,7 @@ export default function DineInReservations() {
     setCalendarOpen(false);
   }
 
-  function updatePickup(order: PickupOrder, status: "confirmed" | "preparing" | "ready") {
+  function updatePickup(order: PickupOrder, status: "preparing" | "ready" | "declined") {
     pickupStatusMutation.mutate({ order, status });
   }
 
@@ -350,11 +351,15 @@ export default function DineInReservations() {
                         hour: "numeric",
                         minute: "2-digit"
                       })}</p>
+                      {order.ready_at ? (
+                        <p className="text-sm font-semibold text-emerald-800">
+                          Pickup Time: {formatManilaDateTime(order.ready_at, { hour: "numeric", minute: "2-digit" })}
+                        </p>
+                      ) : null}
                     </div>
                     <div className="text-right text-sm">
                       <p className="font-semibold capitalize text-slate-800">{formatStatus(order.status)}</p>
-                      <p className="text-slate-600">Payment: {formatStatus(order.payment_status)}</p>
-                      <p className="text-slate-600">{order.payment_plan === "pay_now" ? order.payment_method ?? "Online" : "Pay at pickup"}</p>
+                      <p className="text-slate-600">Pay at counter</p>
                     </div>
                   </div>
                   <ul className="grid gap-1 text-sm text-slate-700 sm:grid-cols-2">
@@ -367,13 +372,23 @@ export default function DineInReservations() {
                     <div className="flex flex-wrap justify-end gap-2">
                       {order.status === "ready" ? <span className="self-center text-sm font-semibold text-emerald-800">Ready for pickup</span> : null}
                       {canUpdatePickup && order.status === "pending_approval" ? (
-                        <Button
-                          type="button"
-                          disabled={pickupStatusMutation.isPending || (order.payment_plan === "pay_now" && order.payment_status !== "paid")}
-                          onClick={() => updatePickup(order, "preparing")}
-                        >
-                          {order.payment_plan === "pay_now" && order.payment_status !== "paid" ? "Awaiting payment" : "Approve & start preparing"}
-                        </Button>
+                        <>
+                          <Button
+                            type="button"
+                            disabled={pickupStatusMutation.isPending}
+                            onClick={() => updatePickup(order, "preparing")}
+                          >
+                            Approve
+                          </Button>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            disabled={pickupStatusMutation.isPending}
+                            onClick={() => updatePickup(order, "declined")}
+                          >
+                            Decline
+                          </Button>
+                        </>
                       ) : null}
                       {canUpdatePickup && order.status === "confirmed" ? (
                         <Button type="button" variant="outline" disabled={pickupStatusMutation.isPending} onClick={() => updatePickup(order, "preparing")}>

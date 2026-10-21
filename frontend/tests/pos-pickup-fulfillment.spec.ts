@@ -1,33 +1,37 @@
 import { expect, test } from "@playwright/test";
 
+type PickupStatus = "preparing" | "ready";
 type PickupOrder = {
   order_number: string;
-  status: "ready";
-  payment_plan: "pay_now" | "pay_at_pickup";
-  payment_status: string;
-  payment_method: string | null;
+  status: PickupStatus;
+  payment_plan: "pay_at_pickup";
+  payment_status: "unpaid";
+  payment_method: null;
   customer_name: string;
   created_at: string;
+  pickup_time: string | null;
   total: number;
   items: Array<{ name: string; quantity: number; unit_price: number; total_price: number }>;
 };
 
-function order(name: string, paymentPlan: "pay_now" | "pay_at_pickup", paymentStatus: string): PickupOrder {
+function order(orderNumber: string, status: PickupStatus): PickupOrder {
   return {
-    order_number: `KTO-${paymentPlan === "pay_now" ? "PAID" : "UNPAID"}-001`,
-    status: "ready",
-    payment_plan: paymentPlan,
-    payment_status: paymentStatus,
-    payment_method: paymentStatus === "paid" ? "gcash" : null,
-    customer_name: name,
+    order_number: orderNumber,
+    status,
+    payment_plan: "pay_at_pickup",
+    payment_status: "unpaid",
+    payment_method: null,
+    customer_name: `${status} Customer`,
     created_at: "2026-10-20T10:00:00.000Z",
+    pickup_time: status === "ready" ? "2026-10-20T10:05:00.000Z" : null,
     total: 200,
     items: [{ name: "California Roll", quantity: 2, unit_price: 100, total_price: 200 }]
   };
 }
 
-test("cashier completes paid pickups without payment and collects cash for unpaid pickups", async ({ page }) => {
+test("cashier searches by order ID and completes preparing or ready pickups with cash", async ({ page }) => {
   const completionRequests: Array<{ orderNumber: string; body: Record<string, unknown> }> = [];
+  const searches: string[] = [];
   await page.addInitScript(() => {
     localStorage.setItem("katana_token", "playwright-token");
     localStorage.setItem("katana_role", "cashier");
@@ -49,11 +53,12 @@ test("cashier completes paid pickups without payment and collects cash for unpai
       return;
     }
     if (url.pathname === "/api/pos/pickup-orders" && route.request().method() === "GET") {
-      const name = url.searchParams.get("name") ?? "";
-      const pickupOrder = name.startsWith("Paid")
-        ? order("Paid Customer", "pay_now", "paid")
-        : name.startsWith("Unpaid")
-          ? order("Unpaid Customer", "pay_at_pickup", "unpaid")
+      const orderId = url.searchParams.get("orderId") ?? "";
+      searches.push(orderId);
+      const pickupOrder = orderId.includes("PREP")
+        ? order("KTO-PREP-001", "preparing")
+        : orderId.includes("READY")
+          ? order("KTO-READY-001", "ready")
           : null;
       await route.fulfill({ json: { orders: pickupOrder ? [pickupOrder] : [] } });
       return;
@@ -68,10 +73,11 @@ test("cashier completes paid pickups without payment and collects cash for unpai
           order: {
             order_number: "KTO-COMPLETED",
             status: "completed",
-            payment_plan: "pay_now",
+            payment_plan: "pay_at_pickup",
             payment_status: "paid",
             subtotal: 200,
             total: 200,
+            ready_at: null,
             items: []
           }
         }
@@ -82,35 +88,30 @@ test("cashier completes paid pickups without payment and collects cash for unpai
   });
 
   await page.goto("/staff/pos");
-  const customerType = page.getByRole("region", { name: "Customer type" });
-  await customerType.getByRole("button", { name: "Pickup customer" }).click();
+  await page.getByRole("region", { name: "Customer type" }).getByRole("button", { name: "Pickup customer" }).click();
+  const searchInput = page.getByLabel("Order ID");
 
-  await page.getByLabel("Customer name").fill("Paid");
-  const paidOrder = page.getByRole("button", { name: /Paid Customer/ });
-  await expect(paidOrder).toBeVisible();
-  await paidOrder.click();
-  await page.getByRole("button", { name: "Complete pickup" }).click();
-  await expect(page.getByText("Select a ready pickup order to load its cart.")).toBeVisible();
-  expect(completionRequests[0]).toEqual({
-    orderNumber: "KTO-PAID-001",
-    body: {}
-  });
-  await expect(page.getByRole("dialog", { name: "Payment" })).toHaveCount(0);
+  for (const [orderId, status] of [["KTO-PREP-001", "Preparing"], ["KTO-READY-001", "Ready for pickup"]] as const) {
+    await searchInput.fill(orderId);
+    const result = page.getByRole("button", { name: new RegExp(orderId) });
+    await expect(result).toBeVisible();
+    await result.click();
+    await expect(page.getByText(status, { exact: true })).toBeVisible();
+    if (orderId.includes("READY")) {
+      await expect(page.getByText(/Pickup Time:/)).toBeVisible();
+    }
+    await page.getByRole("button", { name: "Collect payment & complete" }).click();
+    const payment = page.getByRole("dialog", { name: "Payment" });
+    await payment.getByRole("button", { name: "Cash", exact: true }).click();
+    await payment.getByLabel("Enter Amount Received").fill("250");
+    await payment.getByRole("button", { name: "Confirm" }).click();
+    await expect(page.getByText("Select a preparing or ready pickup order to load its cart.")).toBeVisible();
+  }
 
-  await page.getByLabel("Customer name").fill("Unpaid");
-  const unpaidOrder = page.getByRole("button", { name: /Unpaid Customer/ });
-  await expect(unpaidOrder).toBeVisible();
-  await unpaidOrder.click();
-  await page.getByRole("button", { name: "Collect payment & complete" }).click();
-  const payment = page.getByRole("dialog", { name: "Payment" });
-  await expect(payment.getByText("PHP 200")).toBeVisible();
-  await payment.getByRole("button", { name: "Cash", exact: true }).click();
-  await payment.getByLabel("Enter Amount Received").fill("250");
-  await payment.getByRole("button", { name: "Confirm" }).click();
-  await expect(page.getByText("Select a ready pickup order to load its cart.")).toBeVisible();
-
-  expect(completionRequests[1]).toEqual({
-    orderNumber: "KTO-UNPAID-001",
-    body: { paymentMethod: "cash", cashReceived: 250 }
-  });
+  expect(searches).toContain("KTO-PREP-001");
+  expect(searches).toContain("KTO-READY-001");
+  expect(completionRequests).toEqual([
+    { orderNumber: "KTO-PREP-001", body: { paymentMethod: "cash", cashReceived: 250 } },
+    { orderNumber: "KTO-READY-001", body: { paymentMethod: "cash", cashReceived: 250 } }
+  ]);
 });

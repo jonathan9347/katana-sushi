@@ -39,7 +39,6 @@ import {
   validateInventoryQuantity
 } from "./services/inventory.service";
 import { paymentIntentStore } from "./services/payment/paymentIntentStore";
-import { PaymentGatewayFactory } from "./services/payment/paymentGateway.factory";
 import { PaymentService } from "./services/payment.service";
 import { prisma } from "./lib/prisma";
 import { jwtExpirationSeconds } from "./lib/jwtExpiration";
@@ -4395,6 +4394,7 @@ app.get("/api/staff/reservations/overview/pickup", async (req, res, next) => {
         payment_method: true,
         customer_name: true,
         created_at: true,
+        ready_at: true,
         total: true,
         items: {
           orderBy: { created_at: "asc" },
@@ -4412,6 +4412,7 @@ app.get("/api/staff/reservations/overview/pickup", async (req, res, next) => {
         payment_method: order.payment_method,
         customer_name: order.customer_name,
         created_at: order.created_at,
+        ready_at: order.ready_at,
         total: order.total,
         items: order.items.map((item) => ({
           name: item.name_snapshot,
@@ -7460,6 +7461,7 @@ function takeoutOrderSummary(order: {
   status: string;
   payment_plan: string;
   payment_status: string;
+  ready_at: Date | null;
   subtotal: number;
   total: number;
   items: Array<{
@@ -7474,6 +7476,7 @@ function takeoutOrderSummary(order: {
     status: order.status === "released" ? "completed" : order.status,
     payment_plan: order.payment_plan,
     payment_status: order.payment_status,
+    ready_at: order.ready_at,
     subtotal: order.subtotal,
     total: order.total,
     items: order.items.map((item) => ({
@@ -7488,8 +7491,7 @@ function takeoutOrderSummary(order: {
 const takeoutOrderBodySchema = z.object({
   customer_name: z.string().trim().min(1).max(120),
   customer_phone: z.string().regex(/^\d{1,11}$/),
-  payment_plan: z.enum(["pay_now", "pay_at_pickup"]),
-  payment_method: z.enum(["gcash", "bank_transfer"]).optional(),
+  payment_plan: z.literal("pay_at_pickup"),
   idempotency_key: z.string().min(16).max(128),
   items: z.array(z.object({
     product_id: z.string().min(1),
@@ -7502,22 +7504,7 @@ const takeoutOrderBodySchema = z.object({
       });
     }
   })
-}).superRefine((body, context) => {
-  if (body.payment_plan === "pay_now" && !body.payment_method) {
-    context.addIssue({
-      code: z.ZodIssueCode.custom,
-      path: ["payment_method"],
-      message: "Choose a payment method for online payment."
-    });
-  }
-  if (body.payment_plan === "pay_at_pickup" && body.payment_method) {
-    context.addIssue({
-      code: z.ZodIssueCode.custom,
-      path: ["payment_method"],
-      message: "Choose the payment method at pickup."
-    });
-  }
-});
+}).strict();
 
 app.get("/api/takeout/catalog", async (_req, res, next) => {
   try {
@@ -7560,15 +7547,6 @@ app.get("/api/takeout/catalog", async (_req, res, next) => {
 app.post("/api/takeout/orders", async (req, res, next) => {
   try {
     const body = takeoutOrderBodySchema.parse(req.body);
-    if (
-      body.payment_plan === "pay_now" &&
-      process.env.NODE_ENV === "production" &&
-      PaymentGatewayFactory.isFakeGatewayActive()
-    ) {
-      return res.status(503).json({
-        message: "Online payment is unavailable while TEST MODE is enabled."
-      });
-    }
     const existingOrder = await prisma.takeoutOrder.findUnique({
       where: { idempotency_key: body.idempotency_key },
       include: { items: { orderBy: { created_at: "asc" } } }
@@ -7584,7 +7562,6 @@ app.post("/api/takeout/orders", async (req, res, next) => {
       const sameRequest = existingOrder.customer_name === body.customer_name &&
         existingOrder.customer_phone === body.customer_phone &&
         existingOrder.payment_plan === body.payment_plan &&
-        existingOrder.payment_method === (body.payment_method ?? null) &&
         existingItems.length === requestItems.length &&
         existingItems.every((item, index) =>
           item.product_id === requestItems[index].product_id &&
@@ -7596,22 +7573,13 @@ app.post("/api/takeout/orders", async (req, res, next) => {
       if (["cancelled", "expired"].includes(existingOrder.status)) {
         return res.status(409).json({ message: "This pickup order is no longer active. Start a new checkout." });
       }
-      if (
-        existingOrder.payment_plan === "pay_now" &&
-        existingOrder.payment_expires_at &&
-        existingOrder.payment_expires_at.getTime() <= Date.now()
-      ) {
-        return res.status(409).json({ message: "This payment session expired. Start a new checkout." });
-      }
     } else {
       const orderNumber = await generateTakeoutOrderNumber();
       try {
         order = await prisma.$transaction(async (tx) => {
           const { productsById, needs } = await getTakeoutRequirements(tx, body.items);
-          const reservedBeforeByMaterial = new Map<string, number>();
 
           for (const need of needs) {
-            await lockMaterialForUpdate(tx, need.raw_material_id);
             const material = await tx.rawMaterial.findFirst({
               where: { id: need.raw_material_id, is_deleted: false }
             });
@@ -7627,30 +7595,21 @@ app.post("/api/takeout/orders", async (req, res, next) => {
             const reserved = await getActiveCateringReservationQuantity(tx, material.id);
             const available = calculateAvailableQuantity(Number(material.current_stock), reserved);
             assertEnoughAvailable(material.name, material.unit, need.quantity, available);
-            reservedBeforeByMaterial.set(material.id, reserved);
           }
 
           const subtotal = Number(body.items.reduce((total, item) => {
             const product = productsById.get(item.product_id);
             return total + Number(product?.price ?? 0) * item.quantity;
           }, 0).toFixed(2));
-          if (body.payment_plan === "pay_now" && subtotal <= 0) {
-            throw new InventoryError("Online payment requires an order total greater than zero.", "INVALID_ORDER_TOTAL", 400);
-          }
-          const paymentExpiresAt = body.payment_plan === "pay_now"
-            ? new Date(Date.now() + 60 * 60 * 1000)
-            : null;
           const created = await tx.takeoutOrder.create({
             data: {
               order_number: orderNumber,
               idempotency_key: body.idempotency_key,
               customer_name: body.customer_name,
               customer_phone: body.customer_phone,
-              status: body.payment_plan === "pay_now" ? "pending_payment" : "pending_approval",
+              status: "pending_approval",
               payment_plan: body.payment_plan,
-              payment_status: body.payment_plan === "pay_now" ? "pending" : "unpaid",
-              payment_method: body.payment_method ?? null,
-              payment_expires_at: paymentExpiresAt,
+              payment_status: "unpaid",
               subtotal,
               total: subtotal,
               items: {
@@ -7665,32 +7624,10 @@ app.post("/api/takeout/orders", async (req, res, next) => {
                     total_price: Number((unitPrice * item.quantity).toFixed(2))
                   };
                 })
-              },
-              ingredient_locks: {
-                create: needs.map((need) => ({
-                  raw_material_id: need.raw_material_id,
-                  reserved_quantity: need.quantity,
-                  unit: need.unit
-                }))
               }
             },
             include: { items: { orderBy: { created_at: "asc" } } }
           });
-
-          for (const need of needs) {
-            const reservedBefore = reservedBeforeByMaterial.get(need.raw_material_id) ?? 0;
-            await recordReservationMovement(tx, {
-              raw_material_id: need.raw_material_id,
-              quantity: need.quantity,
-              unit: need.unit,
-              source_type: "takeout",
-              source_reference: created.order_number,
-              action: "Reserved",
-              reserved_before: reservedBefore,
-              reserved_after: reservedBefore + need.quantity,
-              note: "Pickup order accepted"
-            });
-          }
           return created;
         });
         isNewOrder = true;
@@ -7709,7 +7646,6 @@ app.post("/api/takeout/orders", async (req, res, next) => {
         const sameRequest = order.customer_name === body.customer_name &&
           order.customer_phone === body.customer_phone &&
           order.payment_plan === body.payment_plan &&
-          order.payment_method === (body.payment_method ?? null) &&
           racedItems.length === requestItems.length &&
           racedItems.every((item, index) =>
             item.product_id === requestItems[index].product_id &&
@@ -7725,44 +7661,9 @@ app.post("/api/takeout/orders", async (req, res, next) => {
       return res.status(500).json({ message: "Pickup order could not be created." });
     }
 
-    let payment: {
-      success: boolean;
-      referenceId: string;
-      qrCode?: string;
-      paymentUrl?: string;
-      instructions?: string;
-      expiresAt?: Date;
-    } | null = null;
-    if (order.payment_plan === "pay_now" && order.payment_status !== "paid") {
-      const attempt = order.payment_status === "pending" && order.payment_attempt > 0
-        ? order.payment_attempt
-        : order.payment_attempt + 1;
-      payment = await paymentService.createPaymentIntent({
-        amount: order.total,
-        paymentMethod: body.payment_method!,
-        bookingId: order.order_number,
-        reservationType: "takeout",
-        purpose: "full_payment",
-        idempotencyKey: `takeout:${order.id}:full:${attempt}`,
-        description: `Pickup order ${order.order_number}`
-      });
-      if (!payment.success) {
-        return res.status(503).json({ message: "Online payment could not be started. Please retry this checkout." });
-      }
-      order = await prisma.takeoutOrder.update({
-        where: { id: order.id },
-        data: {
-          payment_attempt: attempt,
-          payment_intent_reference_id: payment.referenceId,
-          payment_expires_at: payment.expiresAt ?? order.payment_expires_at
-        },
-        include: { items: { orderBy: { created_at: "asc" } } }
-      });
-    }
-
     return res.status(isNewOrder ? 201 : 200).json({
       order: takeoutOrderSummary(order),
-      payment
+      payment: null
     });
   } catch (error) {
     if (error instanceof z.ZodError) {
@@ -7918,20 +7819,17 @@ app.get("/api/admin/takeout/orders", async (req, res, next) => {
 app.get("/api/pos/pickup-orders", async (req, res, next) => {
   try {
     if (!requireRole(req, res, ["admin", "cashier"])) return;
-    const query = z.object({ name: z.string().trim().max(120).optional() }).parse(req.query);
-    const name = query.name ?? "";
-    if (name.length < 2) {
+    const query = z.object({ orderId: z.string().trim().max(120).optional() }).parse(req.query);
+    const orderId = query.orderId ?? "";
+    if (orderId.length < 2) {
       return res.json({ orders: [] });
     }
 
     const orders = await prisma.takeoutOrder.findMany({
       where: {
-        status: "ready",
-        customer_name: { contains: name, mode: "insensitive" },
-        OR: [
-          { payment_plan: "pay_at_pickup" },
-          { payment_status: "paid" }
-        ]
+        status: { in: ["preparing", "ready"] },
+        payment_plan: "pay_at_pickup",
+        order_number: { contains: orderId, mode: "insensitive" }
       },
       orderBy: [{ created_at: "asc" }, { order_number: "asc" }],
       take: 20,
@@ -7942,7 +7840,8 @@ app.get("/api/pos/pickup-orders", async (req, res, next) => {
         ...takeoutOrderSummary(order),
         customer_name: order.customer_name,
         payment_method: order.payment_method,
-        created_at: order.created_at
+        created_at: order.created_at,
+        pickup_time: order.ready_at
       }))
     });
   } catch (error) {
@@ -7977,19 +7876,20 @@ app.post("/api/pos/pickup-orders/:orderNumber/complete", async (req, res, next) 
       if (!current) {
         throw new InventoryError("Pickup order not found.", "ORDER_NOT_FOUND", 404);
       }
-      if (current.status !== "ready") {
+      if (!["preparing", "ready"].includes(current.status)) {
         throw new InventoryError(
-          `Only ready pickup orders can be completed in the POS. Current status: ${current.status}.`,
+          `Only preparing or ready pickup orders can be completed in the POS. Current status: ${current.status}.`,
           "INVALID_ORDER_TRANSITION",
           409
         );
       }
 
+      if (current.ingredient_locks.length === 0) {
+        throw new InventoryError("Pickup stock must be reserved by staff approval before checkout.", "STOCK_NOT_RESERVED", 409);
+      }
+
       const alreadyPaid = current.payment_status === "paid";
       let paymentMethod: string;
-      if (current.payment_plan === "pay_now" && !alreadyPaid) {
-        throw new InventoryError("Online payment must be confirmed before pickup.", "PAYMENT_REQUIRED", 409);
-      }
       if (alreadyPaid) {
         if (!current.payment_method) {
           throw new InventoryError(
@@ -8127,7 +8027,7 @@ app.patch("/api/admin/takeout/orders/:orderNumber/status", async (req, res, next
     const user = requireRole(req, res, ["admin", "cashier", "chef"]);
     if (!user) return;
     const body = z.object({
-      status: z.enum(["confirmed", "preparing", "ready"])
+      status: z.enum(["preparing", "ready", "declined"])
     }).parse(req.body);
     const orderNumber = z.string().min(1).parse(req.params.orderNumber);
     const updated = await prisma.$transaction(async (tx) => {
@@ -8136,22 +8036,56 @@ app.patch("/api/admin/takeout/orders/:orderNumber/status", async (req, res, next
       `;
       const order = await tx.takeoutOrder.findUnique({
         where: { order_number: orderNumber },
-        include: { ingredient_locks: { where: { is_released: false } } }
+        include: {
+          ingredient_locks: { where: { is_released: false } },
+          items: { orderBy: { created_at: "asc" } }
+        }
       });
       if (!order) {
         throw new InventoryError("Pickup order not found.", "ORDER_NOT_FOUND", 404);
       }
-      if (
-        order.payment_plan === "pay_now" &&
-        order.payment_status !== "paid"
-      ) {
-        throw new InventoryError("Online payment must be confirmed before preparation.", "PAYMENT_REQUIRED", 409);
+
+      if (body.status === "declined") {
+        if (order.status !== "pending_approval") {
+          throw new InventoryError(
+            "Only pending pickup orders can be declined.",
+            "INVALID_ORDER_TRANSITION",
+            409
+          );
+        }
+        for (const lock of [...order.ingredient_locks].sort((a, b) =>
+          a.raw_material_id.localeCompare(b.raw_material_id)
+        )) {
+          await lockMaterialForUpdate(tx, lock.raw_material_id);
+          const reservedBefore = await getActiveCateringReservationQuantity(tx, lock.raw_material_id);
+          await tx.takeoutIngredientLock.update({
+            where: { id: lock.id },
+            data: { is_released: true, released_at: new Date() }
+          });
+          const reservedAfter = await getActiveCateringReservationQuantity(tx, lock.raw_material_id);
+          await recordReservationMovement(tx, {
+            raw_material_id: lock.raw_material_id,
+            quantity: Number(lock.reserved_quantity),
+            unit: lock.unit,
+            source_type: "takeout",
+            source_reference: order.order_number,
+            action: "Released back",
+            reserved_before: reservedBefore,
+            reserved_after: reservedAfter,
+            actor_id: user.sub,
+            note: "Legacy pickup reservation released when order was declined"
+          });
+        }
+        return tx.takeoutOrder.update({
+          where: { id: order.id },
+          data: { status: "declined" },
+          include: { items: { orderBy: { created_at: "asc" } } }
+        });
       }
-      const expectedStatuses = body.status === "confirmed"
-        ? ["pending_approval"]
-        : body.status === "preparing"
-          ? ["pending_approval", "confirmed"]
-          : ["preparing"];
+
+      const expectedStatuses = body.status === "preparing"
+        ? ["pending_approval", "confirmed"]
+        : ["preparing"];
       if (!expectedStatuses.includes(order.status)) {
         throw new InventoryError(
           `Cannot move this pickup order from ${order.status} to ${body.status}.`,
@@ -8160,12 +8094,70 @@ app.patch("/api/admin/takeout/orders/:orderNumber/status", async (req, res, next
         );
       }
 
+      if (body.status === "preparing" && order.ingredient_locks.length === 0) {
+        const requestedItems = order.items.flatMap((item) =>
+          item.selling_product_id
+            ? [{ product_id: item.selling_product_id, quantity: item.quantity }]
+            : []
+        );
+        const { needs } = await getTakeoutRequirements(tx, requestedItems);
+        const reservedBeforeByMaterial = new Map<string, number>();
+        for (const need of [...needs].sort((a, b) => a.raw_material_id.localeCompare(b.raw_material_id))) {
+          await lockMaterialForUpdate(tx, need.raw_material_id);
+          const material = await tx.rawMaterial.findFirst({
+            where: { id: need.raw_material_id, is_deleted: false }
+          });
+          if (!material) {
+            throw new InventoryError("A required ingredient is no longer available.", "MATERIAL_NOT_FOUND", 409);
+          }
+          await assertBatchQuantitiesMatchOnHand(
+            tx,
+            material.id,
+            material.name,
+            Number(material.current_stock)
+          );
+          const reserved = await getActiveCateringReservationQuantity(tx, material.id);
+          assertEnoughAvailable(
+            material.name,
+            material.unit,
+            need.quantity,
+            calculateAvailableQuantity(Number(material.current_stock), reserved)
+          );
+          reservedBeforeByMaterial.set(material.id, reserved);
+        }
+
+        for (const need of needs) {
+          await tx.takeoutIngredientLock.create({
+            data: {
+              order_id: order.id,
+              raw_material_id: need.raw_material_id,
+              reserved_quantity: need.quantity,
+              unit: need.unit
+            }
+          });
+          const reservedBefore = reservedBeforeByMaterial.get(need.raw_material_id) ?? 0;
+          await recordReservationMovement(tx, {
+            raw_material_id: need.raw_material_id,
+            quantity: need.quantity,
+            unit: need.unit,
+            source_type: "takeout",
+            source_reference: order.order_number,
+            action: "Reserved",
+            reserved_before: reservedBefore,
+            reserved_after: reservedBefore + need.quantity,
+            actor_id: user.sub,
+            note: "Pickup order approved for preparation"
+          });
+        }
+      }
+
+      const now = new Date();
       return tx.takeoutOrder.update({
         where: { id: order.id },
         data: {
           status: body.status,
-          prepared_at: body.status === "preparing" ? new Date() : order.prepared_at,
-          ready_at: body.status === "ready" ? new Date() : order.ready_at
+          prepared_at: body.status === "preparing" ? now : order.prepared_at,
+          ready_at: body.status === "ready" ? now : order.ready_at
         },
         include: { items: { orderBy: { created_at: "asc" } } }
       });
