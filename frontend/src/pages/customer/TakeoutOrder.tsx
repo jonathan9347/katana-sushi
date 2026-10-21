@@ -45,7 +45,9 @@ type PaymentMethod = "gcash" | "bank_transfer";
 type CartLine = { product: TakeoutProduct; quantity: number };
 
 function takeoutStatusLabel(status: string) {
-  return status === "pending_approval" ? "Awaiting staff approval" : status.replace(/_/g, " ");
+  if (status === "pending_approval") return "Awaiting staff approval";
+  if (status === "completed" || status === "released") return "Completed";
+  return status.replace(/_/g, " ");
 }
 
 function categorySectionId(category: string) {
@@ -121,7 +123,7 @@ export default function TakeoutOrder() {
   }, []);
 
   useEffect(() => {
-    if (!order || !customerPhone || ["released", "cancelled", "expired"].includes(order.status)) return;
+    if (!order || !customerPhone || ["released", "completed", "cancelled", "expired"].includes(order.status)) return;
     let active = true;
     const poll = async () => {
       try {

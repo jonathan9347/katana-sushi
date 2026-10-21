@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "../../../lib/api";
 
-type FulfillmentStatus = "pending_payment" | "payment_failed" | "pending_approval" | "confirmed" | "preparing" | "ready" | "released" | "cancelled" | "expired";
+type FulfillmentStatus = "pending_payment" | "payment_failed" | "pending_approval" | "confirmed" | "preparing" | "ready" | "released" | "completed" | "cancelled" | "expired";
 
 type TakeoutOrder = {
   order_number: string;
@@ -21,6 +21,14 @@ function money(value: number) {
   return new Intl.NumberFormat("en-PH", { style: "currency", currency: "PHP" }).format(value);
 }
 
+function statusLabel(status: FulfillmentStatus) {
+  return status === "pending_approval"
+    ? "Awaiting approval"
+    : status === "released"
+      ? "Completed"
+      : status.replace(/_/g, " ");
+}
+
 function orderError(error: unknown) {
   if (typeof error === "object" && error !== null && "response" in error) {
     const response = (error as { response?: { data?: { message?: string } } }).response;
@@ -35,7 +43,6 @@ export default function TakeoutOrders() {
   const [readyNotice, setReadyNotice] = useState("");
   const [loading, setLoading] = useState(true);
   const [updating, setUpdating] = useState<string | null>(null);
-  const [pickupPaymentMethods, setPickupPaymentMethods] = useState<Record<string, string>>({});
   const previousStatuses = useRef<Map<string, FulfillmentStatus> | null>(null);
 
   const loadOrders = useCallback(async () => {
@@ -67,13 +74,13 @@ export default function TakeoutOrders() {
     return () => window.clearInterval(timer);
   }, [loadOrders]);
 
-  async function setStatus(order: TakeoutOrder, status: "confirmed" | "preparing" | "ready" | "released", paymentMethod?: string) {
+  async function setStatus(order: TakeoutOrder, status: "confirmed" | "preparing" | "ready") {
     setUpdating(order.order_number);
     setErrorMessage("");
     try {
       await api.patch(
         `/api/admin/takeout/orders/${encodeURIComponent(order.order_number)}/status`,
-        { status, payment_method: paymentMethod }
+        { status }
       );
       await loadOrders();
     } catch (error) {
@@ -118,7 +125,7 @@ export default function TakeoutOrders() {
                     <p className="mt-1 text-xs text-slate-500">{new Date(order.created_at).toLocaleString()}</p>
                   </div>
                   <div className="text-right text-sm">
-                    <p className="font-bold capitalize">{order.status === "pending_approval" ? "Awaiting approval" : order.status.replace(/_/g, " ")}</p>
+                    <p className="font-bold capitalize">{statusLabel(order.status)}</p>
                     <p className="mt-1 text-slate-600">Payment: {order.payment_status.replace(/_/g, " ")}</p>
                     <p className="text-slate-600">{order.payment_plan === "pay_now" ? order.payment_method ?? "Online" : "Pay at pickup"}</p>
                   </div>
@@ -144,12 +151,12 @@ export default function TakeoutOrders() {
                     <button
                       type="button"
                       disabled={updating === order.order_number || (order.payment_plan === "pay_now" && order.payment_status !== "paid")}
-                      onClick={() => void setStatus(order, "confirmed")}
+                      onClick={() => void setStatus(order, "preparing")}
                       className="rounded-lg bg-green-700 px-4 py-2 text-sm font-bold text-white disabled:opacity-50"
                     >
                       {order.payment_plan === "pay_now" && order.payment_status !== "paid"
                         ? "Awaiting payment"
-                        : "Approve order"}
+                        : "Approve & start preparing"}
                     </button>
                   )}
                   {order.status === "confirmed" && (
@@ -163,41 +170,9 @@ export default function TakeoutOrders() {
                     </button>
                   )}
                   {order.status === "ready" && (
-                    <>
-                      {order.payment_plan === "pay_at_pickup" && order.payment_status !== "paid" && (
-                        <select
-                          aria-label={`Payment method for ${order.order_number}`}
-                          value={pickupPaymentMethods[order.order_number] ?? ""}
-                          onChange={(event) => setPickupPaymentMethods((current) => ({
-                            ...current,
-                            [order.order_number]: event.target.value
-                          }))}
-                          className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm"
-                        >
-                          <option value="">Record pickup payment...</option>
-                          <option value="cash">Cash</option>
-                          <option value="gcash">GCash</option>
-                          <option value="bank_transfer">Bank transfer</option>
-                        </select>
-                      )}
-                      <button
-                        type="button"
-                        disabled={
-                          updating === order.order_number ||
-                          (order.payment_plan === "pay_at_pickup" &&
-                            order.payment_status !== "paid" &&
-                            !pickupPaymentMethods[order.order_number])
-                        }
-                        onClick={() => void setStatus(
-                          order,
-                          "released",
-                          pickupPaymentMethods[order.order_number]
-                        )}
-                        className="rounded-lg bg-green-700 px-4 py-2 text-sm font-bold text-white disabled:opacity-50"
-                      >
-                        Hand to customer
-                      </button>
-                    </>
+                    <p className="text-sm font-semibold text-emerald-800">
+                      Ready for POS checkout and handover.
+                    </p>
                   )}
                 </div>
               </article>

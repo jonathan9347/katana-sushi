@@ -35,6 +35,18 @@ type PosTransaction = {
   }>;
 };
 
+type PickupOrder = {
+  order_number: string;
+  status: "ready" | "completed";
+  payment_plan: "pay_now" | "pay_at_pickup";
+  payment_status: string;
+  payment_method: string | null;
+  customer_name: string;
+  created_at: string;
+  total: number;
+  items: Array<{ name: string; quantity: number; unit_price: number; total_price: number }>;
+};
+
 const posTabs: Array<SectionNavTab> = [
   { id: "new-sale", label: "Takeout Sale", icon: <ShoppingCart className="h-4 w-4" />, to: "/staff/pos", end: true },
   { id: "history", label: "Transaction History", icon: <Printer className="h-4 w-4" />, to: "/staff/pos/history" },
@@ -63,11 +75,13 @@ function getApiErrorMessage(error: unknown, fallback: string) {
 }
 
 export default function PosPage() {
-  const [customerType, setCustomerType] = useState<"new_customer" | "existing_table">("new_customer");
+  const [customerType, setCustomerType] = useState<"new_customer" | "existing_table" | "pickup_customer">("new_customer");
   const [customerService, setCustomerService] = useState<"dine_in" | "takeout">("takeout");
   const [selectedDiningSessionId, setSelectedDiningSessionId] = useState("");
   const [hasUnconfirmedDiningDrafts, setHasUnconfirmedDiningDrafts] = useState(false);
   const [customerName, setCustomerName] = useState("");
+  const [pickupSearch, setPickupSearch] = useState("");
+  const [selectedPickupOrder, setSelectedPickupOrder] = useState<PickupOrder | null>(null);
   const [category, setCategory] = useState("All");
   const [paymentOpen, setPaymentOpen] = useState(false);
   const role = getStoredRole();
@@ -86,6 +100,18 @@ export default function PosPage() {
     enabled: allowed
   });
 
+  const pickupOrdersQuery = useQuery({
+    queryKey: ["pos", "pickup-orders", pickupSearch.trim()],
+    queryFn: async () => {
+      const response = await api.get<{ orders: PickupOrder[] }>("/api/pos/pickup-orders", {
+        params: { name: pickupSearch.trim() }
+      });
+      return response.data.orders;
+    },
+    enabled: allowed && customerType === "pickup_customer" && pickupSearch.trim().length >= 2,
+    staleTime: 5_000
+  });
+
   const systemSettingsQuery = useQuery({
     queryKey: ["system-settings"],
     queryFn: fetchSystemSettings,
@@ -96,6 +122,7 @@ export default function PosPage() {
   const systemSettings = systemSettingsQuery.data ?? defaultSystemSettings;
   const isDineIn = customerType === "existing_table"
     || (customerType === "new_customer" && customerService === "dine_in");
+  const isPickupCustomer = customerType === "pickup_customer";
 
   function confirmLeavingDineIn() {
     if (!hasUnconfirmedDiningDrafts) return true;
@@ -158,12 +185,46 @@ export default function PosPage() {
     }
   });
 
+  const pickupCompletionMutation = useMutation({
+    mutationFn: async (payment: { paymentMethod?: "cash"; cashReceived?: number }) => {
+      if (!selectedPickupOrder) {
+        throw new Error("Select a ready pickup order first.");
+      }
+      const response = await api.post<{ order: PickupOrder }>(
+        `/api/pos/pickup-orders/${encodeURIComponent(selectedPickupOrder.order_number)}/complete`,
+        selectedPickupOrder.payment_status === "paid" ? {} : payment
+      );
+      return response.data.order;
+    },
+    onSuccess: () => {
+      setPaymentOpen(false);
+      setSelectedPickupOrder(null);
+      setPickupSearch("");
+      queryClient.invalidateQueries({ queryKey: ["pos", "pickup-orders"] });
+      queryClient.invalidateQueries({ queryKey: ["inventory"] });
+      toast("Pickup order completed and handed over.");
+    },
+    onError: (error) => {
+      toast(getApiErrorMessage(error, "Unable to complete this pickup order."));
+      queryClient.invalidateQueries({ queryKey: ["pos", "pickup-orders"] });
+    }
+  });
+
   function handleCheckout() {
     if (items.length === 0) {
       toast("Add at least one item before checkout.");
       return;
     }
 
+    setPaymentOpen(true);
+  }
+
+  function handlePickupCheckout() {
+    if (!selectedPickupOrder) return;
+    if (selectedPickupOrder.payment_status === "paid") {
+      pickupCompletionMutation.mutate({});
+      return;
+    }
     setPaymentOpen(true);
   }
 
@@ -186,7 +247,13 @@ export default function PosPage() {
           <div>
             <p className="text-sm font-medium uppercase text-red-700">Point of Sale</p>
             <h1 className="text-3xl font-semibold text-slate-950">
-              {customerType === "existing_table" ? "Existing table" : customerService === "dine_in" ? "Dine in" : "Takeout Sale"}
+              {customerType === "existing_table"
+                ? "Existing table"
+                : isPickupCustomer
+                  ? "Pickup customer"
+                  : customerService === "dine_in"
+                    ? "Dine in"
+                    : "Takeout Sale"}
             </h1>
           </div>
           <p className="text-sm text-slate-500">Signed in as {role}</p>
@@ -203,6 +270,7 @@ export default function PosPage() {
                 setCustomerType("new_customer");
                 setCustomerService("takeout");
                 setSelectedDiningSessionId("");
+                setSelectedPickupOrder(null);
               }}
               type="button"
             >
@@ -215,15 +283,20 @@ export default function PosPage() {
                 if (!confirmLeavingDineIn()) return;
                 setCustomerType("existing_table");
                 setSelectedDiningSessionId("");
+                setSelectedPickupOrder(null);
               }}
               type="button"
             >
               Existing table
             </button>
             <button
-              aria-describedby="pickup-customer-unavailable"
-              className="rounded-md border border-slate-300 bg-slate-100 px-4 py-2 text-sm font-bold text-slate-500"
-              disabled
+              aria-pressed={isPickupCustomer}
+              className={`rounded-md border px-4 py-2 text-sm font-bold ${isPickupCustomer ? "border-red-800 bg-red-800 text-white" : "border-slate-300 bg-white text-slate-700"}`}
+              onClick={() => {
+                if (!confirmLeavingDineIn()) return;
+                setCustomerType("pickup_customer");
+                setSelectedDiningSessionId("");
+              }}
               type="button"
             >
               Pickup customer
@@ -258,7 +331,7 @@ export default function PosPage() {
           </div>}
           <div className="mt-2 space-y-1 text-xs text-slate-500">
             {customerType === "new_customer" && <p id="existing-table-unavailable">Existing table opens the table board.</p>}
-            <p id="pickup-customer-unavailable">Pickup customer is disabled until Phase 4.</p>
+            {isPickupCustomer && <p>Search for a staff-approved, ready pickup order by customer name.</p>}
           </div>
         </section>
 
@@ -284,6 +357,111 @@ export default function PosPage() {
               onSessionSelected={setSelectedDiningSessionId}
             />
           )
+        ) : isPickupCustomer ? (
+          <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(320px,0.8fr)]">
+            <Card className="min-w-0">
+              <CardHeader>
+                <CardTitle>Find ready pickup orders</CardTitle>
+              </CardHeader>
+              <CardContent className="grid gap-4">
+                <label className="grid gap-1 text-sm font-medium text-slate-700">
+                  <span>Customer name</span>
+                  <input
+                    className="h-11 rounded-md border border-slate-300 px-3 text-sm outline-none focus:border-red-700 focus:ring-2 focus:ring-red-100"
+                    autoComplete="off"
+                    value={pickupSearch}
+                    onChange={(event) => {
+                      setPickupSearch(event.target.value);
+                      setSelectedPickupOrder(null);
+                    }}
+                    placeholder="Enter at least 2 characters"
+                  />
+                </label>
+                {pickupSearch.trim().length < 2 && (
+                  <p className="text-sm text-slate-500">Enter at least 2 characters to search approved, ready pickup orders.</p>
+                )}
+                {pickupOrdersQuery.isLoading && <p className="text-sm text-slate-500">Searching pickup orders...</p>}
+                {pickupOrdersQuery.isError && <p role="alert" className="text-sm text-red-700">Unable to search pickup orders. Please retry.</p>}
+                {pickupSearch.trim().length >= 2 && pickupOrdersQuery.isSuccess && pickupOrdersQuery.data.length === 0 && (
+                  <p className="text-sm text-slate-500">No ready pickup orders match that name.</p>
+                )}
+                <div className="grid gap-2">
+                  {pickupOrdersQuery.data?.map((order) => (
+                    <button
+                      key={order.order_number}
+                      type="button"
+                      aria-pressed={selectedPickupOrder?.order_number === order.order_number}
+                      onClick={() => setSelectedPickupOrder(order)}
+                      className={`flex items-center justify-between gap-3 rounded-md border p-3 text-left ${selectedPickupOrder?.order_number === order.order_number ? "border-red-700 bg-red-50" : "border-slate-200 bg-white hover:bg-slate-50"}`}
+                    >
+                      <span>
+                        <span className="block font-semibold text-slate-950">{order.customer_name}</span>
+                        <span className="block text-xs text-slate-500">{order.order_number} · Ready</span>
+                      </span>
+                      <span className="text-sm font-bold text-slate-900">{money(order.total)}</span>
+                    </button>
+                  ))}
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card className="min-w-0">
+              <CardHeader>
+                <CardTitle>Pickup checkout</CardTitle>
+              </CardHeader>
+              <CardContent className="grid content-start gap-4">
+                {!selectedPickupOrder ? (
+                  <p className="rounded-md border border-dashed border-slate-300 p-6 text-center text-sm text-slate-500">
+                    Select a ready pickup order to load its cart.
+                  </p>
+                ) : (
+                  <>
+                    <div>
+                      <p className="font-semibold text-slate-950">{selectedPickupOrder.customer_name}</p>
+                      <p className="text-sm text-slate-500">{selectedPickupOrder.order_number}</p>
+                      <p className="mt-2 text-sm font-semibold text-emerald-800">Ready for pickup</p>
+                    </div>
+                    <div className="grid gap-2">
+                      {selectedPickupOrder.items.map((item, index) => (
+                        <div key={`${selectedPickupOrder.order_number}-${index}`} className="flex justify-between gap-3 rounded-md border border-slate-200 p-3 text-sm">
+                          <span>{item.quantity} × {item.name}</span>
+                          <span className="font-semibold">{money(item.total_price)}</span>
+                        </div>
+                      ))}
+                    </div>
+                    <div className="grid gap-2 border-t border-slate-200 pt-4 text-sm">
+                      <TotalLine label="Total" value={selectedPickupOrder.total} strong />
+                      {selectedPickupOrder.payment_status === "paid" ? (
+                        <>
+                          <p className="text-sm text-emerald-800">
+                            Already paid{selectedPickupOrder.payment_method ? ` · ${selectedPickupOrder.payment_method.replace(/_/g, " ")}` : ""}. No payment will be collected again.
+                          </p>
+                          <Button
+                            className="mt-2 min-h-12"
+                            disabled={pickupCompletionMutation.isPending}
+                            onClick={handlePickupCheckout}
+                          >
+                            {pickupCompletionMutation.isPending ? "Completing..." : "Complete pickup"}
+                          </Button>
+                        </>
+                      ) : (
+                        <>
+                          <p className="text-sm text-amber-800">Payment is due at pickup. Collect cash before handover.</p>
+                          <Button
+                            className="mt-2 min-h-12"
+                            disabled={pickupCompletionMutation.isPending}
+                            onClick={handlePickupCheckout}
+                          >
+                            Collect payment & complete
+                          </Button>
+                        </>
+                      )}
+                    </div>
+                  </>
+                )}
+              </CardContent>
+            </Card>
+          </div>
         ) : (
         <div className="grid gap-4 lg:grid-cols-[220px_minmax(0,1fr)] lg:items-start">
           <aside className="lg:sticky lg:top-6">
@@ -431,10 +609,20 @@ export default function PosPage() {
 
       <PaymentModal
         open={paymentOpen}
-        pending={checkoutMutation.isPending}
-        total={totals.total}
+        pending={isPickupCustomer ? pickupCompletionMutation.isPending : checkoutMutation.isPending}
+        total={isPickupCustomer ? selectedPickupOrder?.total ?? 0 : totals.total}
         onClose={() => setPaymentOpen(false)}
-        onConfirm={(payment) => checkoutMutation.mutate(payment)}
+        onConfirm={(payment) => {
+          if (isPickupCustomer) {
+            if (payment.paymentMethod !== "cash") return;
+            pickupCompletionMutation.mutate({
+              paymentMethod: "cash",
+              cashReceived: payment.cashReceived
+            });
+          } else {
+            checkoutMutation.mutate(payment);
+          }
+        }}
       />
     </main>
   );

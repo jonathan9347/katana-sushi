@@ -49,7 +49,7 @@ export default function ReservationStatus() {
   const [isPaying, setIsPaying] = useState(false);
 
   const statusIcon =
-    result?.status === "completed" ? (
+    result?.status === "completed" || (result?.is_takeout && result.status === "released") ? (
       <Check className="h-6 w-6 text-green-500" strokeWidth={3} />
     ) : result?.status === "approved" || result?.status === "confirmed" ? (
       <CheckCircle2 className="h-6 w-6 text-emerald-400" />
@@ -212,7 +212,9 @@ export default function ReservationStatus() {
                 {statusIcon}
                 <div>
                   <p className="text-xs font-bold uppercase tracking-[0.18em] text-katana-muted">Status</p>
-                  <p className="font-display text-2xl font-bold capitalize text-white">{result.status.replace(/_/g, " ")}</p>
+                  <p className="font-display text-2xl font-bold capitalize text-white">
+                    {result.is_takeout && result.status === "released" ? "completed" : result.status.replace(/_/g, " ")}
+                  </p>
                 </div>
               </div>
               {result.is_takeout && result.status === "ready" && (

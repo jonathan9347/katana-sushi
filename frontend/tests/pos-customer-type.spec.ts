@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 
-test("keeps takeout as the default, enables Dine in, and leaves Pickup unavailable", async ({ page }) => {
+test("keeps takeout as the default and enables Pickup customer", async ({ page }) => {
   await page.addInitScript(() => {
     localStorage.setItem("katana_token", "playwright-token");
     localStorage.setItem("katana_role", "cashier");
@@ -30,12 +30,16 @@ test("keeps takeout as the default, enables Dine in, and leaves Pickup unavailab
   await expect(customerType.getByRole("button", { name: "New customer" })).toHaveAttribute("aria-pressed", "true");
   await expect(customerType.getByRole("button", { name: "Existing table" })).toBeEnabled();
   await expect(customerType.getByRole("button", { name: "Existing table" })).toHaveAttribute("aria-pressed", "false");
-  await expect(customerType.getByRole("button", { name: "Pickup customer" })).toBeDisabled();
+  await expect(customerType.getByRole("button", { name: "Pickup customer" })).toBeEnabled();
   await expect(customerType.getByRole("button", { name: "Dine in" })).toBeEnabled();
   await expect(customerType.getByRole("button", { name: "Takeout" })).toHaveAttribute("aria-pressed", "true");
-  await expect(customerType).toContainText("Pickup customer is disabled until Phase 4.");
   await expect(page.getByRole("heading", { name: "Takeout Sale" })).toBeVisible();
 
+  await customerType.getByRole("button", { name: "Pickup customer" }).click();
+  await expect(page.getByRole("heading", { name: "Pickup customer" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Find ready pickup orders" })).toBeVisible();
+
+  await customerType.getByRole("button", { name: "New customer" }).click();
   await customerType.getByRole("group", { name: "New customer service type" }).getByRole("button", { name: "Dine in" }).click();
   await expect(page.locator("header").getByRole("heading", { name: "Table board", exact: true })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Dine-in order" })).toHaveCount(0);
