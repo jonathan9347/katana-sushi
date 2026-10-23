@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { CalendarDays, ChevronLeft, ChevronRight, Clock, Facebook, MapPin, PartyPopper, Phone, Sparkles, UtensilsCrossed } from "lucide-react";
+import { CalendarDays, ChevronLeft, ChevronRight, Clock, Facebook, MapPin, PartyPopper, Phone, ShoppingBag, Sparkles, UtensilsCrossed } from "lucide-react";
 import { Link } from "react-router-dom";
 
 const experienceHighlights = [
@@ -28,11 +28,11 @@ const experienceHighlights = [
 
 const actions = [
   {
-    title: "Dine-in",
-    body: "Reserve a table in minutes, choose your preferred seating, and enjoy a smooth visit with quick service, fresh favorites, and a relaxed atmosphere.",
-    steps: ["Pick your date and time", "Choose your preferred seating", "Arrive and enjoy a seamless visit"],
+    title: "Reserve",
+    body: "Book a table for dine-in or arrange sushi catering for your next celebration.",
+    steps: ["Choose table or catering", "Share your booking details", "Let our team help plan your visit"],
     to: "/reserve",
-    label: "Reserve",
+    label: "Choose a booking",
     icon: CalendarDays
   },
   {
@@ -44,12 +44,12 @@ const actions = [
     icon: UtensilsCrossed
   },
   {
-    title: "Catering",
-    body: "Plan birthdays, office lunches, and private celebrations with customizable menus, flexible serving options, and dedicated support for every event.",
-    steps: ["Share your event details", "Choose your menu and package", "Confirm your booking and enjoy"],
-    to: "/catering",
-    label: "Book Event",
-    icon: PartyPopper
+    title: "Pickup",
+    body: "Choose your sushi favorites and place an order for pickup at the counter.",
+    steps: ["Browse the pickup menu", "Add items to your order", "Pay in cash when you arrive"],
+    to: "/takeout",
+    label: "Order pickup",
+    icon: ShoppingBag
   }
 ];
 
@@ -119,7 +119,7 @@ export default function Home() {
             </p>
             <div className="mt-10 flex flex-col gap-3 sm:flex-row">
               <Link className="customer-btn-primary" to="/reserve">
-                Book a Table
+                Reserve
               </Link>
               <Link className="customer-btn-secondary bg-[var(--customer-surface)]/90 text-[var(--customer-text)] shadow-lg shadow-black/20 backdrop-blur hover:bg-[var(--customer-surface-2)]" to="/menu">
                 Explore Menu

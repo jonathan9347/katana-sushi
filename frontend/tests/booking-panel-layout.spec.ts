@@ -130,6 +130,8 @@ async function mockApi(page: Page, packages: typeof cateringPackages = []) {
     let body: Record<string, unknown> = {};
     if (url.pathname === "/api/products") {
       body = { products };
+    } else if (url.pathname === "/api/takeout/catalog") {
+      body = { products };
     } else if (url.pathname === "/api/reservations/dine-in" && route.request().method() === "POST") {
       body = {
         booking_id: "KTN-DINE-TEST-001",
@@ -137,6 +139,10 @@ async function mockApi(page: Page, packages: typeof cateringPackages = []) {
         remaining_balance: 500,
         payment_plan: "pay_at_venue"
       };
+    } else if (url.pathname === "/api/reservations/table-availability") {
+      body = { availability: "available", checked_at: new Date().toISOString() };
+    } else if (url.pathname === "/api/reservations/table" && route.request().method() === "POST") {
+      body = { booking_id: "KTN-DINE-TEST-001", status: "confirmed" };
     } else if (url.pathname === "/api/reservations/rules") {
       body = { settings: reservationRules, server_now: new Date().toISOString() };
     } else if (url.pathname === "/api/reservations/dine-in/availability") {
@@ -216,42 +222,12 @@ async function expectPanelBounds(page: Page, selector: string, height: number) {
   expect(bounds).toEqual({ top: 12, bottomGap: 12, rightGap: 12, height: height - 24 });
 }
 
-test("Dine In panel stays at the viewport edge in normal and editing states", async ({ page }) => {
+test("table booking route uses the minimal Back control instead of the Home header", async ({ page }) => {
   await mockApi(page);
-  await page.setViewportSize(viewportSizes[0]);
   await page.goto("/reserve/book");
-  const panel = page.locator(".reservation-checkout-aside");
-  const back = page.getByRole("link", { name: "Back to home" });
-  const action = panel.getByRole("button", { name: "Confirm booking" });
-
-  await expect(panel).toBeVisible();
-  await expect(back).toHaveAttribute("href", "/");
-  await expect(page.locator('nav a[href="/"]')).toHaveCount(0);
-
-  for (const viewport of viewportSizes) {
-    await page.setViewportSize(viewport);
-    await expectPanelBounds(page, ".reservation-checkout-aside", viewport.height);
-    await expect(action).toBeInViewport();
-
-    await expect(page.locator("#reservation-details-fields")).toBeVisible();
-    await page.locator("#reservation-details-toggle").click();
-    await expect(page.locator("#reservation-details-fields")).toBeHidden();
-    await expect(action).toBeInViewport();
-    await page.locator("#reservation-details-toggle").click();
-  }
-
-  await page.locator(".customer-reservation-form > div:first-child").evaluate((left) => {
-    (left as HTMLElement).style.minHeight = "1600px";
-  });
-  await page.evaluate(() => window.scrollTo(0, 200));
-  await expect.poll(() => panel.evaluate((element) => Math.round(element.getBoundingClientRect().top))).toBe(12);
-
-  await page.locator('[data-category-tab="reservation-menu-sashimi"]').click();
-  await expect.poll(() => page.locator("#reservation-menu-sashimi").evaluate((element) => Math.abs(Math.round(element.getBoundingClientRect().top)))).toBe(0);
-  await expect(page.locator("#reservation-menu-sashimi")).toHaveCSS("scroll-margin-top", "0px");
-
-  await page.locator('[data-category-tab="reservation-menu-all"]').click();
-  await expect.poll(() => page.locator("#reservation-products-top").evaluate((element) => Math.abs(Math.round(element.getBoundingClientRect().top)))).toBe(0);
+  await expect(page.getByRole("heading", { name: "Book a table" })).toBeVisible();
+  await expect(page.getByRole("link", { name: "Back to home" })).toHaveAttribute("href", "/");
+  await expect(page.getByTestId("desktop-customer-nav")).toHaveCount(0);
 });
 
 test("Catering panel stays at the viewport edge and its details card collapses independently", async ({ page }) => {
@@ -467,6 +443,28 @@ test("customer inner routes hide the header and link home", async ({ page }) => 
     await expect(backToHome).toHaveAttribute("href", "/");
     expect(await backToHome.evaluate((link) => link.getBoundingClientRect().height)).toBeGreaterThanOrEqual(44);
   }
+});
+
+test("Reserve hub offers table and catering booking, and Pickup navigation opens ordering", async ({ page }) => {
+  await mockApi(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto("/");
+
+  const customerNav = page.getByRole("navigation", { name: "Customer navigation" }).first();
+  await customerNav.getByRole("link", { name: "Reserve", exact: true }).click();
+  await expect(page).toHaveURL(/\/reserve$/);
+  await expect(page.getByRole("heading", { name: "How would you like to book?" })).toBeVisible();
+  await expect(page.getByRole("link", { name: /Book a table/ })).toHaveAttribute("href", "/reserve/book");
+  await expect(page.getByRole("link", { name: /Book catering/ })).toHaveAttribute("href", "/catering/book");
+
+  await page.getByRole("link", { name: /Book catering/ }).click();
+  await expect(page).toHaveURL(/\/catering\/book$/);
+  await expect(page.getByRole("heading", { name: "Choose your stations" })).toBeVisible();
+
+  await page.goto("/");
+  await customerNav.getByRole("link", { name: "Pickup", exact: true }).click();
+  await expect(page).toHaveURL(/\/takeout$/);
+  await expect(page.getByRole("heading", { name: "Choose your menu" })).toBeVisible();
 });
 
 test("Home desktop header centers the tabs between the logo and search controls", async ({ page }) => {
@@ -708,24 +706,18 @@ for (const theme of ["light", "dark"] as const) {
   });
 }
 
-test("dine-in cart survives leaving with Back to home and returning to booking", async ({ page }) => {
+test("Reserve hub opens table booking and keeps the minimal Back control", async ({ page }) => {
   await mockApi(page);
   await page.setViewportSize({ width: 1440, height: 900 });
-  await page.goto("/reserve/book");
-
-  const addToCart = page.getByRole("button", { name: "Add to cart" }).first();
-  await expect(addToCart).toBeEnabled();
-  await addToCart.click();
-  await expect.poll(() =>
-    page.evaluate(() => localStorage.getItem("katana-customer-dine-in-cart"))
-  ).toContain("Test Sushi 1");
-
-  await page.getByRole("link", { name: "Back to home" }).click();
+  await page.goto("/");
   await page.getByRole("navigation", { name: "Customer navigation" }).first()
-    .getByRole("link", { name: "Dine In", exact: true }).click();
-  await page.getByRole("link", { name: "Proceed to booking" }).click();
+    .getByRole("link", { name: "Reserve", exact: true }).click();
+  await page.getByRole("link", { name: /Book a table/ }).click();
 
-  await expect(page.locator(".reservation-order-items")).toContainText("Test Sushi 1");
+  await expect(page).toHaveURL(/\/reserve\/book$/);
+  await expect(page.getByRole("heading", { name: "Book a table" })).toBeVisible();
+  await expect(page.getByTestId("desktop-customer-nav")).toHaveCount(0);
+  await expect(page.getByRole("link", { name: "Back to home" })).toHaveAttribute("href", "/");
 });
 
 test("successful dine-in reservation links to its Status page", async ({ page }) => {
@@ -733,22 +725,20 @@ test("successful dine-in reservation links to its Status page", async ({ page })
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto("/reserve/book");
 
-  const addToCart = page.getByRole("button", { name: "Add to cart" }).first();
-  await expect(addToCart).toBeEnabled();
-  await addToCart.click();
   await page.getByLabel("Date *").fill("2099-01-01");
-  await page.getByRole("button", { name: "AM", exact: true }).click();
-  await page.locator("#reservation-acknowledgement").check();
+  await page.getByLabel("Hour").fill("12");
+  await page.getByLabel("Minute").fill("0");
+  await page.getByRole("button", { name: "PM", exact: true }).click();
 
-  const confirmBooking = page.locator(".reservation-checkout-submit").getByRole("button", { name: "Confirm booking" });
+  const confirmBooking = page.getByRole("button", { name: "Confirm booking" });
   await expect(confirmBooking).toBeEnabled();
   await confirmBooking.click();
 
   const details = page.getByRole("dialog");
-  await details.getByLabel("Your name *").fill("Test Customer");
-  await details.getByLabel("Phone number *").fill("09123456789");
-  await details.getByLabel("Email *").fill("test@example.com");
-  await details.getByRole("button", { name: "Confirm booking" }).click();
+  await details.getByLabel("Full name *").fill("Test Customer");
+  await details.getByLabel("Mobile number *").fill("09123456789");
+  await details.getByLabel("Email address *").fill("test@example.com");
+  await details.getByRole("button", { name: "Confirm table reservation" }).click();
 
   const statusLink = page.getByRole("link", { name: "View Reservation Status" });
   await expect(statusLink).toHaveAttribute("href", "/reservation/status?bookingId=KTN-DINE-TEST-001");

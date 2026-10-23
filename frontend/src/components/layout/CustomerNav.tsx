@@ -1,4 +1,4 @@
-import { CalendarDays, ClipboardList, Home, Menu, MessageSquareHeart, MoonStar, PartyPopper, Search, ShoppingBag, SunMedium, X } from "lucide-react";
+import { CalendarDays, ClipboardList, Home, Menu, MessageSquareHeart, MoonStar, Search, ShoppingBag, SunMedium, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { NavLink } from "react-router-dom";
 import CustomerMenuSearch from "./CustomerMenuSearch";
@@ -7,9 +7,7 @@ const navItems = [
   { to: "/", label: "Home", icon: Home },
   { to: "/menu", label: "Menu", icon: ClipboardList },
   { to: "/takeout", label: "Pickup", icon: ShoppingBag },
-  { to: "/reserve", label: "Dine In", icon: CalendarDays },
-
-  { to: "/catering", label: "Catering", icon: PartyPopper },
+  { to: "/reserve", label: "Reserve", icon: CalendarDays },
   { to: "/reservation/status", label: "Status", icon: Search },
   { to: "/feedback", label: "Feedback", icon: MessageSquareHeart }
 ];
