@@ -1,10 +1,9 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
-import { Boxes, ClipboardList, Package, PackageSearch, ReceiptText, Settings2 } from "lucide-react";
+import { ClipboardList, Package, ReceiptText } from "lucide-react";
 import SectionNav, { SectionNavTab } from "../../../components/layout/SectionNav";
 import BatchManagement from "./BatchManagement";
 import InventoryMovements from "./InventoryMovements";
-import InventoryOverview from "./InventoryOverview";
 import InventoryReservations from "./InventoryReservations";
 import MaterialsList from "./MaterialsList";
 import SellingProductsList from "./SellingProductsList";
@@ -12,17 +11,14 @@ import WasteDisposal from "./WasteDisposal";
 import YieldEstimator from "./YieldEstimator";
 import { StaffRole } from "./types";
 
-type InventoryTab = "overview" | "stock" | "reservations" | "movements" | "setup";
-type StockView = "materials" | "batches" | "waste";
+type InventoryTab = "stock" | "reservations" | "movements";
+type StockView = "materials" | "batches" | "waste" | "menu-products" | "yield";
 type MaterialsStockFilter = "all" | "issues" | "low" | "negative" | "expiring";
-type SetupView = "menu-products" | "yield";
 
 const tabs: Array<SectionNavTab<InventoryTab>> = [
-  { id: "overview", label: "Overview", icon: <Boxes className="h-4 w-4" /> },
   { id: "stock", label: "Stock", icon: <Package className="h-4 w-4" /> },
   { id: "reservations", label: "Reservations", icon: <ClipboardList className="h-4 w-4" /> },
-  { id: "movements", label: "Movements", icon: <ReceiptText className="h-4 w-4" /> },
-  { id: "setup", label: "Setup & Tools", icon: <Settings2 className="h-4 w-4" /> }
+  { id: "movements", label: "Movements", icon: <ReceiptText className="h-4 w-4" /> }
 ];
 
 function getStoredRole(): StaffRole {
@@ -34,11 +30,10 @@ function getStoredRole(): StaffRole {
 }
 
 export default function InventoryPage({ readOnly = false }: { readOnly?: boolean }) {
-  const [activeTab, setActiveTab] = useState<InventoryTab>(readOnly ? "stock" : "overview");
+  const [activeTab, setActiveTab] = useState<InventoryTab>("stock");
   const [stockView, setStockView] = useState<StockView>("materials");
   const [materialsStockFilter, setMaterialsStockFilter] = useState<MaterialsStockFilter>("all");
   const [batchesExpiringOnly, setBatchesExpiringOnly] = useState(false);
-  const [setupView, setSetupView] = useState<SetupView>("menu-products");
   const role = getStoredRole();
   const allowed = role === "admin" || role === "inventory_manager" || (readOnly && role === "chef");
   const visibleTabs = readOnly ? tabs.filter((tab) => tab.id === "stock") : tabs;
@@ -66,22 +61,9 @@ export default function InventoryPage({ readOnly = false }: { readOnly?: boolean
           <p className="text-sm text-slate-500">Signed in as {role.replace("_", " ")}</p>
         </div>
 
-        <div className="grid gap-5 lg:grid-cols-[240px_minmax(0,1fr)] lg:items-start">
-          <aside className="lg:sticky lg:top-6">
-            <SectionNav activeTab={activeTab} orientation="vertical" tabs={visibleTabs} onTabChange={setActiveTab} />
-          </aside>
-
-          <section className="min-w-0">
-            {activeTab === "overview" && !readOnly && (
-              <InventoryOverview
-                onNavigate={(target) => {
-                  setActiveTab(target.section);
-                  if (target.stockView) setStockView(target.stockView);
-                  if (target.stockFilter) setMaterialsStockFilter(target.stockFilter);
-                  if (target.batchExpiringOnly !== undefined) setBatchesExpiringOnly(target.batchExpiringOnly);
-                }}
-              />
-            )}
+        <section className="grid min-w-0 gap-4">
+          <SectionNav activeTab={activeTab} tabs={visibleTabs} onTabChange={setActiveTab} />
+          <div className="min-w-0">
             {activeTab === "stock" && (
               <div className="grid gap-4">
                 {!readOnly && (
@@ -89,7 +71,9 @@ export default function InventoryPage({ readOnly = false }: { readOnly?: boolean
                     {([
                       ["materials", "Materials"],
                       ["batches", "Batches & Expiry"],
-                      ["waste", "Waste Disposal"]
+                      ["waste", "Waste Disposal"],
+                      ["menu-products", "Menu Products"],
+                      ["yield", "Yield Estimator"]
                     ] as const).map(([view, label]) => (
                       <button
                         key={view}
@@ -115,33 +99,14 @@ export default function InventoryPage({ readOnly = false }: { readOnly?: boolean
                   onExpiringOnlyChange={setBatchesExpiringOnly}
                 />}
                 {stockView === "waste" && <WasteDisposal />}
+                {stockView === "menu-products" && !readOnly && <SellingProductsList role={role} />}
+                {stockView === "yield" && !readOnly && <YieldEstimator />}
               </div>
             )}
             {activeTab === "reservations" && !readOnly && <InventoryReservations />}
             {activeTab === "movements" && !readOnly && <InventoryMovements />}
-            {activeTab === "setup" && !readOnly && (
-              <div className="grid gap-4">
-                <div className="flex flex-wrap gap-2">
-                  {([
-                    ["menu-products", "Menu Products"],
-                    ["yield", "Yield Estimator"]
-                  ] as const).map(([view, label]) => (
-                    <button
-                      key={view}
-                      type="button"
-                      onClick={() => setSetupView(view)}
-                      className={`rounded-md px-3 py-2 text-sm font-semibold ${setupView === view ? "bg-red-700 text-white" : "border border-slate-300 bg-white text-slate-700"}`}
-                    >
-                      {label}
-                    </button>
-                  ))}
-                </div>
-                {setupView === "menu-products" && <SellingProductsList role={role} />}
-                {setupView === "yield" && <YieldEstimator />}
-              </div>
-            )}
-          </section>
-        </div>
+          </div>
+        </section>
       </div>
     </main>
   );
