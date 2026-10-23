@@ -183,9 +183,10 @@ async function openDiningService(
     await route.fulfill({ json: {} });
   });
   await page.goto(path);
-  await page.getByRole("group", { name: "New customer service type" })
-    .getByRole("button", { name: "Dine in" }).click();
-  await page.getByRole("button", { name: /Table 4/ }).click();
+  await page.getByRole("button", { name: "Existing Table" }).click();
+  await page.getByRole("button", { name: "Proceed" }).click();
+  await page.getByRole("button", { name: "Select Table 4, Occupied" }).click();
+  await page.getByRole("button", { name: "Open table session tools" }).click();
   await expect(page.getByRole("heading", { name: "Dine-in order", exact: true })).toBeVisible();
 }
 
@@ -209,7 +210,7 @@ test("confirms guestless order with reviewed price and reprints saved slip witho
   await addOneOrderLine(page);
 
   const firstPopup = page.waitForEvent("popup");
-  await page.getByRole("button", { name: "Confirm & Print" }).click();
+  await page.getByTestId("order-review").getByRole("button", { name: "Confirm & Print" }).click();
   const printedSlip = await firstPopup;
   await expect(printedSlip.locator("body")).toContainText("DO-PRINT-001");
   await expect(printedSlip.locator("body")).toContainText("Table 4");
@@ -247,15 +248,16 @@ test("reload fetches the tab's saved order ID and reprints without committing ag
   });
   await addOneOrderLine(page);
   const firstPopupPromise = page.waitForEvent("popup");
-  await page.getByRole("button", { name: "Confirm & Print" }).click();
+  await page.getByTestId("order-review").getByRole("button", { name: "Confirm & Print" }).click();
   await firstPopupPromise;
   await expect(page.getByRole("button", { name: "Reprint" })).toBeVisible();
   await expect.poll(() => postCount).toBe(1);
 
   await page.reload();
-  await page.getByRole("group", { name: "New customer service type" })
-    .getByRole("button", { name: "Dine in" }).click();
-  await page.getByRole("button", { name: /Table 4/ }).click();
+  await page.getByRole("button", { name: "Existing Table" }).click();
+  await page.getByRole("button", { name: "Proceed" }).click();
+  await page.getByRole("button", { name: "Select Table 4, Occupied" }).click();
+  await page.getByRole("button", { name: "Open table session tools" }).click();
   await expect(page.getByText(`Saved order ${orderResponse.order.order_number} · Table 4`)).toBeVisible();
   await expect.poll(() => lookupCount).toBeGreaterThan(0);
 
@@ -279,7 +281,7 @@ test("main POS dine-in commits, reprints, and checks out through the saved-order
   await expect(page.getByRole("button", { name: /^Unlimited/ })).toHaveCount(1);
   await addOneOrderLine(page);
   const printPopupPromise = page.waitForEvent("popup");
-  await page.getByRole("button", { name: "Confirm & Print" }).click();
+  await page.getByTestId("order-review").getByRole("button", { name: "Confirm & Print" }).click();
   const printPopup = await printPopupPromise;
   await expect(printPopup.locator("body")).toContainText("California Roll");
   await expect(printPopup.locator("body")).toContainText("Table 4");
@@ -361,7 +363,7 @@ test("main POS offers smart conversion to the Unlimited cart", async ({ page }) 
   await page.getByLabel("Product").selectOption("included-product");
   await page.getByRole("button", { name: "Add item" }).click();
   await expect.poll(() => conversionPrompt).toContain("Convert this cart to the Unlimited cart");
-  await expect(page.getByRole("button", { name: "Unlimited (1)" })).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByRole("group", { name: "Order type" }).getByRole("button", { name: "Unlimited" })).toHaveAttribute("aria-pressed", "true");
   await expect(page.getByText("1 × Iced Tea · Included")).toBeVisible();
 });
 
@@ -403,12 +405,14 @@ test("main POS supports both carts, saved headcount, live Unlimited timer, and f
       }
     }
   ], "/staff/pos", 1);
+  const orderBuilder = page.getByRole("region", { name: "POS order builder" });
 
   await page.getByLabel("Product").selectOption("product-1");
   await page.getByRole("button", { name: "Add item" }).click();
   await expect(page.getByText("1 × California Roll · PHP 100.00 each")).toBeVisible();
 
-  await page.getByRole("button", { name: "Unlimited (0)" }).click();
+  await page.getByRole("group", { name: "Order type" }).getByRole("button", { name: "Unlimited" }).click();
+  await expect(orderBuilder.getByText("Time Remaining")).toHaveCount(0);
   await page.getByLabel("Product").selectOption("included-product");
   await page.getByRole("button", { name: "Add item" }).click();
   await expect(page.getByText("1 × Iced Tea · Included")).toBeVisible();
@@ -421,25 +425,25 @@ test("main POS supports both carts, saved headcount, live Unlimited timer, and f
   const startRequest = await startRequestPromise;
   expect(startRequest.postDataJSON()).toEqual({ paxCount: 3 });
   await expect(page.getByText("3 covers × PHP 1,500.00")).toBeVisible();
-  await expect(page.getByText("Time Remaining")).toBeVisible();
+  await expect(orderBuilder.getByText("Time Remaining")).toBeVisible();
   await expect(page.locator("text=/\\b\\d{2}:\\d{2}\\b/").first()).toBeVisible();
 
   const extensionRequestPromise = page.waitForRequest((request) =>
     request.method() === "POST" && request.url().endsWith("/unlimited-session-1/extend")
   );
-  await page.getByRole("button", { name: "Extend session" }).click();
+  await orderBuilder.getByRole("button", { name: "Extend Session", exact: true }).click();
   const extensionRequest = await extensionRequestPromise;
   expect(extensionPrompt).toContain("30 minutes");
   expect(extensionPrompt).toContain("no fee");
   expect(extensionRequest.postData()).toBeNull();
 
-  await page.getByRole("button", { name: "A la carte (1)" }).click();
+  await page.getByRole("group", { name: "Order type" }).getByRole("button", { name: "A la carte" }).click();
   await expect(page.getByText("1 × California Roll · PHP 100.00 each")).toBeVisible();
-  await page.getByRole("button", { name: "Unlimited (1)" }).click();
+  await page.getByRole("group", { name: "Order type" }).getByRole("button", { name: "Unlimited" }).click();
   await page.getByRole("button", { name: "Review order" }).click();
   await expect(page.getByTestId("order-review")).toContainText("Confirm Unlimited order · Table 4");
   const printPopupPromise = page.waitForEvent("popup");
-  await page.getByRole("button", { name: "Confirm & Print" }).click();
+  await page.getByTestId("order-review").getByRole("button", { name: "Confirm & Print" }).click();
   await printPopupPromise;
   expect(submittedOrder).toMatchObject({
     orderType: "unlimited",
@@ -448,26 +452,22 @@ test("main POS supports both carts, saved headcount, live Unlimited timer, and f
   });
 });
 
-test("confirms before switching away from an unconfirmed main-POS dine-in order", async ({ page }) => {
-  const dialogMessages: string[] = [];
-  page.on("dialog", async (dialog) => {
-    dialogMessages.push(dialog.message());
-    if (dialogMessages.length === 1) await dialog.dismiss();
-    else await dialog.accept();
-  });
+test("preserves the dine-in cart when opening customer selection", async ({ page }) => {
   await openDiningService(page, async (route) => {
     await route.fulfill({ json: orderResponse, status: 201 });
   }, () => 100, undefined, "/staff/pos");
   await addOneOrderLine(page);
 
-  const serviceType = page.getByRole("group", { name: "New customer service type" });
-  await serviceType.getByRole("button", { name: "Takeout" }).click();
-  await expect(page.getByRole("heading", { name: "Dine-in order", exact: true })).toBeVisible();
-  expect(dialogMessages[0]).toContain("discard the unconfirmed dine-in order");
-
-  await serviceType.getByRole("button", { name: "Takeout" }).click();
-  await expect(page.getByRole("heading", { name: "Takeout Sale" })).toBeVisible();
-  expect(dialogMessages).toHaveLength(2);
+  await page.getByRole("button", { name: "New Customer" }).click();
+  const serviceDialog = page.getByRole("dialog", { name: "New Customer" });
+  await expect(serviceDialog.getByRole("button", { name: "Take-out" })).toBeVisible();
+  await serviceDialog.getByRole("button", { name: "Take-out" }).click();
+  await page.getByRole("dialog", { name: "Take-out" }).getByRole("button", { name: "Walk-in" }).click();
+  await expect(page.getByRole("region", { name: "POS order builder" })).toContainText("Cart is empty");
+  await page.getByRole("button", { name: "Existing Table" }).click();
+  await page.getByRole("button", { name: "Proceed" }).click();
+  await page.getByRole("button", { name: "Select Table 4, Occupied" }).click();
+  await expect(page.getByRole("region", { name: "POS order builder" }).getByText("2 × California Roll")).toBeVisible();
 });
 
 test("keeps separate a-la-carte and Unlimited carts while using one menu", async ({ page }) => {
@@ -505,14 +505,14 @@ test("keeps separate a-la-carte and Unlimited carts while using one menu", async
   await page.getByRole("button", { name: "Add item" }).click();
   await expect(page.getByText("1 × Regular Roll · PHP 100.00 each")).toBeVisible();
 
-  await page.getByRole("button", { name: "Unlimited (0)" }).click();
+  await page.getByRole("group", { name: "Order type" }).getByRole("button", { name: "Unlimited" }).click();
   await page.getByLabel("Product").selectOption("beverage-addon");
   await page.getByRole("button", { name: "Add item" }).click();
   await expect(page.getByText("1 × Bottled Water · PHP 30.00 each")).toBeVisible();
 
-  await page.getByRole("button", { name: "A la carte (1)" }).click();
+  await page.getByRole("group", { name: "Order type" }).getByRole("button", { name: "A la carte" }).click();
   await expect(page.getByText("1 × Regular Roll · PHP 100.00 each")).toBeVisible();
-  await page.getByRole("button", { name: "Unlimited (1)" }).click();
+  await page.getByRole("group", { name: "Order type" }).getByRole("button", { name: "Unlimited" }).click();
   await expect(page.getByText("1 × Bottled Water · PHP 30.00 each")).toBeVisible();
 });
 
@@ -610,7 +610,7 @@ test("offers conversion when the a-la-carte cart has included items and preserve
   await expect.poll(() => dialogMessages.length).toBe(1);
   expect(dialogMessages[0]).toContain("Convert this cart to the Unlimited cart");
   expect(dialogMessages[0]).toContain("beverage add-ons are charged at menu price");
-  await expect(page.getByRole("button", { name: "Unlimited (1)" })).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByRole("group", { name: "Order type" }).getByRole("button", { name: "Unlimited" })).toHaveAttribute("aria-pressed", "true");
   await expect(page.getByText("1 × Iced Tea · Included")).toBeVisible();
 });
 
@@ -625,7 +625,7 @@ test("double-click commits only once", async ({ page }) => {
   await addOneOrderLine(page);
 
   const popupPromise = page.waitForEvent("popup");
-  await page.getByRole("button", { name: "Confirm & Print" }).dblclick({ delay: 20 });
+  await page.getByTestId("order-review").getByRole("button", { name: "Confirm & Print" }).dblclick({ delay: 20 });
   await popupPromise;
   await expect(page.getByRole("button", { name: "Reprint" })).toBeVisible();
   expect(postCount).toBe(1);
@@ -651,7 +651,7 @@ test("keeps the editable cart and requires a fresh review after a stale-price re
   await addOneOrderLine(page);
   await page.evaluate(() => { window.open = () => null; });
 
-  await page.getByRole("button", { name: "Confirm & Print" }).click();
+  await page.getByTestId("order-review").getByRole("button", { name: "Confirm & Print" }).click();
   await expect.poll(() => dialogMessages.length).toBe(1);
   await expect(page.getByTestId("order-review")).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Review order" })).toBeVisible();
@@ -685,7 +685,7 @@ test("retries with the same idempotency key after an uncertain response", async 
     window.open = () => null;
   });
 
-  await page.getByRole("button", { name: "Confirm & Print" }).click();
+  await page.getByTestId("order-review").getByRole("button", { name: "Confirm & Print" }).click();
   await expect.poll(() => requests.length).toBe(1);
   await expect.poll(() => dialogMessages.length).toBe(1);
   expect(dialogMessages).toContain("Temporary response failure");
@@ -696,7 +696,7 @@ test("retries with the same idempotency key after an uncertain response", async 
     window.open = Object.getOwnPropertyDescriptor(window, "__originalOpen")?.value ?? window.open;
   });
   const popupPromise = page.waitForEvent("popup");
-  await page.getByRole("button", { name: "Confirm & Print" }).click();
+  await page.getByTestId("order-review").getByRole("button", { name: "Confirm & Print" }).click();
   const popup = await popupPromise;
   await expect(popup.locator("body")).toContainText("DO-PRINT-001");
   await expect(page.getByRole("button", { name: "Reprint" })).toBeVisible();
@@ -721,7 +721,7 @@ test("keeps a committed order and offers print-only recovery when the first popu
     window.open = () => null;
   });
 
-  await page.getByRole("button", { name: "Confirm & Print" }).click();
+  await page.getByTestId("order-review").getByRole("button", { name: "Confirm & Print" }).click();
   await expect(page.getByRole("button", { name: "Reprint" })).toBeVisible();
   expect(dialogMessages).toContain("The order was saved, but the print window was blocked. Use Reprint to try again.");
   expect(postCount).toBe(1);

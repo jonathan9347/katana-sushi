@@ -5,6 +5,7 @@ import { Link } from "react-router-dom";
 import SectionNav, { SectionNavTab } from "../../../components/layout/SectionNav";
 import { Dialog } from "../../../components/ui/dialog";
 import UnlimitedTimer from "../../../components/pos/UnlimitedTimer";
+import { usePosCart, type PosCartKey } from "./store";
 import { api } from "../../../lib/api";
 import { useToast } from "../../../hooks/useToast";
 
@@ -30,8 +31,9 @@ type KitchenOrder = {
   items: TicketItem[];
 };
 
-type CommittedDiningOrder = {
+export type CommittedDiningOrder = {
   id: string;
+  dining_session_id: string;
   order_number: string;
   table_number_snapshot: number | null;
   created_at: string;
@@ -159,17 +161,20 @@ type CheckoutTransaction = {
 };
 
 type Props = {
-  mode?: "service" | "kitchen" | "board";
+  mode?: "service" | "kitchen" | "board" | "reservation-picker";
+  boardPurpose?: "walk_in" | "existing_table";
   embedded?: boolean;
   initialSessionId?: string;
   onSessionSelected?: (sessionId: string) => void;
+  onTableSelected?: (selection: { tableId: string; tableNumber: number; sessionId: string | null }) => void;
+  onReservationSelected?: (reservation: UpcomingReservation) => void;
   onDraftStateChange?: (hasDrafts: boolean) => void;
   onBackToBoard?: () => void;
 };
 type DraftItem = { productId: string; quantity: number };
 type CommitOrderInput = { review: ReviewedOrder; printWindow: Window | null };
 type DiningAction = { method: "post" | "patch"; url: string; body?: unknown };
-const LAST_COMMITTED_ORDER_STORAGE_KEY = "katana_last_committed_dining_order_id";
+export const LAST_COMMITTED_ORDER_STORAGE_KEY = "katana_last_committed_dining_order_id";
 type DiningActionResult = {
   transaction?: CheckoutTransaction;
   replayed?: boolean;
@@ -203,7 +208,7 @@ function escapeHtml(value: string) {
   })[character] ?? character);
 }
 
-function printDiningOrderSlip(
+export function printDiningOrderSlip(
   target: Window,
   order: CommittedDiningOrder,
   isReprint = false
@@ -266,9 +271,12 @@ function errorCode(error: unknown) {
 
 export default function DiningService({
   mode = "service",
+  boardPurpose = "walk_in",
   embedded = false,
   initialSessionId = "",
   onSessionSelected,
+  onTableSelected,
+  onReservationSelected,
   onDraftStateChange,
   onBackToBoard
 }: Props) {
@@ -276,24 +284,31 @@ export default function DiningService({
   const isAdmin = role === "admin";
   const kitchenOnly = mode === "kitchen";
   const boardOnly = mode === "board";
+  const reservationOnly = mode === "reservation-picker";
   const MainContainer = embedded ? "div" : "main";
   const [selectedSessionId, setSelectedSessionId] = useState(initialSessionId);
-  const [orderType, setOrderType] = useState<"ala_carte" | "unlimited">("ala_carte");
+  const [orderType, setOrderTypeState] = useState<"ala_carte" | "unlimited">(
+    () => usePosCart.getState().dineOrderType
+  );
   const [productId, setProductId] = useState("");
   const [quantity, setQuantity] = useState(1);
-  const [aLaCarteDraftItems, setALaCarteDraftItems] = useState<DraftItem[]>([]);
-  const [unlimitedDraftItems, setUnlimitedDraftItems] = useState<DraftItem[]>([]);
-  const [draftKeys, setDraftKeys] = useState({
-    ala_carte: crypto.randomUUID(),
-    unlimited: crypto.randomUUID()
-  });
+  const carts = usePosCart((state) => state.carts);
+  const selectedDineOrderType = usePosCart((state) => state.dineOrderType);
+  const draftKeys = usePosCart((state) => state.draftKeys);
+  const setItemsFor = usePosCart((state) => state.setItemsFor);
+  const addItemTo = usePosCart((state) => state.addItemTo);
+  const clearCartFor = usePosCart((state) => state.clearCartFor);
+  const rotateDraftKey = usePosCart((state) => state.rotateDraftKey);
+  const setDineOrderType = usePosCart((state) => state.setDineOrderType);
+  const selectCart = usePosCart((state) => state.selectCart);
   const [orderReview, setOrderReview] = useState<ReviewedOrder | null>(null);
   const [lastCommittedOrderId, setLastCommittedOrderId] = useState(
     () => sessionStorage.getItem(LAST_COMMITTED_ORDER_STORAGE_KEY) ?? ""
   );
   const [printError, setPrintError] = useState("");
   const confirmClickLocked = useRef(false);
-  const [packageCovers, setPackageCovers] = useState(1);
+  const packageCovers = usePosCart((state) => state.dineHeadcount);
+  const setDineHeadcount = usePosCart((state) => state.setDineHeadcount);
   const [leftoverProductId, setLeftoverProductId] = useState("");
   const [leftoverQuantity, setLeftoverQuantity] = useState(0);
   const [cashReceived, setCashReceived] = useState("");
@@ -310,14 +325,25 @@ export default function DiningService({
   const [completedTransaction, setCompletedTransaction] = useState<CheckoutTransaction | null>(null);
   const queryClient = useQueryClient();
   const { toast } = useToast();
-  const draftItems = orderType === "ala_carte" ? aLaCarteDraftItems : unlimitedDraftItems;
-  const setDraftItems = orderType === "ala_carte" ? setALaCarteDraftItems : setUnlimitedDraftItems;
-  const draftKey = draftKeys[orderType];
+  const aLaCarteDraftItems = carts.dine_in_ala_carte;
+  const unlimitedDraftItems = carts.dine_in_unlimited;
+  const cartKey: PosCartKey = orderType === "ala_carte" ? "dine_in_ala_carte" : "dine_in_unlimited";
+  const draftItems = carts[cartKey].map(({ product, quantity: itemQuantity }) => ({
+    productId: product.id,
+    quantity: itemQuantity
+  }));
+  const draftKey = draftKeys[cartKey];
   const hasDraftItems = aLaCarteDraftItems.length > 0 || unlimitedDraftItems.length > 0;
 
   useEffect(() => {
     onDraftStateChange?.(hasDraftItems);
   }, [hasDraftItems, onDraftStateChange]);
+  useEffect(() => {
+    setOrderTypeState(selectedDineOrderType);
+  }, [selectedDineOrderType]);
+  useEffect(() => {
+    selectCart(cartKey);
+  }, [cartKey, selectCart]);
 
   const tablesQuery = useQuery({
     queryKey: ["pos", "dining", "tables"],
@@ -413,6 +439,28 @@ export default function DiningService({
     () => new Map((productsQuery.data ?? []).map((item) => [item.id, item])),
     [productsQuery.data]
   );
+  const writeDraftItems = (targetCart: PosCartKey, nextItems: DraftItem[]) => {
+    const currentItems = usePosCart.getState().carts[targetCart];
+    const resolvedItems = nextItems.map((item) => {
+      const product = productsById.get(item.productId)
+        ?? currentItems.find((cartItem) => cartItem.product.id === item.productId)?.product;
+      if (!product) return null;
+      return { product, quantity: item.quantity };
+    });
+    if (resolvedItems.some((item) => item === null)) {
+      toast("A cart product is no longer available. Reload products before editing this order.");
+      return false;
+    }
+    setItemsFor(targetCart, resolvedItems.filter((item): item is NonNullable<typeof item> => item !== null));
+    return true;
+  };
+  const changeOrderType = (nextOrderType: "ala_carte" | "unlimited") => {
+    setOrderTypeState(nextOrderType);
+    setDineOrderType(nextOrderType);
+    selectCart(nextOrderType === "ala_carte" ? "dine_in_ala_carte" : "dine_in_unlimited");
+    setProductId("");
+    setOrderReview(null);
+  };
 
   const refreshQueries = async () => {
     await Promise.all([
@@ -503,11 +551,11 @@ export default function DiningService({
       sessionStorage.setItem(LAST_COMMITTED_ORDER_STORAGE_KEY, result.order.id);
       setLastCommittedOrderId(result.order.id);
       if (cartType === "ala_carte") {
-        setALaCarteDraftItems([]);
+        clearCartFor("dine_in_ala_carte");
       } else {
-        setUnlimitedDraftItems([]);
+        clearCartFor("dine_in_unlimited");
       }
-      setDraftKeys((current) => ({ ...current, [cartType]: crypto.randomUUID() }));
+      rotateDraftKey(cartType === "ala_carte" ? "dine_in_ala_carte" : "dine_in_unlimited");
       setOrderReview(null);
       setPrintError("");
       confirmClickLocked.current = false;
@@ -560,7 +608,7 @@ export default function DiningService({
         toast("Wait for the current order to finish before seating another table.");
         return;
       }
-      if (hasDraftItems && !window.confirm("Starting another table session will discard both unconfirmed carts. Continue?")) {
+      if (hasDraftItems && !window.confirm("Starting another table session will keep both unconfirmed carts. Continue?")) {
         return;
       }
     }
@@ -568,13 +616,9 @@ export default function DiningService({
   }
 
   function resetDraftForSessionChange() {
-    setALaCarteDraftItems([]);
-    setUnlimitedDraftItems([]);
-    setDraftKeys({ ala_carte: crypto.randomUUID(), unlimited: crypto.randomUUID() });
     setOrderReview(null);
     setProductId("");
     setQuantity(1);
-    setOrderType("ala_carte");
     setCheckoutGuestCount("");
     setCheckoutSeniorPwdCount("0");
   }
@@ -616,7 +660,7 @@ export default function DiningService({
     const shouldOfferConversion = orderType === "ala_carte"
       && !canConvertDraftToUnlimited(draftItems)
       && canConvertDraftToUnlimited(nextItems);
-    setDraftItems(nextItems);
+    if (!writeDraftItems(cartKey, nextItems)) return;
     setOrderReview(null);
     setShowCheckout(false);
     setProductId("");
@@ -624,10 +668,13 @@ export default function DiningService({
     if (shouldOfferConversion && window.confirm(
       "These items are included in Unlimited or are beverage add-ons. Convert this cart to the Unlimited cart? Included items are free; beverage add-ons are charged at menu price. Start an Unlimited package before confirming."
     )) {
-      setALaCarteDraftItems([]);
-      setUnlimitedDraftItems((items) => [...items, ...nextItems]);
-      setDraftKeys((keys) => ({ ...keys, ala_carte: crypto.randomUUID() }));
-      setOrderType("unlimited");
+      if (!writeDraftItems("dine_in_ala_carte", [])) return;
+      if (!writeDraftItems("dine_in_unlimited", [...carts.dine_in_unlimited.map(({ product, quantity: itemQuantity }) => ({
+        productId: product.id,
+        quantity: itemQuantity
+      })), ...nextItems])) return;
+      rotateDraftKey("dine_in_ala_carte");
+      changeOrderType("unlimited");
       setOrderReview(null);
     }
   }
@@ -773,18 +820,127 @@ export default function DiningService({
           <div>
             <p className="text-sm font-bold uppercase text-red-700">Point of sale</p>
             <h1 className="text-3xl font-black text-slate-950">
-              {boardOnly ? "Table board" : embedded ? "Dine-in ordering" : "Table service"}
+              {boardOnly ? "Table board" : reservationOnly ? "Today's reservations" : embedded ? "Dine-in ordering" : "Table service"}
             </h1>
           </div>
           <div className="flex flex-wrap items-center gap-3">
             {!boardOnly && <p className="text-sm text-slate-500">New dine-in orders deduct stock at Confirm &amp; Print; legacy kitchen tickets deduct when released.</p>}
-            {embedded && !boardOnly && onBackToBoard && (
+            {(boardOnly || reservationOnly) && onBackToBoard && (
+              <ActionButton tone="muted" onClick={onBackToBoard}>Back to POS</ActionButton>
+            )}
+            {embedded && !boardOnly && !reservationOnly && onBackToBoard && (
               <ActionButton tone="muted" onClick={onBackToBoard}>Back to table board</ActionButton>
             )}
-            <ActionButton tone="muted" onClick={() => setManageTablesOpen(true)}>Manage tables</ActionButton>
+            {boardOnly && <ActionButton tone="muted" className="min-h-8 px-2 text-xs" onClick={() => setManageTablesOpen(true)}>Manage Tables</ActionButton>}
+            {!embedded && !boardOnly && !reservationOnly && <ActionButton tone="muted" onClick={() => setManageTablesOpen(true)}>Manage tables</ActionButton>}
           </div>
         </header>
         {!embedded && <SectionNav orientation="horizontal" tabs={posTabs} />}
+        {boardOnly && (
+          <section aria-label="Table board" className="space-y-4">
+            <div className="flex flex-wrap gap-2 text-xs font-semibold" aria-label="Table status legend">
+              <span className="rounded bg-emerald-100 px-2 py-1 text-emerald-900">Free</span>
+              <span className="rounded bg-red-100 px-2 py-1 text-red-900">Occupied</span>
+              <span className="rounded bg-amber-100 px-2 py-1 text-amber-900">Reserved</span>
+              <span className="rounded bg-slate-200 px-2 py-1 text-slate-800">Unavailable</span>
+            </div>
+            {(tablesQuery.isError || upcomingReservationsQuery.isError) && (
+              <p role="alert" className="rounded bg-red-50 p-3 text-sm text-red-800">Unable to load table availability.</p>
+            )}
+            {tablesQuery.isLoading ? (
+              <p className="text-sm text-slate-600">Loading tables...</p>
+            ) : (
+              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+                {(tablesQuery.data ?? []).map((table) => {
+                  const status = normalizeTableStatus(table.status);
+                  const reservation = reservationsByTableNumber.get(table.table_number);
+                  const held = Boolean(reservation && ["upcoming", "late"].includes(reservation.state));
+                  const state = table.linked_to_table_id || (status !== "available" && status !== "occupied")
+                    ? "unavailable"
+                    : table.active_session || status === "occupied"
+                      ? "occupied"
+                      : held ? "reserved" : "free";
+                  const canSelect = boardPurpose === "walk_in"
+                    ? state === "free"
+                    : state === "occupied" && Boolean(table.active_session);
+                  const stateClass = state === "free"
+                    ? "border-emerald-300 bg-emerald-50 text-emerald-950"
+                    : state === "occupied"
+                      ? "border-red-300 bg-red-50 text-red-950"
+                      : state === "reserved"
+                        ? "border-amber-300 bg-amber-50 text-amber-950"
+                        : "border-slate-300 bg-slate-100 text-slate-800";
+                  const label = state[0].toUpperCase() + state.slice(1);
+                  const contents = (
+                    <>
+                      <span className="text-xl font-bold">Table {table.table_number}</span>
+                      <span className="text-sm">{table.capacity} seats</span>
+                      <span className="mt-2 inline-flex rounded-full bg-white/80 px-3 py-1 text-sm font-bold">{label}</span>
+                    </>
+                  );
+                  return canSelect ? (
+                    <button
+                      key={table.id}
+                      type="button"
+                      aria-label={`Select Table ${table.table_number}, ${label}`}
+                      className={`grid min-h-36 place-items-center rounded-xl border p-4 shadow-sm transition hover:scale-[1.01] ${stateClass}`}
+                      onClick={() => onTableSelected?.({
+                        tableId: table.id,
+                        tableNumber: table.table_number,
+                        sessionId: table.active_session?.id ?? null
+                      })}
+                    >
+                      {contents}
+                    </button>
+                  ) : (
+                    <article key={table.id} aria-label={`Table ${table.table_number}, ${label}`} className={`grid min-h-36 place-items-center rounded-xl border p-4 shadow-sm ${stateClass}`}>
+                      {contents}
+                    </article>
+                  );
+                })}
+                {(tablesQuery.data ?? []).length === 0 && (
+                  <p className="rounded border border-dashed p-5 text-sm text-slate-500">No tables are configured.</p>
+                )}
+              </div>
+            )}
+          </section>
+        )}
+        {reservationOnly && (
+          <section aria-label="Today's reservation list" className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+            {upcomingReservationsQuery.isError && <p role="alert" className="text-sm text-red-700">Unable to load today's reservations.</p>}
+            {upcomingReservationsQuery.isLoading ? (
+              <p className="text-sm text-slate-500">Loading reservations...</p>
+            ) : orderedReservations.length === 0 ? (
+              <p className="text-sm text-slate-500">No reservations are available today.</p>
+            ) : (
+              <ul className="divide-y divide-slate-100">
+                {orderedReservations.map((reservation) => (
+                  <li key={reservation.id} className="py-2 first:pt-0 last:pb-0">
+                    <button
+                      type="button"
+                      className="flex w-full flex-wrap items-center justify-between gap-3 rounded-lg p-3 text-left hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+                      disabled={reservation.state === "arrived"}
+                      onClick={() => onReservationSelected?.(reservation)}
+                    >
+                      <span>
+                        <span className="block font-semibold">{reservation.customer_name}</span>
+                        <span className="text-sm text-slate-600">{reservation.time} · {reservation.party_size} guests
+                          {reservation.table_numbers.length > 0 ? ` · Table${reservation.table_numbers.length === 1 ? "" : "s"} ${reservation.table_numbers.join(", ")}` : ""}
+                          {reservation.temporary_table_numbers.length > 0 ? ` · Temp ${reservation.temporary_table_numbers.join(", ")}` : ""}
+                        </span>
+                      </span>
+                      <span className={`rounded-full px-3 py-1 text-xs font-bold ${reservation.state === "late" ? "bg-red-100 text-red-800" : reservation.state === "arrived" ? "bg-emerald-100 text-emerald-800" : "bg-slate-100 text-slate-700"}`}>
+                        {reservation.state === "late" ? "Late" : reservation.state === "arrived" ? "Arrived" : "Upcoming"}
+                      </span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </section>
+        )}
+        {!boardOnly && !reservationOnly && (
+        <>
         {(tablesQuery.isError || sessionsQuery.isError || upcomingReservationsQuery.isError) && <p className="rounded bg-red-50 p-3 text-sm text-red-800">Unable to load dining tables, sessions, or upcoming reservations.</p>}
         {!boardOnly && completedTransaction && (
           <section className="rounded-xl border border-emerald-200 bg-emerald-50 p-4 shadow-sm">
@@ -819,7 +975,8 @@ export default function DiningService({
           <p role="alert" className="text-sm text-red-700">Unable to load the saved order for reprint.</p>
         )}
 
-        <div className="grid gap-5 xl:grid-cols-[0.85fr_1.4fr]">
+        <div className="grid gap-5">
+          {!embedded && (
           <section className="space-y-5">
             <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
               <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
@@ -901,7 +1058,7 @@ export default function DiningService({
                       if (
                         item.id !== selectedSessionId &&
                         hasDraftItems &&
-                        !window.confirm("Switching tables will discard this unconfirmed cart. Continue?")
+                        !window.confirm("Switching tables will keep this unconfirmed cart. Continue?")
                       ) {
                         return;
                       }
@@ -929,8 +1086,10 @@ export default function DiningService({
               </section>
             )}
           </section>
+          )}
 
           <section className="space-y-5">
+            {!embedded && (
             <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
               <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
                 <div>
@@ -996,39 +1155,16 @@ export default function DiningService({
                           <span className="whitespace-nowrap rounded bg-violet-800 px-2 py-1 text-xs font-bold text-white">Unlimited running</span>
                         )}
                       </div>
-                      {state === "free" && (
-                        <button
-                          className="mt-3 rounded bg-emerald-800 px-3 py-1.5 text-sm font-bold text-white hover:bg-emerald-900 disabled:opacity-50"
-                          disabled={runMutation.isPending || commitOrder.isPending}
-                          onClick={() => runAction("post", "/api/pos/dining/sessions", { tableId: table.id })}
-                        >
-                          Seat walk-in
-                        </button>
-                      )}
                     </article>
                   );
                 })}
                 {!tablesQuery.isLoading && (tablesQuery.data ?? []).length === 0 && (
-                  <p className="rounded border border-dashed p-5 text-sm text-slate-500 sm:col-span-2 xl:col-span-3">No active tables are configured.</p>
+                      <p className="rounded border border-dashed p-5 text-sm text-slate-500 sm:col-span-2 xl:col-span-3">No active tables are configured.</p>
+                    )}
+                  </div>
+                </section>
                 )}
-              </div>
-            </section>
-            {boardOnly ? (
-              <section aria-label="Selected existing table" className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-                {session ? (
-                  <>
-                    <h2 className="text-lg font-bold">Table {session.table.table_number} selected</h2>
-                    <p className="mt-2 text-sm text-slate-600">
-                      Select an active table to open its dine-in order.
-                    </p>
-                  </>
-                ) : (
-                  <p className="text-sm text-slate-600">
-                    Select an active table or seat a walk-in or reservation from the board.
-                  </p>
-                )}
-              </section>
-            ) : !session ? (
+                {!session ? (
               <section className="grid min-h-64 place-items-center rounded-xl border border-dashed border-slate-300 bg-white p-6 text-center text-slate-500">
                 Select an active table to prepare and confirm orders or check out.
               </section>
@@ -1050,15 +1186,13 @@ export default function DiningService({
                 <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
                   <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
                     <h2 className="text-lg font-bold">Dine-in order</h2>
-                    <div aria-label="Order carts" className="flex flex-wrap gap-2" role="group">
+                    {!embedded && <div aria-label="Order carts" className="flex flex-wrap gap-2" role="group">
                       <button
                         aria-pressed={orderType === "ala_carte"}
                         className={`rounded border px-3 py-2 text-sm font-bold ${orderType === "ala_carte" ? "border-slate-900 bg-slate-900 text-white" : "border-slate-300 bg-white"}`}
                         disabled={orderControlsDisabled}
                         onClick={() => {
-                          setOrderType("ala_carte");
-                          setProductId("");
-                          setOrderReview(null);
+                          changeOrderType("ala_carte");
                         }}
                       >
                         A la carte ({aLaCarteDraftItems.length})
@@ -1068,14 +1202,12 @@ export default function DiningService({
                         className={`rounded border px-3 py-2 text-sm font-bold ${orderType === "unlimited" ? "border-violet-900 bg-violet-900 text-white" : "border-slate-300 bg-white"}`}
                         disabled={orderControlsDisabled}
                         onClick={() => {
-                          setOrderType("unlimited");
-                          setProductId("");
-                          setOrderReview(null);
+                          changeOrderType("unlimited");
                         }}
                       >
                         Unlimited ({unlimitedDraftItems.length})
                       </button>
-                    </div>
+                    </div>}
                   </div>
                   {orderType === "unlimited" && (
                     <div className="mb-3 flex flex-wrap items-end gap-2">
@@ -1118,7 +1250,7 @@ export default function DiningService({
                         </div>
                       ) : (
                         <>
-                          <label className="grid gap-1 text-sm">Unlimited headcount
+                          {!embedded && <label className="grid gap-1 text-sm">Unlimited headcount
                             <input
                               className="h-10 w-32 rounded border border-slate-300 px-2"
                               type="number"
@@ -1126,9 +1258,9 @@ export default function DiningService({
                               max={100}
                               step={1}
                               value={packageCovers}
-                              onChange={(event) => setPackageCovers(Number(event.target.value))}
+                              onChange={(event) => setDineHeadcount(Number(event.target.value))}
                             />
-                          </label>
+                          </label>}
                           {unlimitedSettingsQuery.isError && <p className="text-sm text-red-700">Unlimited pricing could not be loaded.</p>}
                           <ActionButton
                             disabled={runMutation.isPending || unlimitedSettingsQuery.isLoading || unlimitedSettingsQuery.isError || !Number.isInteger(packageCovers) || packageCovers < 1 || packageCovers > 100}
@@ -1175,7 +1307,7 @@ export default function DiningService({
                               )}
                             </span>
                             <button className="text-red-700 underline disabled:opacity-50" disabled={orderControlsDisabled} onClick={() => {
-                              setDraftItems((items) => items.filter((_, itemIndex) => itemIndex !== index));
+                              writeDraftItems(cartKey, draftItems.filter((_, itemIndex) => itemIndex !== index));
                               setOrderReview(null);
                             }}>Remove</button>
                           </li>
@@ -1286,6 +1418,8 @@ export default function DiningService({
             )}
           </section>
         </div>
+        </>
+        )}
         <Dialog
           open={manageTablesOpen}
           title="Manage tables"

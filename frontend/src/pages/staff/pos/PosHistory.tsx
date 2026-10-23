@@ -1,8 +1,7 @@
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Download, Eye, Printer, RotateCcw, Settings, ShoppingCart } from "lucide-react";
+import { Download, Eye, Printer, RotateCcw } from "lucide-react";
 import { Link } from "react-router-dom";
-import SectionNav, { SectionNavTab } from "../../../components/layout/SectionNav";
 import TransactionDetailsModal, { PosHistoryTransaction } from "../../../components/pos/TransactionDetailsModal";
 import { Button } from "../../../components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "../../../components/ui/card";
@@ -11,6 +10,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from ".
 import { api } from "../../../lib/api";
 import { useToast } from "../../../hooks/useToast";
 import { formatManilaDateTime, todayManilaDateKey } from "../../../lib/dateTime";
+import PosHeader from "./PosHeader";
 
 type PosSummary = {
   totalSales: number;
@@ -26,12 +26,6 @@ type HistoryTable = {
   is_archived: boolean;
   is_temporary: boolean;
 };
-
-const posTabs: Array<SectionNavTab> = [
-  { id: "new-sale", label: "Takeout Sale", icon: <ShoppingCart className="h-4 w-4" />, to: "/staff/pos", end: true },
-  { id: "history", label: "Transaction History", icon: <Printer className="h-4 w-4" />, to: "/staff/pos/history" },
-  { id: "settings", label: "Unlimited Settings", icon: <Settings className="h-4 w-4" />, to: "/staff/pos/unlimited-settings" }
-];
 
 function today() {
   return todayManilaDateKey();
@@ -188,11 +182,8 @@ export default function PosHistory() {
   return (
     <main className="min-h-screen bg-slate-100 px-4 py-6 lg:pl-4 lg:pr-8">
       <div className="grid w-full gap-5">
-        <div className="flex flex-col gap-2 md:flex-row md:items-end md:justify-between">
-          <div>
-            <p className="text-sm font-medium uppercase text-red-700">Point of Sale</p>
-            <h1 className="text-3xl font-semibold text-slate-950">Transaction History</h1>
-          </div>
+        <PosHeader section="Transaction History" showBack />
+        <div className="flex justify-end">
           <div className="flex gap-2">
             <Button variant="outline" disabled={exporting || !pagination} onClick={handleExport}>
               <Download className="mr-2 h-4 w-4" />
@@ -201,12 +192,7 @@ export default function PosHistory() {
           </div>
         </div>
 
-        <div className="grid gap-5 lg:grid-cols-[220px_minmax(0,1fr)] lg:items-start">
-          <aside className="lg:sticky lg:top-6">
-            <SectionNav orientation="vertical" tabs={posTabs} />
-          </aside>
-
-          <section className="grid min-w-0 gap-5">
+        <section className="grid min-w-0 gap-5">
             <Card>
               <CardHeader>
                 <CardTitle>Filters</CardTitle>
@@ -419,8 +405,7 @@ export default function PosHistory() {
                 )}
               </CardContent>
             </Card>
-          </section>
-        </div>
+        </section>
       </div>
 
       <TransactionDetailsModal

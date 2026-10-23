@@ -57,6 +57,78 @@ const checkoutBodySchema = z.object({
   paymentMethod: z.enum(["cash", "gcash", "bank_transfer"]),
   cashReceived: z.coerce.number().nonnegative().optional()
 }).superRefine(refineCheckoutHeadcount);
+const diningOrderItemSchema = z.object({
+  productId: z.string().min(1),
+  orderType: z.enum(["ala_carte", "unlimited"]).optional(),
+  guestNumber: z.coerce.number().int().positive().optional(),
+  quantity: z.coerce.number().int().min(1).max(100),
+  expectedUnitPrice: z.coerce.number().finite().min(0).refine(
+    (value) => Math.abs(value * 100 - Math.round(value * 100)) < 1e-8,
+    "Expected unit price must be in cents."
+  )
+});
+const diningOrderCommitSchema = z.object({
+  idempotencyKey: z.string().min(16).max(128),
+  orderType: z.enum(["ala_carte", "unlimited"]),
+  unlimitedSessionId: z.string().min(1).optional(),
+  items: z.array(diningOrderItemSchema).min(1).max(100)
+}).superRefine((value, context) => {
+  if (value.orderType === "unlimited" && !value.unlimitedSessionId) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["unlimitedSessionId"],
+      message: "Choose an active Unlimited package."
+    });
+  }
+  if (value.orderType === "ala_carte" && value.unlimitedSessionId) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["unlimitedSessionId"],
+      message: "A la carte tickets cannot use an Unlimited package."
+    });
+  }
+  if (value.items.some((item) => item.orderType === "unlimited") && value.orderType !== "unlimited") {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["orderType"],
+      message: "Unlimited items require an Unlimited order."
+    });
+  }
+});
+const atomicDiningConfirmationSchema = z.object({
+  selection: z.discriminatedUnion("type", [
+    z.object({ type: z.literal("session"), sessionId: z.string().min(1) }),
+    z.object({ type: z.literal("table"), tableId: z.string().min(1) }),
+    z.object({ type: z.literal("reservation"), reservationId: z.string().min(1) })
+  ]),
+  idempotencyKey: z.string().min(16).max(128),
+  orderType: z.enum(["ala_carte", "unlimited"]),
+  unlimitedSessionId: z.string().min(1).optional(),
+  paxCount: z.coerce.number().int().positive().max(100).optional(),
+  items: z.array(diningOrderItemSchema).min(1).max(100)
+}).superRefine((value, context) => {
+  if (value.orderType === "unlimited" && !value.paxCount) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["paxCount"],
+      message: "Choose the number of Unlimited guests."
+    });
+  }
+  if (value.orderType === "ala_carte" && (value.unlimitedSessionId || value.paxCount !== undefined)) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["paxCount"],
+      message: "A la carte orders cannot start an Unlimited package."
+    });
+  }
+  if (value.items.some((item) => item.orderType === "unlimited") && value.orderType !== "unlimited") {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["orderType"],
+      message: "Unlimited items require an Unlimited order."
+    });
+  }
+});
 type AuthenticatedRequest = Request & { user?: { sub: string } };
 let committedOrderStatusCache: { allowed: boolean; expiresAt: number } | null = null;
 
@@ -276,6 +348,167 @@ async function findInventoryNeeds(
   return Array.from(needs.values()).sort((a, b) => a.raw_material_id.localeCompare(b.raw_material_id));
 }
 
+async function commitDineInOrder(
+  tx: Prisma.TransactionClient,
+  sessionId: string,
+  creatorId: string,
+  body: z.infer<typeof diningOrderCommitSchema>,
+  orderNumber: string
+) {
+  await tx.$queryRaw<Array<{ id: string }>>`
+    SELECT id FROM dining_table_sessions WHERE id = ${sessionId} FOR UPDATE
+  `;
+  const session = await tx.diningTableSession.findUnique({
+    where: { id: sessionId },
+    include: { table: true, guests: true }
+  });
+  if (!session || session.status !== "active") {
+    throw new InventoryError("Active dining session not found.", "SESSION_NOT_FOUND", 404);
+  }
+  if (body.orderType === "unlimited") {
+    await tx.$queryRaw<Array<{ id: string }>>`
+      SELECT id FROM unlimited_sessions WHERE id = ${body.unlimitedSessionId!} FOR UPDATE
+    `;
+    const unlimitedSession = await tx.unlimitedSession.findFirst({
+      where: {
+        id: body.unlimitedSessionId,
+        dining_session_id: sessionId,
+        status: "active"
+      },
+      select: { id: true }
+    });
+    if (!unlimitedSession) {
+      throw new InventoryError(
+        "Start an active Unlimited package for this table before confirming the Unlimited cart.",
+        "UNLIMITED_SESSION_NOT_ACTIVE",
+        409
+      );
+    }
+  }
+
+  const racedOrder = await tx.diningOrder.findUnique({
+    where: { idempotency_key: body.idempotencyKey },
+    include: { items: { include: { guest: true } } }
+  });
+  if (racedOrder) {
+    if (!isSameOrderRequest(racedOrder, body, sessionId)) {
+      throw new InventoryError("This order key is already tied to a different order.", "IDEMPOTENCY_CONFLICT", 409);
+    }
+    return { order: racedOrder, replayed: true };
+  }
+
+  const guestByNumber = new Map(session.guests.map((guest) => [guest.guest_number, guest]));
+  if (body.items.some((item) => item.guestNumber !== undefined && !guestByNumber.has(item.guestNumber))) {
+    throw new InventoryError("Choose a valid customer number for every item.", "GUEST_NOT_FOUND", 400);
+  }
+
+  const products = await tx.sellingProduct.findMany({
+    where: {
+      id: { in: body.items.map((item) => item.productId) },
+      is_deleted: false
+    },
+    include: {
+      unlimited_included_products: true,
+      recipes: { include: { recipe_ingredients: { include: { raw_material: true } } } }
+    }
+  });
+  const productsById = new Map(products.map((product) => [product.id, product]));
+  for (const item of body.items) {
+    const product = productsById.get(item.productId);
+    if (!product || !product.is_available) {
+      throw new InventoryError("A selected product is unavailable.", "PRODUCT_UNAVAILABLE", 409);
+    }
+    const isIncluded = product.unlimited_included_products.some((entry) => entry.is_included);
+    const itemOrderType = item.orderType ?? body.orderType;
+    const cartType: DiningCartType = itemOrderType === "ala_carte" ? "a_la_carte" : "unlimited";
+    const compatibility = getProductCartCompatibility({
+      name: product.name,
+      category: product.category,
+      is_included: isIncluded,
+      is_sold_a_la_carte: product.is_sold_a_la_carte
+    }, cartType);
+    if (!compatibility.allowed) {
+      const code = compatibility.classification === "unlimited_only"
+        ? "PRODUCT_NOT_SOLD_A_LA_CARTE"
+        : compatibility.classification === "a_la_carte_only"
+          ? "PRODUCT_NOT_INCLUDED_IN_UNLIMITED"
+          : "PRODUCT_NOT_SELLABLE";
+      throw new InventoryError(compatibility.message ?? "This product is not available in the selected cart.", code, 409);
+    }
+    const expectedPrice = itemOrderType === "unlimited"
+      && (compatibility.classification === "included_in_unlimited" || compatibility.classification === "unlimited_only")
+      ? 0
+      : money(Number(product.price));
+    if (expectedPrice !== money(item.expectedUnitPrice)) {
+      throw new InventoryError(
+        `${product.name}'s price has changed. Review the order again before confirming.`,
+        "PRODUCT_PRICE_CHANGED",
+        409
+      );
+    }
+  }
+
+  const needs = await findInventoryNeeds(tx, body.items.map((item) => ({
+    productId: item.productId,
+    quantity: item.quantity
+  })), products);
+  const created = await tx.diningOrder.create({
+    data: {
+      order_number: orderNumber,
+      idempotency_key: body.idempotencyKey,
+      dining_session_id: sessionId,
+      table_number_snapshot: session.table.table_number,
+      unlimited_session_id: body.orderType === "unlimited" ? body.unlimitedSessionId : null,
+      order_type: body.orderType,
+      status: "committed",
+      created_by: creatorId,
+      items: {
+        create: body.items.map((item) => {
+          const product = productsById.get(item.productId)!;
+          const isIncluded = product.unlimited_included_products.some((entry) => entry.is_included);
+          const itemOrderType = item.orderType ?? body.orderType;
+          const compatibility = getProductCartCompatibility({
+            name: product.name,
+            category: product.category,
+            is_included: isIncluded,
+            is_sold_a_la_carte: product.is_sold_a_la_carte
+          }, itemOrderType === "ala_carte" ? "a_la_carte" : "unlimited");
+          const price = itemOrderType === "unlimited"
+            && (compatibility.classification === "included_in_unlimited" || compatibility.classification === "unlimited_only")
+            ? 0
+            : money(Number(product.price));
+          return {
+            guest_id: item.guestNumber === undefined ? null : guestByNumber.get(item.guestNumber)!.id,
+            selling_product_id: product.id,
+            name_snapshot: product.name,
+            quantity: item.quantity,
+            unit_price: price,
+            total_price: money(price * item.quantity)
+          };
+        })
+      }
+    },
+    include: {
+      items: { include: { guest: true } },
+      dining_session: { include: { table: true } },
+      ingredient_locks: true
+    }
+  });
+
+  for (const need of needs) {
+    await consumeMaterialStock(tx, {
+      raw_material_id: need.raw_material_id,
+      quantity: need.quantity,
+      source_type: "dine-in",
+      source_reference: orderNumber,
+      actor_id: creatorId,
+      note: "Dine-in a la carte order committed",
+      action: "Used"
+    });
+  }
+  return { order: created, replayed: false };
+}
+
 async function buildCheckout(
   session: NonNullable<Awaited<ReturnType<typeof getDiningSession>>>,
   headcount: { guestCount: number; seniorPwdCount: number }
@@ -324,8 +557,11 @@ async function buildCheckout(
   );
   const leftoverAmount = leftoverLines.reduce((total, item) => total + item.total, 0);
   const subtotal = money(aLaCarteAmount + unlimitedOrderAmount + unlimitedAmount + leftoverAmount);
+  const discountBase = aLaCarteAmount + unlimitedOrderItems
+    .filter((item) => Number(item.total_price) > 0)
+    .reduce((total, item) => total + Number(item.total_price), 0);
   const discount = calculateSeniorPwdDiscount({
-    aLaCarteTotal: money(aLaCarteAmount),
+    aLaCarteTotal: money(discountBase),
     guestCount: headcount.guestCount,
     seniorPwdCount: headcount.seniorPwdCount,
     discountRate: SENIOR_PWD_DISCOUNT_RATE
@@ -996,6 +1232,7 @@ router.get(
       where: { id: orderId, status: "committed" },
       select: {
         id: true,
+        dining_session_id: true,
         order_number: true,
         table_number_snapshot: true,
         created_at: true,
@@ -1022,27 +1259,7 @@ router.post(
   "/api/pos/dining/sessions/:id/orders",
   roleGuard(["admin", "cashier"]),
   asyncRoute(async (req, res) => {
-    const body = z.object({
-      idempotencyKey: z.string().min(16).max(128),
-      orderType: z.enum(["ala_carte", "unlimited"]),
-      unlimitedSessionId: z.string().min(1).optional(),
-      items: z.array(z.object({
-        productId: z.string().min(1),
-        guestNumber: z.coerce.number().int().positive().optional(),
-        quantity: z.coerce.number().int().min(1).max(100),
-        expectedUnitPrice: z.coerce.number().finite().min(0).refine(
-          (value) => Math.abs(value * 100 - Math.round(value * 100)) < 1e-8,
-          "Expected unit price must be in cents."
-        )
-      })).min(1).max(100)
-    }).superRefine((value, context) => {
-      if (value.orderType === "unlimited" && !value.unlimitedSessionId) {
-        context.addIssue({ code: z.ZodIssueCode.custom, path: ["unlimitedSessionId"], message: "Choose an active Unlimited package." });
-      }
-      if (value.orderType === "ala_carte" && value.unlimitedSessionId) {
-        context.addIssue({ code: z.ZodIssueCode.custom, path: ["unlimitedSessionId"], message: "A la carte tickets cannot use an Unlimited package." });
-      }
-    }).parse(req.body);
+    const body = diningOrderCommitSchema.parse(req.body);
     if (!(await isCommittedOrderStatusAllowed())) {
       throw new InventoryError(
         "Order commit is not available until the pending database migration is deployed",
@@ -1065,152 +1282,9 @@ router.post(
 
     const orderNumber = makeReference("DIN");
     try {
-      const result = await prisma.$transaction(async (tx) => {
-        await tx.$queryRaw<Array<{ id: string }>>`
-          SELECT id FROM dining_table_sessions WHERE id = ${sessionId} FOR UPDATE
-        `;
-        const session = await tx.diningTableSession.findUnique({
-          where: { id: sessionId },
-          include: { table: true, guests: true }
-        });
-        if (!session || session.status !== "active") {
-          throw new InventoryError("Active dining session not found.", "SESSION_NOT_FOUND", 404);
-        }
-        if (body.orderType === "unlimited") {
-          await tx.$queryRaw<Array<{ id: string }>>`
-            SELECT id FROM unlimited_sessions WHERE id = ${body.unlimitedSessionId!} FOR UPDATE
-          `;
-          const unlimitedSession = await tx.unlimitedSession.findFirst({
-            where: {
-              id: body.unlimitedSessionId,
-              dining_session_id: sessionId,
-              status: "active"
-            },
-            select: { id: true }
-          });
-          if (!unlimitedSession) {
-            throw new InventoryError(
-              "Start an active Unlimited package for this table before confirming the Unlimited cart.",
-              "UNLIMITED_SESSION_NOT_ACTIVE",
-              409
-            );
-          }
-        }
-
-        const racedOrder = await tx.diningOrder.findUnique({
-          where: { idempotency_key: body.idempotencyKey },
-          include: { items: { include: { guest: true } } }
-        });
-        if (racedOrder) {
-          if (!isSameOrderRequest(racedOrder, body, sessionId)) {
-            throw new InventoryError("This order key is already tied to a different order.", "IDEMPOTENCY_CONFLICT", 409);
-          }
-          return { order: racedOrder, replayed: true };
-        }
-
-        const guestByNumber = new Map(session.guests.map((guest) => [guest.guest_number, guest]));
-        if (body.items.some((item) => item.guestNumber !== undefined && !guestByNumber.has(item.guestNumber))) {
-          throw new InventoryError("Choose a valid customer number for every item.", "GUEST_NOT_FOUND", 400);
-        }
-
-        const products = await tx.sellingProduct.findMany({
-          where: {
-            id: { in: body.items.map((item) => item.productId) },
-            is_deleted: false
-          },
-          include: {
-            unlimited_included_products: true,
-            recipes: { include: { recipe_ingredients: { include: { raw_material: true } } } }
-          }
-        });
-        const productsById = new Map(products.map((product) => [product.id, product]));
-        for (const item of body.items) {
-          const product = productsById.get(item.productId);
-          if (!product || !product.is_available) {
-            throw new InventoryError("A selected product is unavailable.", "PRODUCT_UNAVAILABLE", 409);
-          }
-          const isIncluded = product.unlimited_included_products.some((entry) => entry.is_included);
-          const cartType: DiningCartType = body.orderType === "ala_carte" ? "a_la_carte" : "unlimited";
-          const compatibility = getProductCartCompatibility({
-            name: product.name,
-            category: product.category,
-            is_included: isIncluded,
-            is_sold_a_la_carte: product.is_sold_a_la_carte
-          }, cartType);
-          if (!compatibility.allowed) {
-            const code = compatibility.classification === "unlimited_only"
-              ? "PRODUCT_NOT_SOLD_A_LA_CARTE"
-              : compatibility.classification === "a_la_carte_only"
-                ? "PRODUCT_NOT_INCLUDED_IN_UNLIMITED"
-                : "PRODUCT_NOT_SELLABLE";
-            throw new InventoryError(compatibility.message ?? "This product is not available in the selected cart.", code, 409);
-          }
-          const expectedPrice = body.orderType === "unlimited" && isIncluded
-            ? 0
-            : money(Number(product.price));
-          if (expectedPrice !== money(item.expectedUnitPrice)) {
-            throw new InventoryError(
-              `${product.name}'s price has changed. Review the order again before confirming.`,
-              "PRODUCT_PRICE_CHANGED",
-              409
-            );
-          }
-        }
-
-        const requestedForInventory = body.items.map((item) => ({
-          productId: item.productId,
-          quantity: item.quantity
-        }));
-        const needs = await findInventoryNeeds(tx, requestedForInventory, products);
-
-        const created = await tx.diningOrder.create({
-          data: {
-            order_number: orderNumber,
-            idempotency_key: body.idempotencyKey,
-            dining_session_id: sessionId,
-            table_number_snapshot: session.table.table_number,
-            unlimited_session_id: body.orderType === "unlimited" ? body.unlimitedSessionId : null,
-            order_type: body.orderType,
-            status: "committed",
-            created_by: creatorId,
-            items: {
-              create: body.items.map((item) => {
-                const product = productsById.get(item.productId)!;
-                const isIncluded = product.unlimited_included_products.some((entry) => entry.is_included);
-                const price = body.orderType === "unlimited" && isIncluded
-                  ? 0
-                  : money(Number(product.price));
-                return {
-                  guest_id: item.guestNumber === undefined ? null : guestByNumber.get(item.guestNumber)!.id,
-                  selling_product_id: product.id,
-                  name_snapshot: product.name,
-                  quantity: item.quantity,
-                  unit_price: price,
-                  total_price: money(price * item.quantity)
-                };
-              })
-            },
-          },
-          include: {
-            items: { include: { guest: true } },
-            dining_session: { include: { table: true } },
-            ingredient_locks: true
-          }
-        });
-
-        for (const need of needs) {
-          await consumeMaterialStock(tx, {
-            raw_material_id: need.raw_material_id,
-            quantity: need.quantity,
-            source_type: "dine-in",
-            source_reference: orderNumber,
-            actor_id: creatorId,
-            note: "Dine-in a la carte order committed",
-            action: "Used"
-          });
-        }
-        return { order: created, replayed: false };
-      });
+      const result = await prisma.$transaction((tx) =>
+        commitDineInOrder(tx, sessionId, creatorId, body, orderNumber)
+      );
       return res.status(result.replayed ? 200 : 201).json(result);
     } catch (error) {
       if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
@@ -1224,6 +1298,282 @@ router.post(
         if (raced) {
           throw new InventoryError("This order key is already tied to a different order.", "IDEMPOTENCY_CONFLICT", 409);
         }
+      }
+      throw error;
+    }
+  })
+);
+
+router.post(
+  "/api/pos/dining/confirm-order",
+  roleGuard(["admin", "cashier"]),
+  asyncRoute(async (req, res) => {
+    const body = atomicDiningConfirmationSchema.parse(req.body);
+    if (!(await isCommittedOrderStatusAllowed())) {
+      throw new InventoryError(
+        "Order commit is not available until the pending database migration is deployed",
+        "ORDER_COMMIT_MIGRATION_PENDING",
+        503
+      );
+    }
+
+    const creatorId = actorId(req);
+    const orderNumber = makeReference("DIN");
+    const findReplay = async (client: Prisma.TransactionClient | typeof prisma) => {
+      const existing = await client.diningOrder.findUnique({
+        where: { idempotency_key: body.idempotencyKey },
+        include: {
+          items: { include: { guest: true } },
+          dining_session: { select: { id: true, table_id: true } }
+        }
+      });
+      if (!existing) return null;
+
+      const comparable = {
+        ...body,
+        unlimitedSessionId: body.unlimitedSessionId ?? existing.unlimited_session_id ?? undefined
+      };
+      if (!isSameOrderRequest(existing, comparable, existing.dining_session_id)) {
+        throw new InventoryError("This order key is already tied to a different order.", "IDEMPOTENCY_CONFLICT", 409);
+      }
+
+      const selectionMatches = body.selection.type === "session"
+        ? existing.dining_session_id === body.selection.sessionId
+        : body.selection.type === "table"
+          ? existing.dining_session.table_id === body.selection.tableId
+          : Boolean(await client.reservationTableAssignment.findFirst({
+            where: {
+              reservation_id: body.selection.reservationId,
+              table_id: existing.dining_session.table_id,
+              status: "seated"
+            },
+            select: { id: true }
+          }));
+      if (!selectionMatches) {
+        throw new InventoryError("This order key is already tied to a different table or reservation.", "IDEMPOTENCY_CONFLICT", 409);
+      }
+      return { order: existing, replayed: true };
+    };
+
+    const replay = await findReplay(prisma);
+    if (replay) return res.json(replay);
+
+    try {
+      const result = await prisma.$transaction(async (tx) => {
+        if (body.selection.type !== "session") {
+          await lockTablesInStableOrder(tx);
+        } else {
+          await tx.$queryRaw<Array<{ id: string }>>`
+            SELECT id FROM dining_table_sessions WHERE id = ${body.selection.sessionId} FOR UPDATE
+          `;
+        }
+
+        if (body.selection.type === "reservation") {
+          await tx.$queryRaw<Array<{ id: string }>>`
+            SELECT id FROM reservations WHERE id = ${body.selection.reservationId} FOR UPDATE
+          `;
+        }
+        const transactionReplay = await findReplay(tx);
+        if (transactionReplay) return transactionReplay;
+
+        let sessionId: string;
+        if (body.selection.type === "session") {
+          const session = await tx.diningTableSession.findUnique({
+            where: { id: body.selection.sessionId },
+            select: { id: true, status: true }
+          });
+          if (!session || session.status !== "active") {
+            throw new InventoryError("Active dining session not found.", "SESSION_NOT_FOUND", 404);
+          }
+          sessionId = session.id;
+        } else if (body.selection.type === "table") {
+          const table = await tx.table.findUnique({ where: { id: body.selection.tableId } });
+          if (!table) throw new InventoryError("Table not found.", "TABLE_NOT_FOUND", 404);
+          if (table.is_archived || normalizeTableStatus(table.status) !== "available" || table.linked_to_table_id) {
+            throw new InventoryError("Choose a live table marked available.", "TABLE_NOT_AVAILABLE", 409);
+          }
+          const active = await tx.diningTableSession.findFirst({
+            where: { table_id: table.id, status: "active" },
+            select: { id: true }
+          });
+          if (active) {
+            throw new InventoryError("This table already has an active dining session.", "TABLE_OCCUPIED", 409);
+          }
+          const session = await tx.diningTableSession.create({
+            data: { table_id: table.id, cashier_id: creatorId }
+          });
+          await tx.table.update({ where: { id: table.id }, data: { status: "occupied" } });
+          sessionId = session.id;
+        } else {
+          const reservation = await tx.reservation.findUnique({
+            where: { id: body.selection.reservationId },
+            include: {
+              table_assignments: {
+                where: { status: "assigned" },
+                orderBy: [{ table: { table_number: "asc" } }, { table_id: "asc" }],
+                include: {
+                  table: {
+                    include: {
+                      dining_sessions: {
+                        where: { status: "active" },
+                        take: 1,
+                        select: { id: true }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          });
+          if (!reservation) {
+            throw new InventoryError("Reservation not found.", "BOOKING_NOT_FOUND", 404);
+          }
+          if (!["confirmed", "approved"].includes(reservation.status)) {
+            throw new InventoryError(
+              reservation.status === "seated"
+                ? "This reservation has already been seated."
+                : `This reservation cannot be seated while it is ${reservation.status}.`,
+              "BOOKING_NOT_READY_TO_SEAT",
+              409
+            );
+          }
+          const today = new Intl.DateTimeFormat("en-CA", {
+            timeZone: "Asia/Manila",
+            year: "numeric",
+            month: "2-digit",
+            day: "2-digit"
+          }).format(new Date());
+          const reservationDate = new Intl.DateTimeFormat("en-CA", {
+            timeZone: "Asia/Manila",
+            year: "numeric",
+            month: "2-digit",
+            day: "2-digit"
+          }).format(reservation.date);
+          if (reservationDate !== today) {
+            throw new InventoryError(
+              "Only today's reservations can be seated from the POS.",
+              "BOOKING_NOT_TODAY",
+              409
+            );
+          }
+          const assignments = reservation.table_assignments;
+          if (assignments.length === 0) {
+            throw new InventoryError(
+              "This reservation has no active table assignments.",
+              "BOOKING_TABLE_ASSIGNMENTS_MISSING",
+              409
+            );
+          }
+          const unavailableTables = assignments.filter(({ table }) =>
+            table.is_archived ||
+            normalizeTableStatus(table.status) !== "available" ||
+            Boolean(table.linked_to_table_id) ||
+            table.dining_sessions.length > 0
+          );
+          if (unavailableTables.length > 0) {
+            throw new InventoryError(
+              "An assigned table is occupied or unavailable. Offer the customer a temporary table.",
+              "RESERVATION_TABLE_UNAVAILABLE",
+              409
+            );
+          }
+
+          const [primaryAssignment, ...linkedAssignments] = assignments;
+          const session = await tx.diningTableSession.create({
+            data: { table_id: primaryAssignment.table_id, cashier_id: creatorId }
+          });
+          await tx.table.update({
+            where: { id: primaryAssignment.table_id },
+            data: { status: "occupied" }
+          });
+          for (const assignment of linkedAssignments) {
+            await tx.table.update({
+              where: { id: assignment.table_id },
+              data: {
+                status: "unavailable",
+                linked_to_table_id: primaryAssignment.table_id,
+                unavailable_reason: `Linked to reservation at table ${primaryAssignment.table.table_number}`
+              }
+            });
+          }
+          const updatedAssignments = await tx.reservationTableAssignment.updateMany({
+            where: { reservation_id: reservation.id, status: "assigned" },
+            data: { status: "seated" }
+          });
+          if (updatedAssignments.count !== assignments.length) {
+            throw new InventoryError(
+              "The reservation's table assignments changed while seating. Refresh and try again.",
+              "RESERVATION_ASSIGNMENTS_CHANGED",
+              409
+            );
+          }
+          await tx.reservation.update({
+            where: { id: reservation.id },
+            data: { status: "seated" }
+          });
+          await tx.reservationActivity.create({
+            data: {
+              reservation_id: reservation.id,
+              event_type: "status_changed",
+              from_status: reservation.status,
+              to_status: "seated",
+              actor_type: "staff",
+              actor_id: creatorId,
+              reason: "Guests seated from POS"
+            }
+          });
+          sessionId = session.id;
+        }
+
+        const orderBody: z.infer<typeof diningOrderCommitSchema> = {
+          idempotencyKey: body.idempotencyKey,
+          orderType: body.orderType,
+          items: body.items
+        };
+        if (body.orderType === "unlimited") {
+          const activeUnlimited = await tx.unlimitedSession.findFirst({
+            where: { dining_session_id: sessionId, status: "active" },
+            select: { id: true }
+          });
+          if (body.unlimitedSessionId) {
+            orderBody.unlimitedSessionId = body.unlimitedSessionId;
+          } else if (activeUnlimited) {
+            orderBody.unlimitedSessionId = activeUnlimited.id;
+          } else {
+            const settings = await tx.unlimitedSetting.findFirst();
+            if (!settings) {
+              throw new InventoryError("Unlimited pricing settings are unavailable.", "UNLIMITED_SETTINGS_MISSING", 503);
+            }
+            const startedAt = new Date();
+            const unlimited = await tx.unlimitedSession.create({
+              data: {
+                dining_session_id: sessionId,
+                table_id: (await tx.diningTableSession.findUniqueOrThrow({
+                  where: { id: sessionId },
+                  select: { table_id: true }
+                })).table_id,
+                pax_count: body.paxCount!,
+                price_per_pax: settings.price_per_person,
+                total_paid: 0,
+                time_limit_minutes: settings.time_limit_minutes,
+                started_at: startedAt,
+                first_round_at: startedAt,
+                ends_at: new Date(startedAt.getTime() + settings.time_limit_minutes * 60_000),
+                status: "active",
+                cashier_id: creatorId
+              }
+            });
+            orderBody.unlimitedSessionId = unlimited.id;
+          }
+        }
+
+        return commitDineInOrder(tx, sessionId, creatorId, orderBody, orderNumber);
+      });
+      return res.status(result.replayed ? 200 : 201).json(result);
+    } catch (error) {
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
+        const raced = await findReplay(prisma);
+        if (raced) return res.json(raced);
       }
       throw error;
     }

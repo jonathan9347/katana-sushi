@@ -1,12 +1,11 @@
 import { FormEvent, useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Printer, Settings, ShoppingCart } from "lucide-react";
 import { Link } from "react-router-dom";
-import SectionNav, { SectionNavTab } from "../../components/layout/SectionNav";
 import { Button } from "../../components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "../../components/ui/card";
 import { api } from "../../lib/api";
 import { useToast } from "../../hooks/useToast";
+import PosHeader from "../staff/pos/PosHeader";
 
 type UnlimitedSettingsRecord = {
   price_per_person: number;
@@ -22,12 +21,6 @@ type IncludedProduct = {
   price: number;
   is_included: boolean;
 };
-
-const posTabs: Array<SectionNavTab> = [
-  { id: "new-sale", label: "New Sale", icon: <ShoppingCart className="h-4 w-4" />, to: "/staff/pos", end: true },
-  { id: "history", label: "Transaction History", icon: <Printer className="h-4 w-4" />, to: "/staff/pos/history" },
-  { id: "settings", label: "Unlimited Settings", icon: <Settings className="h-4 w-4" />, to: "/staff/pos/unlimited-settings" }
-];
 
 function getStoredRole() {
   if (!localStorage.getItem("katana_token")) {
@@ -130,19 +123,9 @@ export default function UnlimitedSettings() {
   return (
     <main className="min-h-screen bg-slate-100 px-4 py-6 lg:pl-4 lg:pr-8">
       <div className="grid w-full gap-5">
-        <div className="flex flex-col gap-2 md:flex-row md:items-end md:justify-between">
-          <div>
-            <p className="text-sm font-medium uppercase text-red-700">Point of Sale</p>
-            <h1 className="text-3xl font-semibold text-slate-950">Unlimited Settings</h1>
-          </div>
-        </div>
+        <PosHeader section="Unlimited Settings" showBack />
 
-        <div className="grid gap-5 lg:grid-cols-[220px_minmax(0,1fr)] lg:items-start">
-          <aside className="lg:sticky lg:top-6">
-            <SectionNav orientation="vertical" tabs={posTabs} />
-          </aside>
-
-          <section className="grid min-w-0 gap-5">
+        <section className="grid min-w-0 gap-5">
             <Card>
               <CardHeader>
                 <CardTitle>Pricing and Rules</CardTitle>
@@ -199,8 +182,7 @@ export default function UnlimitedSettings() {
                 </div>
               </CardContent>
             </Card>
-          </section>
-        </div>
+        </section>
       </div>
     </main>
   );

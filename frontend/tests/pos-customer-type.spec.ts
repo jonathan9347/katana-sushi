@@ -1,6 +1,8 @@
 import { expect, test } from "@playwright/test";
 
-test("keeps takeout as the default and enables Pickup customer", async ({ page }) => {
+test("uses customer popups and staged table, reservation, and pickup selection views", async ({ page }) => {
+  let sessionCreationCount = 0;
+  let reservationSeatCount = 0;
   await page.addInitScript(() => {
     localStorage.setItem("katana_token", "playwright-token");
     localStorage.setItem("katana_role", "cashier");
@@ -14,33 +16,229 @@ test("keeps takeout as the default and enables Pickup customer", async ({ page }
   await page.route("**/api/**", async (route) => {
     const url = new URL(route.request().url());
     if (url.pathname === "/api/products") {
-      await route.fulfill({ json: { products: [] } });
+      await route.fulfill({ json: { products: [{
+        id: "included-product",
+        name: "Iced Tea",
+        category: "Beverage",
+        price: 45,
+        is_available: true,
+        available_stock: 5,
+        cart_compatibility: {
+          a_la_carte: { allowed: true, classification: "included_in_unlimited" },
+          unlimited: { allowed: true, classification: "included_in_unlimited" }
+        }
+      }] } });
       return;
     }
     if (url.pathname === "/api/settings/system") {
       await route.fulfill({ json: { settings: {} } });
       return;
     }
+    if (url.pathname === "/api/pos/dining/tables") {
+      await route.fulfill({ json: { tables: [{
+        id: "table-12",
+        table_number: 12,
+        capacity: 4,
+        status: "available",
+        linked_to_table_id: null,
+        unavailable_reason: null,
+        active_session: null
+      }] } });
+      return;
+    }
+    if (url.pathname === "/api/pos/dining/upcoming-reservations") {
+      await route.fulfill({ json: { reservations: [{
+        id: "reservation-1",
+        time: "07:30 PM",
+        customer_name: "Ava Guest",
+        party_size: 3,
+        table_numbers: [15],
+        temporary_table_numbers: [],
+        state: "late"
+      }] } });
+      return;
+    }
+    if (url.pathname === "/api/pos/pickup-orders") {
+      await route.fulfill({ json: { orders: [{
+        order_number: "PICK-123",
+        status: "preparing",
+        payment_plan: "pay_at_pickup",
+        payment_status: "unpaid",
+        payment_method: null,
+        customer_name: "Mika Customer",
+        created_at: "2026-10-22T10:00:00.000Z",
+        pickup_time: null,
+        total: 250,
+        items: [{ name: "Iced Tea", quantity: 1, unit_price: 250, total_price: 250 }]
+      }] } });
+      return;
+    }
+    if (url.pathname === "/api/pos/dining/sessions" && route.request().method() === "POST") {
+      sessionCreationCount += 1;
+    }
+    if (url.pathname.endsWith("/seat") && route.request().method() === "POST") {
+      reservationSeatCount += 1;
+    }
     await route.fulfill({ json: {} });
   });
 
   await page.goto("/staff/pos");
+  await expect(page.getByRole("heading", { name: "Point of Sale" })).toBeVisible();
+  await expect(page.getByRole("link", { name: "Transaction History" })).toBeVisible();
+  await expect(page.getByRole("link", { name: "Unli Settings" })).toBeVisible();
+  await expect(page.getByRole("link", { name: "Takeout Sale" })).toHaveCount(0);
 
-  const customerType = page.getByRole("region", { name: "Customer type" });
-  await expect(customerType.getByRole("button", { name: "New customer" })).toHaveAttribute("aria-pressed", "true");
-  await expect(customerType.getByRole("button", { name: "Existing table" })).toBeEnabled();
-  await expect(customerType.getByRole("button", { name: "Existing table" })).toHaveAttribute("aria-pressed", "false");
-  await expect(customerType.getByRole("button", { name: "Pickup customer" })).toBeEnabled();
-  await expect(customerType.getByRole("button", { name: "Dine in" })).toBeEnabled();
-  await expect(customerType.getByRole("button", { name: "Takeout" })).toHaveAttribute("aria-pressed", "true");
-  await expect(page.getByRole("heading", { name: "Takeout Sale" })).toBeVisible();
+  await page.getByRole("button", { name: "New Customer" }).click();
+  await page.getByRole("dialog", { name: "New Customer" }).getByRole("button", { name: "Dine-in" }).click();
+  await page.getByRole("dialog", { name: "Dine-in" }).getByRole("button", { name: "Walk-in" }).click();
+  await expect(page.getByRole("region", { name: "POS order builder" })).toContainText("Menu");
+  await expect(page.getByRole("button", { name: /Iced Tea/ })).toBeVisible();
+  await page.getByRole("region", { name: "POS order builder" }).getByRole("button", { name: /Iced Tea Beverage/ }).click();
+  await page.getByRole("button", { name: "Proceed" }).click();
+  await expect(page.getByRole("region", { name: "Table board" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Select Table 12, Free" })).toBeVisible();
+  await expect(page.getByRole("region", { name: "POS order builder" })).toContainText("1 × Iced Tea");
+  await expect(page.getByText("Upcoming reservations")).toHaveCount(0);
+  await expect(page.getByText("Active tables")).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Seat walk-in" })).toHaveCount(0);
+  await page.getByRole("button", { name: "Select Table 12, Free" }).click();
+  await expect(page.getByRole("region", { name: "POS order builder" })).toBeVisible();
+  await expect(page.getByText("Table 12 selected")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Confirm & Print" })).toBeVisible();
+  expect(sessionCreationCount).toBe(0);
 
-  await customerType.getByRole("button", { name: "Pickup customer" }).click();
-  await expect(page.getByRole("heading", { name: "Pickup customer" })).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Find pickup orders" })).toBeVisible();
+  await page.getByRole("button", { name: "New Customer" }).click();
+  await page.getByRole("dialog", { name: "New Customer" }).getByRole("button", { name: "Dine-in" }).click();
+  await page.getByRole("dialog", { name: "Dine-in" }).getByRole("button", { name: "Reservation" }).click();
+  await expect(page.getByRole("region", { name: "POS order builder" })).toContainText("Menu");
+  await page.getByRole("region", { name: "POS order builder" }).getByRole("button", { name: /Iced Tea Beverage/ }).click();
+  await page.getByRole("button", { name: "Proceed" }).click();
+  await expect(page.getByRole("region", { name: "Today's reservation list" })).toBeVisible();
+  await expect(page.getByRole("region", { name: "POS order builder" })).toContainText("2 × Iced Tea");
+  await page.getByRole("button", { name: /Ava Guest/ }).click();
+  await expect(page.getByText("Ava Guest · 07:30 PM selected")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Confirm & Print" })).toBeVisible();
+  expect(reservationSeatCount).toBe(0);
 
-  await customerType.getByRole("button", { name: "New customer" }).click();
-  await customerType.getByRole("group", { name: "New customer service type" }).getByRole("button", { name: "Dine in" }).click();
-  await expect(page.locator("header").getByRole("heading", { name: "Table board", exact: true })).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Dine-in order" })).toHaveCount(0);
+  await page.getByRole("button", { name: "New Customer" }).click();
+  await page.getByRole("dialog", { name: "New Customer" }).getByRole("button", { name: "Take-out" }).click();
+  await page.getByRole("dialog", { name: "Take-out" }).getByRole("button", { name: "Walk-in" }).click();
+  await expect(page.getByRole("region", { name: "POS order builder" })).toContainText("PHP 45.00");
+
+  await page.getByRole("button", { name: "New Customer" }).click();
+  await page.getByRole("dialog", { name: "New Customer" }).getByRole("button", { name: "Take-out" }).click();
+  await page.getByRole("dialog", { name: "Take-out" }).getByRole("button", { name: "Pickup" }).click();
+  await expect(page.getByRole("region", { name: "Pickup order list" })).toBeVisible();
+  await expect(page.getByRole("region", { name: "POS order builder" })).toBeVisible();
+  await expect(page.getByRole("region", { name: "POS order builder" })).toContainText("Choose a pickup order to load its read-only items.");
+  await page.getByLabel("Search by Order ID or customer name").fill("PICK");
+  await page.getByRole("button", { name: /PICK-123 · Mika Customer/ }).click();
+  await expect(page.getByRole("region", { name: "POS order builder" })).toContainText("1 × Iced Tea");
+  await expect(page.getByRole("region", { name: "POS order builder" })).toContainText("PHP 250.00");
+  await expect(page.getByRole("button", { name: "Checkout" })).toBeVisible();
+  await expect(page.getByRole("region", { name: "POS order builder" })).toContainText("Menu");
+});
+
+test("confirms a walk-in dine-in order atomically after table selection and resets the POS to Menu", async ({ page }) => {
+  let confirmationBody: Record<string, unknown> | null = null;
+  await page.addInitScript(() => {
+    localStorage.setItem("katana_token", "playwright-token");
+    localStorage.setItem("katana_role", "cashier");
+    localStorage.setItem("katana_user", JSON.stringify({
+      id: "cashier-1",
+      email: "cashier@example.test",
+      name: "Test Cashier",
+      role: "cashier"
+    }));
+  });
+  await page.route("**/api/**", async (route) => {
+    const url = new URL(route.request().url());
+    if (url.pathname === "/api/products") {
+      await route.fulfill({ json: { products: [{
+        id: "product-1",
+        name: "California Roll",
+        category: "Sushi",
+        price: 100,
+        available_stock: 5,
+        is_available: true,
+        is_included: false,
+        is_sold_a_la_carte: true,
+        cart_compatibility: {
+          a_la_carte: { allowed: true, classification: "a_la_carte_only" },
+          unlimited: { allowed: false, classification: "a_la_carte_only" }
+        }
+      }] } });
+      return;
+    }
+    if (url.pathname === "/api/pos/dining/tables") {
+      await route.fulfill({ json: { tables: [{
+        id: "table-12",
+        table_number: 12,
+        capacity: 4,
+        status: "available",
+        linked_to_table_id: null,
+        unavailable_reason: null,
+        active_session: null
+      }] } });
+      return;
+    }
+    if (url.pathname === "/api/pos/dining/upcoming-reservations") {
+      await route.fulfill({ json: { reservations: [] } });
+      return;
+    }
+    if (url.pathname === "/api/pos/dining/confirm-order" && route.request().method() === "POST") {
+      confirmationBody = route.request().postDataJSON() as Record<string, unknown>;
+      await route.fulfill({ status: 201, json: {
+        replayed: false,
+        order: {
+          id: "order-1",
+          dining_session_id: "session-1",
+          order_number: "DIN-20261022-ABC12345",
+          table_number_snapshot: 12,
+          created_at: "2026-10-22T12:00:00.000Z",
+          items: [{
+            id: "line-1",
+            name_snapshot: "California Roll",
+            quantity: 1,
+            unit_price: 100,
+            total_price: 100
+          }]
+        }
+      } });
+      return;
+    }
+    await route.fulfill({ json: {} });
+  });
+  await page.goto("/staff/pos");
+
+  const builder = page.getByRole("region", { name: "POS order builder" });
+  await page.getByRole("button", { name: "New Customer" }).click();
+  await page.getByRole("dialog", { name: "New Customer" }).getByRole("button", { name: "Dine-in" }).click();
+  await page.getByRole("dialog", { name: "Dine-in" }).getByRole("button", { name: "Walk-in" }).click();
+  await builder.getByRole("button", { name: /California Roll/ }).click();
+  await expect(builder).toContainText("1 × California Roll");
+  await page.getByRole("button", { name: "Proceed" }).click();
+  await expect(page.getByRole("region", { name: "Table board" })).toBeVisible();
+  await expect(builder).toContainText("1 × California Roll");
+  await page.getByRole("button", { name: "Select Table 12, Free" }).click();
+
+  const popupPromise = page.waitForEvent("popup");
+  await page.getByRole("button", { name: "Confirm & Print" }).click();
+  const slip = await popupPromise;
+  await expect(slip.locator("body")).toContainText("DIN-20261022-ABC12345");
+  await expect(slip.locator("body")).toContainText("Table 12");
+  await slip.close();
+  await expect(builder).toContainText("Menu");
+  await expect(builder).toContainText("Cart is empty");
+  const reprintPromise = page.waitForEvent("popup");
+  await page.getByRole("button", { name: /Reprint last order/ }).click();
+  const reprint = await reprintPromise;
+  await expect(reprint.locator("body")).toContainText("REPRINT");
+  await expect(reprint.locator("body")).toContainText("DIN-20261022-ABC12345");
+  expect(confirmationBody).toMatchObject({
+    selection: { type: "table", tableId: "table-12" },
+    orderType: "ala_carte",
+    items: [{ productId: "product-1", quantity: 1, expectedUnitPrice: 100 }]
+  });
+  expect(confirmationBody?.idempotencyKey).toEqual(expect.any(String));
 });

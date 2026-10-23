@@ -53,11 +53,11 @@ test("cashier searches by order ID and completes preparing or ready pickups with
       return;
     }
     if (url.pathname === "/api/pos/pickup-orders" && route.request().method() === "GET") {
-      const orderId = url.searchParams.get("orderId") ?? "";
-      searches.push(orderId);
-      const pickupOrder = orderId.includes("PREP")
+      const search = url.searchParams.get("search") ?? "";
+      searches.push(search);
+      const pickupOrder = search.includes("PREP") || search.toLowerCase().includes("preparing customer")
         ? order("KTO-PREP-001", "preparing")
-        : orderId.includes("READY")
+        : search.includes("READY") || search.toLowerCase().includes("ready customer")
           ? order("KTO-READY-001", "ready")
           : null;
       await route.fulfill({ json: { orders: pickupOrder ? [pickupOrder] : [] } });
@@ -88,24 +88,32 @@ test("cashier searches by order ID and completes preparing or ready pickups with
   });
 
   await page.goto("/staff/pos");
-  await page.getByRole("region", { name: "Customer type" }).getByRole("button", { name: "Pickup customer" }).click();
-  const searchInput = page.getByLabel("Order ID");
+  await page.getByRole("button", { name: "New Customer" }).click();
+  await page.getByRole("dialog", { name: "New Customer" }).getByRole("button", { name: "Take-out" }).click();
+  await page.getByRole("dialog", { name: "Take-out" }).getByRole("button", { name: "Pickup" }).click();
+  const searchInput = page.getByLabel("Search by Order ID or customer name");
 
   for (const [orderId, status] of [["KTO-PREP-001", "Preparing"], ["KTO-READY-001", "Ready for pickup"]] as const) {
     await searchInput.fill(orderId);
     const result = page.getByRole("button", { name: new RegExp(orderId) });
     await expect(result).toBeVisible();
     await result.click();
-    await expect(page.getByText(status, { exact: true })).toBeVisible();
+    await expect(page.getByRole("region", { name: "POS order builder" })).toContainText(status);
     if (orderId.includes("READY")) {
-      await expect(page.getByText(/Pickup Time:/)).toBeVisible();
+      await expect(page.getByRole("region", { name: "POS order builder" }).getByText(/Pickup Time:/)).toBeVisible();
     }
-    await page.getByRole("button", { name: "Collect payment & complete" }).click();
+    await page.getByRole("button", { name: "Checkout" }).click();
     const payment = page.getByRole("dialog", { name: "Payment" });
     await payment.getByRole("button", { name: "Cash", exact: true }).click();
     await payment.getByLabel("Enter Amount Received").fill("250");
     await payment.getByRole("button", { name: "Confirm" }).click();
-    await expect(page.getByText("Select a preparing or ready pickup order to load its cart.")).toBeVisible();
+    await expect(page.getByRole("region", { name: "POS order builder" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "New Customer" })).toBeVisible();
+    if (orderId.includes("PREP")) {
+      await page.getByRole("button", { name: "New Customer" }).click();
+      await page.getByRole("dialog", { name: "New Customer" }).getByRole("button", { name: "Take-out" }).click();
+      await page.getByRole("dialog", { name: "Take-out" }).getByRole("button", { name: "Pickup" }).click();
+    }
   }
 
   expect(searches).toContain("KTO-PREP-001");
@@ -114,4 +122,44 @@ test("cashier searches by order ID and completes preparing or ready pickups with
     { orderNumber: "KTO-PREP-001", body: { paymentMethod: "cash", cashReceived: 250 } },
     { orderNumber: "KTO-READY-001", body: { paymentMethod: "cash", cashReceived: 250 } }
   ]);
+});
+
+test("cashier can find a pickup order by customer name", async ({ page }) => {
+  await page.addInitScript(() => {
+    localStorage.setItem("katana_token", "playwright-token");
+    localStorage.setItem("katana_role", "cashier");
+    localStorage.setItem("katana_user", JSON.stringify({
+      id: "cashier-1",
+      email: "cashier@example.test",
+      name: "Test Cashier",
+      role: "cashier"
+    }));
+  });
+  await page.route("**/api/**", async (route) => {
+    const url = new URL(route.request().url());
+    if (url.pathname === "/api/products" || url.pathname === "/api/settings/system") {
+      await route.fulfill({ json: url.pathname === "/api/products" ? { products: [] } : { settings: {} } });
+      return;
+    }
+    if (url.pathname === "/api/pos/pickup-orders") {
+      const search = url.searchParams.get("search") ?? "";
+      await route.fulfill({
+        json: {
+          orders: search.toLowerCase() === "preparing customer"
+            ? [order("KTO-PREP-001", "preparing")]
+            : []
+        }
+      });
+      return;
+    }
+    await route.fulfill({ json: {} });
+  });
+
+  await page.goto("/staff/pos");
+  await page.getByRole("button", { name: "New Customer" }).click();
+  await page.getByRole("dialog", { name: "New Customer" }).getByRole("button", { name: "Take-out" }).click();
+  await page.getByRole("dialog", { name: "Take-out" }).getByRole("button", { name: "Pickup" }).click();
+  await page.getByLabel("Search by Order ID or customer name").fill("preparing Customer");
+
+  await expect(page.getByRole("button", { name: /KTO-PREP-001/ })).toBeVisible();
 });

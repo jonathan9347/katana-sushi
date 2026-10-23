@@ -7819,9 +7819,12 @@ app.get("/api/admin/takeout/orders", async (req, res, next) => {
 app.get("/api/pos/pickup-orders", async (req, res, next) => {
   try {
     if (!requireRole(req, res, ["admin", "cashier"])) return;
-    const query = z.object({ orderId: z.string().trim().max(120).optional() }).parse(req.query);
-    const orderId = query.orderId ?? "";
-    if (orderId.length < 2) {
+    const query = z.object({
+      search: z.string().trim().max(120).optional(),
+      orderId: z.string().trim().max(120).optional()
+    }).parse(req.query);
+    const search = query.search ?? query.orderId ?? "";
+    if (search.length < 2) {
       return res.json({ orders: [] });
     }
 
@@ -7829,7 +7832,10 @@ app.get("/api/pos/pickup-orders", async (req, res, next) => {
       where: {
         status: { in: ["preparing", "ready"] },
         payment_plan: "pay_at_pickup",
-        order_number: { contains: orderId, mode: "insensitive" }
+        OR: [
+          { order_number: { contains: search, mode: "insensitive" } },
+          { customer_name: { contains: search, mode: "insensitive" } }
+        ]
       },
       orderBy: [{ created_at: "asc" }, { order_number: "asc" }],
       take: 20,

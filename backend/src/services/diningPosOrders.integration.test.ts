@@ -8,8 +8,8 @@ if (!testDatabaseUrl) {
 }
 
 const testDatabaseName = new URL(testDatabaseUrl).pathname.slice(1);
-if (!/^katana_sushi_dev_step4_(2|4|5|6)_/.test(testDatabaseName)) {
-  throw new Error("Dining order commit integration tests only run on a dedicated restored Step 4.2, 4.4, 4.5, or 4.6 test copy.");
+if (!/^katana_sushi_dev_step4_(2|4|5|6|7)_/.test(testDatabaseName)) {
+  throw new Error("Dining order commit integration tests only run on a dedicated restored Step 4.2, 4.4, 4.5, 4.6, or 4.7 test copy.");
 }
 
 process.env.DATABASE_URL = testDatabaseUrl;
@@ -42,11 +42,16 @@ function tokenFor(user: { id: string; email: string; role: string }) {
   return "Bear" + "er " + token;
 }
 
-async function request(path: string, body?: unknown, method = "POST") {
+async function request(
+  path: string,
+  body?: unknown,
+  method = "POST",
+  user = cashier
+) {
   return fetch(`${baseUrl}${path}`, {
     method,
     headers: {
-      Authorization: tokenFor(cashier),
+      Authorization: tokenFor(user),
       ...(body === undefined ? {} : { "Content-Type": "application/json" })
     },
     ...(body === undefined ? {} : { body: JSON.stringify(body) })
@@ -170,6 +175,18 @@ async function createAdditionalSession() {
   });
   await prisma.table.update({ where: { id: table.id }, data: { status: "occupied" } });
   return session.id;
+}
+
+async function createAvailableTable() {
+  const maxTable = await prisma.table.aggregate({ _max: { table_number: true } });
+  return prisma.table.create({
+    data: {
+      table_number: (maxTable._max.table_number ?? 0) + 2000 + fixtureSequence,
+      capacity: 4,
+      status: "available",
+      is_archived: false
+    }
+  });
 }
 
 function orderBody(
@@ -761,4 +778,292 @@ test("still supports optional guest assignment for legacy sessions that have gue
   const payload = JSON.parse(responseText) as { order: { items: Array<{ guest_id: string | null }> } };
   assert.equal(payload.order.items[0].guest_id, guest.id);
   assert.deepEqual(await readStock(fixture), { onHand: 18, batchRemaining: 18 });
+});
+
+test("atomic walk-in confirmation creates one session and deducts stock once across retries", async (t) => {
+  if (!(await databaseAllowsCommittedOrders())) {
+    t.skip("The committed-order database rule is not deployed on this restored copy.");
+    return;
+  }
+  const fixture = await createFixture();
+  const table = await createAvailableTable();
+  const body = {
+    ...orderBody(fixture, "atomic-walkin-retry-00001"),
+    selection: { type: "table" as const, tableId: table.id }
+  };
+  const firstResponse = await request("/api/pos/dining/confirm-order", body);
+  const firstText = await firstResponse.text();
+  assert.equal(firstResponse.status, 201, firstText);
+  const first = JSON.parse(firstText) as {
+    replayed: boolean;
+    order: { id: string; status: string; table_number_snapshot: number };
+  };
+  assert.equal(first.replayed, false);
+  assert.equal(first.order.status, "committed");
+  assert.equal(first.order.table_number_snapshot, table.table_number);
+  assert.equal((await prisma.table.findUniqueOrThrow({ where: { id: table.id } })).status, "occupied");
+  assert.equal(await prisma.diningTableSession.count({ where: { table_id: table.id, status: "active" } }), 1);
+  assert.deepEqual(await readStock(fixture), { onHand: 16, batchRemaining: 16 });
+
+  const retryResponse = await request("/api/pos/dining/confirm-order", body);
+  const retryText = await retryResponse.text();
+  assert.equal(retryResponse.status, 200, retryText);
+  const retry = JSON.parse(retryText) as { replayed: boolean; order: { id: string } };
+  assert.equal(retry.replayed, true);
+  assert.equal(retry.order.id, first.order.id);
+  assert.deepEqual(await readStock(fixture), { onHand: 16, batchRemaining: 16 });
+  assert.equal(await prisma.diningOrder.count({ where: { idempotency_key: body.idempotencyKey } }), 1);
+});
+
+test("atomic confirmation commits onto an already active table session", async (t) => {
+  if (!(await databaseAllowsCommittedOrders())) {
+    t.skip("The committed-order database rule is not deployed on this restored copy.");
+    return;
+  }
+  const fixture = await createFixture();
+  const body = {
+    ...orderBody(fixture, "atomic-existing-session-0001"),
+    selection: { type: "session" as const, sessionId: fixture.sessionId! }
+  };
+  const response = await request("/api/pos/dining/confirm-order", body);
+  const responseText = await response.text();
+  assert.equal(response.status, 201, responseText);
+  const result = JSON.parse(responseText) as {
+    order: { dining_session_id: string; table_number_snapshot: number };
+  };
+  assert.equal(result.order.dining_session_id, fixture.sessionId);
+  assert.equal(result.order.table_number_snapshot, (await prisma.table.findUniqueOrThrow({
+    where: { id: fixture.tableId }
+  })).table_number);
+  assert.equal(await prisma.diningTableSession.count({
+    where: { id: fixture.sessionId, status: "active" }
+  }), 1);
+  assert.deepEqual(await readStock(fixture), { onHand: 16, batchRemaining: 16 });
+});
+
+test("atomic Unlimited confirmation starts one timed package with the confirmed headcount", async (t) => {
+  if (!(await databaseAllowsCommittedOrders())) {
+    t.skip("The committed-order database rule is not deployed on this restored copy.");
+    return;
+  }
+  const fixture = await createFixture({ included: true });
+  const table = await createAvailableTable();
+  const settings = await prisma.unlimitedSetting.findFirstOrThrow();
+  const body = {
+    selection: { type: "table" as const, tableId: table.id },
+    idempotencyKey: `${testRunKey}-atomic-unlimited-confirm-001`,
+    orderType: "unlimited" as const,
+    paxCount: 3,
+    items: [{ productId: fixture.productId!, quantity: 2, expectedUnitPrice: 0 }]
+  };
+  const response = await request("/api/pos/dining/confirm-order", body);
+  const responseText = await response.text();
+  assert.equal(response.status, 201, responseText);
+  const result = JSON.parse(responseText) as {
+    order: { order_type: string; unlimited_session_id: string };
+  };
+  const unlimited = await prisma.unlimitedSession.findUniqueOrThrow({
+    where: { id: result.order.unlimited_session_id }
+  });
+  assert.equal(result.order.order_type, "unlimited");
+  assert.equal(unlimited.status, "active");
+  assert.equal(unlimited.pax_count, 3);
+  assert.equal(Number(unlimited.price_per_pax), Number(settings.price_per_person));
+  assert.ok(unlimited.first_round_at);
+  assert.equal(unlimited.ends_at.getTime() - unlimited.first_round_at!.getTime(), settings.time_limit_minutes * 60_000);
+  const committed = await prisma.diningOrder.findUniqueOrThrow({
+    where: { idempotency_key: body.idempotencyKey },
+    select: { dining_session_id: true }
+  });
+  const activePackages = await prisma.unlimitedSession.count({
+    where: { dining_session_id: committed.dining_session_id, status: "active" }
+  });
+  assert.equal(activePackages, 1);
+  const retryResponse = await request("/api/pos/dining/confirm-order", body);
+  assert.equal(retryResponse.status, 200, await retryResponse.text());
+  assert.equal(await prisma.unlimitedSession.count({
+    where: { dining_session_id: committed.dining_session_id, status: "active" }
+  }), 1);
+  assert.deepEqual(await readStock(fixture), { onHand: 16, batchRemaining: 16 });
+});
+
+test("atomic Unlimited confirmation supports a paid a-la-carte line in the same cart and discounts it at bill-out", async (t) => {
+  if (!(await databaseAllowsCommittedOrders())) {
+    t.skip("The committed-order database rule is not deployed on this restored copy.");
+    return;
+  }
+  const regular = await createFixture({ price: 1000 });
+  const included = await createFixture({ price: 500, included: true });
+  const unlimitedSettings = await prisma.unlimitedSetting.findFirstOrThrow();
+  const body = {
+    selection: { type: "session" as const, sessionId: regular.sessionId! },
+    idempotencyKey: `${testRunKey}-atomic-mixed-cart-0001`,
+    orderType: "unlimited" as const,
+    paxCount: 3,
+    items: [
+      {
+        productId: regular.productId!,
+        quantity: 1,
+        orderType: "ala_carte" as const,
+        expectedUnitPrice: 1000
+      },
+      {
+        productId: included.productId!,
+        quantity: 1,
+        orderType: "unlimited" as const,
+        expectedUnitPrice: 0
+      }
+    ]
+  };
+  const response = await request("/api/pos/dining/confirm-order", body);
+  const responseText = await response.text();
+  assert.equal(response.status, 201, responseText);
+  const result = JSON.parse(responseText) as {
+    order: {
+      id: string;
+      order_type: string;
+      items: Array<{ selling_product_id: string; unit_price: number }>;
+    };
+  };
+  assert.equal(result.order.order_type, "unlimited");
+  assert.deepEqual(
+    result.order.items.map((item) => [item.selling_product_id, Number(item.unit_price)]).sort(),
+    [[regular.productId, 1000], [included.productId, 0]].sort()
+  );
+  assert.deepEqual(await readStock(regular), { onHand: 18, batchRemaining: 18 });
+  assert.deepEqual(await readStock(included), { onHand: 18, batchRemaining: 18 });
+
+  const previewResponse = await request(
+    `/api/pos/dining/sessions/${regular.sessionId}/checkout-preview?guestCount=10&seniorPwdCount=3`,
+    undefined,
+    "GET"
+  );
+  const previewText = await previewResponse.text();
+  assert.equal(previewResponse.status, 200, previewText);
+  const preview = JSON.parse(previewText) as {
+    discount_base_snapshot: number;
+    discount_amount: number;
+    total: number;
+  };
+  assert.equal(preview.discount_base_snapshot, 1000);
+  assert.equal(preview.discount_amount, 60);
+  assert.equal(preview.total, Number(unlimitedSettings.price_per_person) * 3 + 940);
+});
+
+test("atomic confirmation rolls back table occupation and session creation when stock consumption fails", async (t) => {
+  if (!(await databaseAllowsCommittedOrders())) {
+    t.skip("The committed-order database rule is not deployed on this restored copy.");
+    return;
+  }
+  const fixture = await createFixture({ stock: 1 });
+  const table = await createAvailableTable();
+  const body = {
+    ...orderBody(fixture, "atomic-abandonment-rollback-01"),
+    selection: { type: "table" as const, tableId: table.id }
+  };
+  const response = await request("/api/pos/dining/confirm-order", body);
+  const responseText = await response.text();
+  assert.equal(response.status, 409, responseText);
+  assert.equal((await prisma.table.findUniqueOrThrow({ where: { id: table.id } })).status, "available");
+  assert.equal(await prisma.diningTableSession.count({ where: { table_id: table.id } }), 0);
+  assert.equal(await prisma.diningOrder.count({ where: { idempotency_key: body.idempotencyKey } }), 0);
+  assert.deepEqual(await readStock(fixture), { onHand: 1, batchRemaining: 1 });
+});
+
+test("two cashiers cannot atomically confirm competing orders for the same free table", async (t) => {
+  if (!(await databaseAllowsCommittedOrders())) {
+    t.skip("The committed-order database rule is not deployed on this restored copy.");
+    return;
+  }
+  const fixture = await createFixture();
+  const table = await createAvailableTable();
+  const secondCashier = await prisma.user.create({
+    data: {
+      email: `atomic-cashier-${testRunKey}@example.test`,
+      name: "Atomic Test Cashier",
+      password_hash: "integration-test-only",
+      role: "cashier",
+      is_active: true
+    },
+    select: { id: true, email: true, role: true }
+  });
+  const responses = await Promise.all([
+    request("/api/pos/dining/confirm-order", {
+      ...orderBody(fixture, "atomic-cashier-one-000001"),
+      selection: { type: "table", tableId: table.id }
+    }),
+    request("/api/pos/dining/confirm-order", {
+      ...orderBody(fixture, "atomic-cashier-two-000001"),
+      selection: { type: "table", tableId: table.id }
+    }, "POST", secondCashier)
+  ]);
+  const responseTexts = await Promise.all(responses.map((response) => response.text()));
+  assert.deepEqual(responses.map((response) => response.status).sort(), [201, 409], responseTexts.join("\n"));
+  assert.equal(await prisma.diningTableSession.count({ where: { table_id: table.id, status: "active" } }), 1);
+  assert.deepEqual(await readStock(fixture), { onHand: 16, batchRemaining: 16 });
+});
+
+test("atomic reservation confirmation seats every assigned table and retries without duplicating the order", async (t) => {
+  if (!(await databaseAllowsCommittedOrders())) {
+    t.skip("The committed-order database rule is not deployed on this restored copy.");
+    return;
+  }
+  const fixture = await createFixture();
+  const primaryTable = await createAvailableTable();
+  const linkedTable = await createAvailableTable();
+  const date = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Manila",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit"
+  }).format(new Date());
+  const reservation = await prisma.reservation.create({
+    data: {
+      booking_id: `ATOMIC-${testRunKey}-RESERVATION`,
+      customer_name: "Atomic Multi-table Guest",
+      customer_phone: "0000000000",
+      customer_email: "atomic-reservation@example.test",
+      date: new Date(`${date}T12:00:00+08:00`),
+      time: "07:00 PM",
+      party_size: 6,
+      status: "confirmed",
+      table_assignments: {
+        create: [
+          { table_id: primaryTable.id, seat_count: 4 },
+          { table_id: linkedTable.id, seat_count: 2 }
+        ]
+      }
+    }
+  });
+  const body = {
+    ...orderBody(fixture, "atomic-reservation-retry-00001"),
+    selection: { type: "reservation" as const, reservationId: reservation.id }
+  };
+
+  const firstResponse = await request("/api/pos/dining/confirm-order", body);
+  const firstText = await firstResponse.text();
+  assert.equal(firstResponse.status, 201, firstText);
+  const first = JSON.parse(firstText) as {
+    order: { id: string; table_number_snapshot: number };
+  };
+  const seatedReservation = await prisma.reservation.findUniqueOrThrow({
+    where: { id: reservation.id },
+    include: { table_assignments: { orderBy: { table: { table_number: "asc" } } } }
+  });
+  assert.equal(seatedReservation.status, "seated");
+  assert.deepEqual(seatedReservation.table_assignments.map(({ status }) => status), ["seated", "seated"]);
+  assert.equal(first.order.table_number_snapshot, primaryTable.table_number);
+  assert.equal((await prisma.table.findUniqueOrThrow({ where: { id: primaryTable.id } })).status, "occupied");
+  const linked = await prisma.table.findUniqueOrThrow({ where: { id: linkedTable.id } });
+  assert.equal(linked.status, "unavailable");
+  assert.equal(linked.linked_to_table_id, primaryTable.id);
+
+  const retryResponse = await request("/api/pos/dining/confirm-order", body);
+  const retryText = await retryResponse.text();
+  assert.equal(retryResponse.status, 200, retryText);
+  const retry = JSON.parse(retryText) as { replayed: boolean; order: { id: string } };
+  assert.equal(retry.replayed, true);
+  assert.equal(retry.order.id, first.order.id);
+  assert.equal(await prisma.diningOrder.count({ where: { idempotency_key: body.idempotencyKey } }), 1);
+  assert.deepEqual(await readStock(fixture), { onHand: 16, batchRemaining: 16 });
 });

@@ -66,6 +66,21 @@ async function openPosWithTableMocks(
   }, role);
   await page.route("**/api/**", async (route) => {
     const url = new URL(route.request().url());
+    if (url.pathname === "/api/products") {
+      await route.fulfill({ json: { products: [{
+        id: "product-1",
+        name: "California Roll",
+        category: "Sushi",
+        price: 100,
+        is_available: true,
+        available_stock: 10,
+        cart_compatibility: {
+          a_la_carte: { allowed: true, classification: "a_la_carte_only" },
+          unlimited: { allowed: false, classification: "a_la_carte_only" }
+        }
+      }] } });
+      return;
+    }
     if (url.pathname === "/api/pos/dining/tables" && route.request().method() === "GET") {
       await route.fulfill({ json: { tables } });
       return;
@@ -119,33 +134,54 @@ async function openPosWithTableMocks(
   await page.goto("/staff/pos");
 }
 
-test("opens the existing-table board, shows live table and reservation states, and seats a walk-in", async ({ page }) => {
-  let seatedTableId = "";
-  await openPosWithTableMocks(page, "cashier", undefined, (tableId) => { seatedTableId = tableId; });
+test("walk-in board is a pure status grid and stages free-table choice without seating", async ({ page }) => {
+  let sessionCreationCount = 0;
+  await openPosWithTableMocks(page, "cashier", undefined, () => { sessionCreationCount += 1; });
 
-  const customerType = page.getByRole("region", { name: "Customer type" });
-  await customerType.getByRole("button", { name: "Existing table" }).click();
+  await page.getByRole("button", { name: "New Customer" }).click();
+  await page.getByRole("dialog", { name: "New Customer" }).getByRole("button", { name: "Dine-in" }).click();
+  await page.getByRole("dialog", { name: "Dine-in" }).getByRole("button", { name: "Walk-in" }).click();
+  await page.getByRole("button", { name: /California Roll/ }).click();
+  await page.getByRole("button", { name: "Proceed" }).click();
 
-  await expect(page.locator("header").getByRole("heading", { name: "Table board", exact: true })).toBeVisible();
-  await expect(page.getByText("Table 11").first()).toBeVisible();
-  await expect(page.getByText("Occupied", { exact: true }).first()).toBeVisible();
-  await expect(page.getByText("Reserved / held", { exact: true }).first()).toBeVisible();
-  await expect(page.getByText("Unavailable · linked to Table 11")).toBeVisible();
-  await expect(page.getByText("Ava Guest · 07:30 PM · Late")).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Dine-in order" })).toHaveCount(0);
+  const tableBoard = page.getByRole("region", { name: "Table board" });
+  await expect(tableBoard).toBeVisible();
+  await expect(tableBoard.getByRole("button", { name: "Select Table 14, Free" })).toBeVisible();
+  await expect(tableBoard.getByRole("article", { name: "Table 11, Occupied" })).toBeVisible();
+  await expect(tableBoard.getByRole("article", { name: "Table 12, Reserved" })).toBeVisible();
+  await expect(tableBoard.getByRole("article", { name: "Table 13, Unavailable" })).toBeVisible();
+  await expect(tableBoard.getByText("Upcoming reservations")).toHaveCount(0);
+  await expect(tableBoard.getByText("Active tables")).toHaveCount(0);
+  await expect(tableBoard.getByRole("button", { name: "Seat walk-in" })).toHaveCount(0);
 
-  const freeTable = page.locator("article").filter({ hasText: "Table 14" });
-  await freeTable.getByRole("button", { name: "Seat walk-in" }).click();
-  await expect.poll(() => seatedTableId).toBe("table-4");
-  await expect(page.getByRole("heading", { name: "Dine-in order", exact: true })).toBeVisible();
-  await expect(page.getByRole("button", { name: /^Unlimited/ })).toHaveCount(1);
+  await tableBoard.getByRole("button", { name: "Select Table 14, Free" }).click();
+  await expect(page.getByRole("region", { name: "POS order builder" })).toBeVisible();
+  await expect(page.getByText("Table 14 selected")).toBeVisible();
+  expect(sessionCreationCount).toBe(0);
+});
+
+test("existing-table board only selects occupied tables with a live session", async ({ page }) => {
+  await openPosWithTableMocks(page);
+  await page.getByRole("button", { name: "Existing Table" }).click();
+  await page.getByRole("button", { name: /California Roll/ }).click();
+  await page.getByRole("button", { name: "Proceed" }).click();
+
+  const tableBoard = page.getByRole("region", { name: "Table board" });
+  await expect(tableBoard.getByRole("button", { name: "Select Table 11, Occupied" })).toBeVisible();
+  await expect(tableBoard.getByRole("article", { name: "Table 12, Reserved" })).toBeVisible();
+  await tableBoard.getByRole("button", { name: "Select Table 11, Occupied" }).click();
+  await expect(page.getByRole("region", { name: "POS order builder" })).toBeVisible();
+  await page.getByRole("button", { name: "Open table session tools" }).click();
+  await expect(page.getByRole("heading", { name: "Table 11" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Confirm & Print" })).toBeVisible();
 });
 
 test("opens Manage tables from the main POS and preserves table creation and link controls", async ({ page }) => {
   let createTableCalled = false;
   await openPosWithTableMocks(page, "admin", () => { createTableCalled = true; });
-  await page.getByRole("button", { name: "Existing table" }).click();
-  await page.getByRole("button", { name: "Manage tables" }).click();
+  await page.getByRole("button", { name: "Existing Table" }).click();
+  await page.getByRole("button", { name: "Proceed" }).click();
+  await page.getByRole("button", { name: "Manage Tables" }).click();
 
   const dialog = page.getByRole("dialog", { name: "Manage tables" });
   await expect(dialog.getByLabel("Link to existing table (seated customer)").first()).toBeVisible();
