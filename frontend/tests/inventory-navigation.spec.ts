@@ -67,7 +67,7 @@ test("Reservations and Movements are direct primary tabs", async ({ page }) => {
   const reservationsTab = navigation.getByRole("button", { name: "Reservations" });
   await reservationsTab.click();
   await expect(reservationsTab).toHaveClass(/bg-red-700/);
-  await expect(page.getByText("Dine-in, catering, and pickup orders with their current inventory status.")).toBeVisible();
+  await expect(page.getByText("Pickup orders and catering reservations with their current inventory status.")).toBeVisible();
 
   const movementsTab = navigation.getByRole("button", { name: "Movements" });
   await movementsTab.click();
@@ -86,4 +86,145 @@ test("chef read-only inventory remains limited to Stock", async ({ page }) => {
   await expect(navigation.getByRole("button", { name: "Movements" })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Materials" })).toHaveCount(0);
   await expect(page.getByRole("heading", { name: "Raw Materials", exact: true })).toBeVisible();
+});
+
+test("inventory Reservations shows only Pickup and Catering entries", async ({ page }) => {
+  await setStaffRole(page, "inventory_manager");
+  await page.route("**/api/inventory/reservations", async (route) => {
+    await route.fulfill({
+      json: {
+        reservations: [
+          {
+            id: "pickup-1",
+            type: "takeout",
+            reference: "KTO-TEST-1",
+            customer_name: "Pickup Fixture",
+            date: "2026-10-24T00:00:00.000Z",
+            time: null,
+            guests: null,
+            status: "preparing",
+            menu: ["2 × Roll"],
+            stock_note: null,
+            ingredients: [{ material_id: "material-1", material: "Rice", quantity: 2, unit: "g", status: "Reserved" }]
+          },
+          {
+            id: "catering-1",
+            type: "catering",
+            reference: "CAT-TEST-1",
+            customer_name: "Catering Fixture",
+            date: "2026-10-25T00:00:00.000Z",
+            time: null,
+            guests: 12,
+            status: "confirmed",
+            menu: "Package",
+            stock_note: null,
+            ingredients: [{ material_id: "material-2", material: "Fish", quantity: 3, unit: "g", status: "Reserved" }]
+          },
+          {
+            id: "dinein-1",
+            type: "dine-in",
+            reference: "KTN-TEST-1",
+            customer_name: "Legacy Dine-in Fixture",
+            date: "2026-10-26T00:00:00.000Z",
+            time: "18:00",
+            guests: 4,
+            status: "confirmed",
+            menu: [],
+            stock_note: "Legacy",
+            ingredients: []
+          }
+        ]
+      }
+    });
+  });
+
+  await page.goto("/staff/inventory");
+  await page.getByRole("button", { name: "Reservations" }).click();
+  await expect(page.getByText("KTO-TEST-1")).toBeVisible();
+  await expect(page.getByText("CAT-TEST-1")).toBeVisible();
+  await expect(page.getByText("KTN-TEST-1")).toHaveCount(0);
+  await expect(page.getByText("Legacy Dine-in Fixture")).toHaveCount(0);
+});
+
+test("Movements shows only approved categories and maps legacy action names", async ({ page }) => {
+  const movementRequests: URL[] = [];
+  await setStaffRole(page, "inventory_manager");
+  await page.route("**/api/inventory/movements**", async (route) => {
+    const url = new URL(route.request().url());
+    movementRequests.push(url);
+    const actions = ["Received", "Used", "Released back", "Reserved", "Wasted", "Adjusted"];
+    await route.fulfill({
+      json: {
+        movements: actions.map((action) => ({
+          id: action,
+          created_at: "2026-10-24T01:00:00.000Z",
+          source_type: "inventory",
+          source_reference: `REF-${action}`,
+          action,
+          quantity: 2,
+          unit: "g",
+          quantity_before: null,
+          quantity_after: null,
+          reserved_before: null,
+          reserved_after: null,
+          note: null,
+          raw_material: { id: "material-1", name: "Rice", unit: "g" },
+          batch: null,
+          actor: { name: "Staff" }
+        })),
+        pagination: { page: 1, limit: 100, total: 5, pages: 1 }
+      }
+    });
+  });
+
+  await page.goto("/staff/inventory");
+  await page.getByRole("button", { name: "Movements" }).click();
+
+  const actionSelect = page.getByLabel("Action");
+  await expect(actionSelect.locator("option")).toHaveText([
+    "All actions",
+    "Received",
+    "Deducted",
+    "Returned",
+    "Wasted",
+    "Adjusted"
+  ]);
+  await expect(page.getByText("REF-Received")).toBeVisible();
+  await expect(page.getByText("REF-Used")).toBeVisible();
+  await expect(page.getByText("REF-Released back")).toBeVisible();
+  await expect(page.getByText("REF-Reserved")).toHaveCount(0);
+  await expect(page.getByRole("cell", { name: "Deducted", exact: true })).toBeVisible();
+  await expect(page.getByRole("cell", { name: "Returned", exact: true })).toBeVisible();
+  expect(movementRequests[0]?.searchParams.get("categoriesOnly")).toBe("true");
+
+  await actionSelect.selectOption("Returned");
+  await expect.poll(() => movementRequests.at(-1)?.searchParams.get("action")).toBe("Returned");
+});
+
+test("Stock Reserved column uses the Pickup and Catering quantity", async ({ page }) => {
+  await setStaffRole(page, "inventory_manager");
+  await page.route("**/api/inventory/materials", async (route) => {
+    await route.fulfill({
+      json: {
+        materials: [{
+          id: "material-1",
+          name: "Inventory Fixture Rice",
+          category: "Raw Material",
+          unit: "g",
+          current_stock: 20,
+          reserved_quantity: 5,
+          available_quantity: 10,
+          reorder_level: 2,
+          cost_per_unit: 1,
+          reserved_for: []
+        }]
+      }
+    });
+  });
+
+  await page.goto("/staff/inventory");
+  await expect(page.getByText("Reserved shows Pickup and Catering holds only; Available continues to account for all active stock commitments.")).toBeVisible();
+  const row = page.getByRole("row").filter({ hasText: "Inventory Fixture Rice" });
+  await expect(row.getByRole("cell").nth(3)).toHaveText("5");
+  await expect(row.getByRole("cell").nth(4)).toHaveText("10");
 });

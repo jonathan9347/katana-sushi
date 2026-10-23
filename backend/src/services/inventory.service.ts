@@ -13,6 +13,16 @@ export type InventorySourceType = "dine-in" | "catering" | "takeout" | "POS" | "
 
 type InventoryTx = Prisma.TransactionClient;
 
+export function calculateDisplayedReservedQuantity(
+  cateringLocks: ReadonlyArray<{ reserved_quantity: unknown }>,
+  takeoutLocks: ReadonlyArray<{ reserved_quantity: unknown }>
+) {
+  return [...cateringLocks, ...takeoutLocks].reduce(
+    (total, lock) => total + Number(lock.reserved_quantity),
+    0
+  );
+}
+
 const terminalCateringStatuses = new Set([
   "cancelled",
   "canceled",

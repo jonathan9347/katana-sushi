@@ -25,6 +25,7 @@ import {
   assertReservationIngredientAvailability,
   inventoryUnitsMatch,
   calculateAvailableQuantity,
+  calculateDisplayedReservedQuantity,
   consumeMaterialStock,
   createInventoryMovement,
   getActiveCateringReservationQuantity,
@@ -38,6 +39,7 @@ import {
   validateInventoryCount,
   validateInventoryQuantity
 } from "./services/inventory.service";
+import { getInventoryMovementFilters } from "./services/inventoryMovementCategories.service";
 import { paymentIntentStore } from "./services/payment/paymentIntentStore";
 import { PaymentService } from "./services/payment.service";
 import { prisma } from "./lib/prisma";
@@ -1141,86 +1143,6 @@ function normalizeProductName(value: string) {
     .replace(/\([^)]*\)/g, "")
     .replace(/[^a-z0-9]+/g, " ")
     .trim();
-}
-
-type ReservationRecipeProduct = {
-  id: string;
-  name: string;
-  recipes: Array<{
-    recipe_ingredients: Array<{
-      quantity_per_yield: unknown;
-      unit: string;
-      raw_material: { id: string; name: string; unit: string };
-    }>;
-  }>;
-};
-
-function getReservationIngredientRequirements(
-  selectedProducts: Array<{
-    product_id?: string | null;
-    productId?: string | null;
-    name?: string | null;
-    quantity?: number | string | null;
-  }> = [],
-  products: ReservationRecipeProduct[]
-) {
-  if (!Array.isArray(selectedProducts) || selectedProducts.length === 0) {
-    return { ingredients: [], warnings: [] as string[] };
-  }
-
-  const productsById = new Map(products.map((product) => [product.id, product]));
-  const productsByName = new Map(
-    products.map((product) => [normalizeProductName(product.name), product])
-  );
-
-  const totals = new Map<string, { material_id: string; material: string; quantity: number; unit: string }>();
-  const warnings: string[] = [];
-
-  for (const item of selectedProducts) {
-    const quantity = Number(item.quantity ?? 1);
-    if (!Number.isFinite(quantity) || quantity <= 0) {
-      continue;
-    }
-
-    const productId = typeof item.product_id === "string" ? item.product_id : item.productId;
-    const product = productId
-      ? productsById.get(productId)
-      : productsByName.get(normalizeProductName(String(item.name ?? "")));
-
-    if (!product) {
-      warnings.push(`Menu item "${item.name ?? productId ?? "Unknown"}" was not found in the product catalog.`);
-      continue;
-    }
-
-    const recipeIngredients = product.recipes[0]?.recipe_ingredients ?? [];
-    if (recipeIngredients.length === 0) {
-      warnings.push(`${product.name} has no inventory recipe.`);
-      continue;
-    }
-
-    for (const ingredient of recipeIngredients) {
-      const material = ingredient.raw_material;
-      if (!inventoryUnitsMatch(ingredient.unit, material.unit)) {
-        warnings.push(`${product.name}: ${material.name} uses ${ingredient.unit} in its recipe but ${material.unit} in stock.`);
-        continue;
-      }
-      const required = Number(ingredient.quantity_per_yield) * quantity;
-      const existing = totals.get(material.id);
-      totals.set(material.id, existing
-        ? { ...existing, quantity: existing.quantity + required }
-        : {
-            material_id: material.id,
-            material: material.name,
-            quantity: required,
-            unit: material.unit
-          });
-    }
-  }
-
-  return {
-    ingredients: Array.from(totals.values()).sort((first, second) => first.material.localeCompare(second.material)),
-    warnings: Array.from(new Set(warnings))
-  };
 }
 
 function getCateringPackageProductNames(packageId: string) {
@@ -5609,7 +5531,11 @@ app.get("/api/inventory/materials", async (_req, res, next) => {
       const dineInLocksForMaterial = activeDineInLocksByMaterial.get(material.id) ?? [];
       const takeoutLocksForMaterial = activeTakeoutLocksByMaterial.get(material.id) ?? [];
       const posDiningLocksForMaterial = activePosDiningLocksByMaterial.get(material.id) ?? [];
-      const reserved_quantity = [
+      const reserved_quantity = calculateDisplayedReservedQuantity(
+        cateringLocksForMaterial,
+        takeoutLocksForMaterial
+      );
+      const allReservedQuantity = [
         ...cateringLocksForMaterial,
         ...dineInLocksForMaterial,
         ...takeoutLocksForMaterial,
@@ -5628,16 +5554,6 @@ app.get("/api/inventory/materials", async (_req, res, next) => {
           event_date: lock.catering_reservation.event_date ?? lock.catering_reservation.confirmed_date,
           customer_name: lock.catering_reservation.inquiry?.customer_name ?? "Unknown"
         })),
-        ...dineInLocksForMaterial.map((lock) => ({
-          id: lock.id,
-          booking_reference: lock.reservation.booking_id,
-          reserved_quantity: lock.reserved_quantity,
-          unit: lock.unit,
-          status: lock.reservation.status,
-          event_name: lock.reservation.reservation_type === "unlimited" ? "Unlimited dining" : "Dine-in",
-          event_date: lock.reservation.date,
-          customer_name: lock.reservation.customer_name
-        })),
         ...takeoutLocksForMaterial.map((lock) => ({
           id: lock.id,
           booking_reference: lock.order.order_number,
@@ -5647,16 +5563,6 @@ app.get("/api/inventory/materials", async (_req, res, next) => {
           event_name: "Takeout pickup",
           event_date: lock.order.created_at,
           customer_name: lock.order.customer_name
-        })),
-        ...posDiningLocksForMaterial.map((lock) => ({
-          id: lock.id,
-          booking_reference: lock.order.order_number,
-          reserved_quantity: lock.reserved_quantity,
-          unit: lock.unit,
-          status: lock.order.status,
-          event_name: `Table ${lock.order.dining_session.table.table_number} kitchen ticket`,
-          event_date: lock.order.created_at,
-          customer_name: `Guest ${lock.order.items[0]?.guest?.guest_number ?? "—"}`
         }))
       ];
       const batch_total = material.batches.reduce(
@@ -5674,7 +5580,7 @@ app.get("/api/inventory/materials", async (_req, res, next) => {
       return {
         ...rest,
         reserved_quantity,
-        available_quantity: calculateAvailableQuantity(Number(material.current_stock), reserved_quantity),
+        available_quantity: calculateAvailableQuantity(Number(material.current_stock), allReservedQuantity),
         batch_total,
         batch_mismatch: Number(material.current_stock) !== batch_total,
         expiring_within_7_days,
@@ -5777,12 +5683,7 @@ app.get("/api/inventory/reservations", async (req, res, next) => {
     const user = requireRole(req, res, ["admin", "inventory_manager"]);
     if (!user) return;
 
-    const [dineInReservations, cateringReservations, recipeProducts, takeoutOrders] = await Promise.all([
-      prisma.reservation.findMany({
-        orderBy: [{ date: "desc" }, { time: "asc" }],
-        take: 100,
-        include: { unlimited_package: true }
-      }),
+    const [cateringReservations, takeoutOrders] = await Promise.all([
       prisma.cateringReservation.findMany({
         orderBy: { event_date: "desc" },
         take: 100,
@@ -5792,18 +5693,6 @@ app.get("/api/inventory/reservations", async (req, res, next) => {
           ingredient_locks: {
             orderBy: { created_at: "asc" },
             include: { raw_material: { select: { id: true, name: true, unit: true } } }
-          }
-        }
-      }),
-      prisma.sellingProduct.findMany({
-        where: { is_deleted: false },
-        include: {
-          recipes: {
-            include: {
-              recipe_ingredients: {
-                include: { raw_material: true }
-              }
-            }
           }
         }
       }),
@@ -5829,45 +5718,7 @@ app.get("/api/inventory/reservations", async (req, res, next) => {
       })
     ]);
 
-    const dineInIngredientRequirements = dineInReservations.map((reservation) => {
-        const requirement = getReservationIngredientRequirements(
-          Array.isArray(reservation.selected_products)
-            ? reservation.selected_products as Array<{ product_id?: string | null; productId?: string | null; name?: string | null; quantity?: number | string | null }>
-            : [],
-          recipeProducts
-        );
-        const { ingredients, warnings } = requirement;
-        const activeStatus = ["cancelled", "canceled", "rejected", "declined", "expired", "no-show", "no_show", "completed"].includes((reservation.status ?? "").toLowerCase())
-          ? "Released"
-          : "Reserved";
-
-        return {
-          id: reservation.id,
-          type: "dine-in" as const,
-          reference: reservation.booking_id,
-          customer_name: reservation.customer_name,
-          date: reservation.date,
-          time: reservation.time,
-          guests: reservation.party_size,
-          status: reservation.status,
-          menu: reservation.selected_products ?? [],
-          ingredients: ingredients.map((ingredient) => ({
-            material_id: ingredient.material_id,
-            material: ingredient.material,
-            quantity: ingredient.quantity,
-            unit: ingredient.unit,
-            status: activeStatus
-          })),
-          stock_note: warnings.length > 0
-            ? warnings.join(" ")
-            : ingredients.length > 0
-              ? `Estimated recipe demand for ${ingredients.length} ingredient${ingredients.length === 1 ? "" : "s"}; dine-in stock is not yet locked.`
-              : "No inventory recipe linked to the selected menu items."
-        };
-      });
-
     const reservations = [
-      ...dineInIngredientRequirements,
       ...cateringReservations.map((reservation) => ({
         id: reservation.id,
         type: "catering" as const,
@@ -6266,6 +6117,7 @@ app.get("/api/inventory/movements", async (req, res, next) => {
       materialId: z.string().optional(),
       booking: z.string().optional(),
       action: z.string().optional(),
+      categoriesOnly: z.enum(["true"]).optional(),
       sourceType: z.enum(["dine-in", "catering", "POS", "unlimited", "inventory", "legacy"]).optional(),
       from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
       to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
@@ -6280,16 +6132,25 @@ app.get("/api/inventory/movements", async (req, res, next) => {
       Reserved: ["reserve", "reserved"],
       Released: ["release", "released"],
       Used: ["deduct", "used"],
+      Deducted: ["deduct", "used"],
+      Returned: ["release", "released", "return", "returned"],
+      "Released back": ["release", "released", "return", "returned"],
       Wasted: ["waste", "wasted"],
       Adjusted: ["adjust", "adjustment", "adjusted"]
     };
+    const categoryFilters = query.categoriesOnly
+      ? getInventoryMovementFilters(query.action)
+      : null;
+    const actionValues = categoryFilters?.actions ?? (query.action ? [query.action] : undefined);
     const where: Prisma.InventoryMovementWhereInput = {
       raw_material_id: query.materialId,
-      action: query.action
+      action: actionValues
         ? {
             in: [
-              query.action,
-              ...(legacyTransactionTypesByAction[query.action] ?? []).map((type) => `Legacy: ${type}`)
+              ...actionValues,
+              ...(categoryFilters?.legacyTypes ??
+                (query.action ? legacyTransactionTypesByAction[query.action] ?? [] : [])
+              ).map((type) => `Legacy: ${type}`)
             ]
           }
         : undefined,
@@ -6343,8 +6204,10 @@ app.get("/api/inventory/movements", async (req, res, next) => {
       const legacyWhere: Prisma.InventoryTransactionWhereInput = {
         raw_material_id: query.materialId,
         reference: query.booking ? { contains: query.booking, mode: "insensitive" } : undefined,
-        transaction_type: query.action
-          ? { in: legacyTransactionTypesByAction[query.action] ?? [] }
+        transaction_type: categoryFilters
+          ? { in: categoryFilters.legacyTypes }
+          : query.action
+            ? { in: legacyTransactionTypesByAction[query.action] ?? [] }
           : undefined,
         created_at: manilaDateRange(dateFrom, dateTo)
       };

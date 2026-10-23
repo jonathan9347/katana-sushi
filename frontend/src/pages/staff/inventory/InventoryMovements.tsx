@@ -34,7 +34,15 @@ type MovementResponse = {
   notice?: string;
 };
 
-const actions = ["Received", "Reserved", "Released back", "Released", "Used", "Wasted", "Adjusted"] as const;
+const actions = ["Received", "Deducted", "Returned", "Wasted", "Adjusted"] as const;
+type MovementCategory = typeof actions[number];
+
+function displayCategory(action: string): MovementCategory | null {
+  if (action === "Received" || action === "Wasted" || action === "Adjusted") return action;
+  if (action === "Deducted" || action === "Used") return "Deducted";
+  if (action === "Returned" || action === "Released" || action === "Released back") return "Returned";
+  return null;
+}
 
 function csvCell(value: unknown) {
   return `"${String(value ?? "").replace(/"/g, '""')}"`;
@@ -67,6 +75,7 @@ export default function InventoryMovements() {
           materialId: materialId || undefined,
           booking: booking.trim() || undefined,
           action: action || undefined,
+          categoriesOnly: "true",
           page,
           limit: 100
         }
@@ -75,16 +84,20 @@ export default function InventoryMovements() {
     }
   });
 
+  const visibleMovements = (movementsQuery.data?.movements ?? [])
+    .map((movement) => ({ movement, category: displayCategory(movement.action) }))
+    .filter((entry): entry is { movement: Movement; category: MovementCategory } => entry.category !== null);
+
   const csv = useMemo(() => {
     const rows = [
       ["Date", "Material", "Batch", "Booking/reference", "Source", "Action", "Quantity", "On hand before", "On hand after", "Staff", "Note"],
-      ...(movementsQuery.data?.movements ?? []).map((movement) => [
+      ...visibleMovements.map(({ movement, category }) => [
         new Date(movement.created_at).toLocaleString(),
         movement.raw_material.name,
         movement.batch?.batch_number ?? "",
         movement.source_reference ?? "",
         movement.source_type ?? "",
-        movement.action,
+        category,
         `${movement.quantity} ${movement.unit}`,
         movement.quantity_before ?? "",
         movement.quantity_after ?? "",
@@ -93,7 +106,7 @@ export default function InventoryMovements() {
       ])
     ];
     return rows.map((row) => row.map(csvCell).join(",")).join("\r\n");
-  }, [movementsQuery.data]);
+  }, [visibleMovements]);
 
   function exportCsv() {
     const url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
@@ -116,7 +129,7 @@ export default function InventoryMovements() {
           <CardTitle>Inventory Movements</CardTitle>
           <p className="mt-1 text-sm text-slate-600">Stock changes and reservation activity, not sales transactions.</p>
         </div>
-        <Button variant="outline" onClick={exportCsv} disabled={!movementsQuery.data?.movements.length}>
+        <Button variant="outline" onClick={exportCsv} disabled={!visibleMovements.length}>
           <Download className="mr-2 h-4 w-4" />
           Export this page
         </Button>
@@ -166,12 +179,12 @@ export default function InventoryMovements() {
             {movementsQuery.data.notice ?? "Showing legacy inventory records; the movement ledger database migration is pending."}
           </p>
         )}
-        {movementsQuery.data?.movements.length === 0 && (
+        {!movementsQuery.isLoading && !movementsQuery.isError && visibleMovements.length === 0 && (
           <p className="rounded-md border border-dashed border-slate-300 p-6 text-center text-sm text-slate-600">
             No inventory movements in this date range. Receive stock, record waste, or make a reservation to create a movement.
           </p>
         )}
-        {!!movementsQuery.data?.movements.length && (
+        {!!visibleMovements.length && (
           <>
             <div className="overflow-x-auto">
               <Table>
@@ -189,7 +202,7 @@ export default function InventoryMovements() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {movementsQuery.data.movements.map((movement) => (
+                  {visibleMovements.map(({ movement, category }) => (
                     <TableRow key={movement.id}>
                       <TableCell>{new Date(movement.created_at).toLocaleString()}</TableCell>
                       <TableCell>
@@ -199,7 +212,7 @@ export default function InventoryMovements() {
                         </span>
                       </TableCell>
                       <TableCell>{movement.source_reference ?? "—"}</TableCell>
-                      <TableCell>{movement.action}</TableCell>
+                      <TableCell>{category}</TableCell>
                       <TableCell>{Number(movement.quantity).toLocaleString()} {movement.unit}</TableCell>
                       <TableCell>
                         {movement.quantity_before === null || movement.quantity_after === null
@@ -218,15 +231,17 @@ export default function InventoryMovements() {
                 </TableBody>
               </Table>
             </div>
-            <div className="flex items-center justify-between border-t border-slate-200 pt-3 text-sm">
-              <span className="text-slate-600">
-                {movementsQuery.data.pagination.total} movement(s) · Page {page} of {Math.max(movementsQuery.data.pagination.pages, 1)}
-              </span>
-              <div className="flex gap-2">
-                <Button variant="outline" size="sm" disabled={page <= 1} onClick={() => setPage((current) => current - 1)}>Previous</Button>
-                <Button variant="outline" size="sm" disabled={page >= movementsQuery.data.pagination.pages} onClick={() => setPage((current) => current + 1)}>Next</Button>
+            {movementsQuery.data && (
+              <div className="flex items-center justify-between border-t border-slate-200 pt-3 text-sm">
+                <span className="text-slate-600">
+                  {movementsQuery.data.pagination.total} movement(s) · Page {page} of {Math.max(movementsQuery.data.pagination.pages, 1)}
+                </span>
+                <div className="flex gap-2">
+                  <Button variant="outline" size="sm" disabled={page <= 1} onClick={() => setPage((current) => current - 1)}>Previous</Button>
+                  <Button variant="outline" size="sm" disabled={page >= movementsQuery.data.pagination.pages} onClick={() => setPage((current) => current + 1)}>Next</Button>
+                </div>
               </div>
-            </div>
+            )}
           </>
         )}
       </CardContent>

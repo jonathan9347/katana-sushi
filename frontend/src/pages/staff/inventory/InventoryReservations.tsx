@@ -63,7 +63,9 @@ export default function InventoryReservations() {
     })).data
   });
 
-  const reservations = reservationsQuery.data ?? [];
+  const reservations = (reservationsQuery.data ?? []).filter((reservation) =>
+    reservation.type === "catering" || reservation.type === "takeout"
+  );
   const reservedToday = reservations.filter((reservation) => {
     const active = !["cancelled", "canceled", "completed", "declined", "expired", "no-show", "no_show", "rejected"].includes(reservation.status.toLowerCase());
     return active && reservation.date !== null && manilaDateKey(reservation.date) === today &&
@@ -81,7 +83,7 @@ export default function InventoryReservations() {
       <Card>
         <CardHeader>
           <CardTitle>Reservations</CardTitle>
-          <p className="text-sm text-slate-600">Dine-in, catering, and pickup orders with their current inventory status.</p>
+          <p className="text-sm text-slate-600">Pickup orders and catering reservations with their current inventory status.</p>
         </CardHeader>
         <CardContent>
           {reservationsQuery.isLoading && <p className="text-sm text-slate-500">Loading reservations…</p>}
@@ -93,8 +95,8 @@ export default function InventoryReservations() {
               </Button>
             </div>
           )}
-          {reservationsQuery.data?.length === 0 && (
-            <p className="rounded-md border border-dashed border-slate-300 p-6 text-center text-sm text-slate-600">No bookings found.</p>
+          {reservationsQuery.data && reservations.length === 0 && (
+            <p className="rounded-md border border-dashed border-slate-300 p-6 text-center text-sm text-slate-600">No pickup or catering holds found.</p>
           )}
           {!!reservations.length && (
             <div className="overflow-x-auto">
