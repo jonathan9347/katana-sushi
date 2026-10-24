@@ -138,9 +138,6 @@ export default function RecipeModal({ productId, isAdmin, onClose }: RecipeModal
       {recipeQuery.data && (
         <form className="grid gap-4" onSubmit={submit}>
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-            <span className="rounded-full bg-amber-100 px-3 py-1 text-xs font-bold text-amber-900">
-              {recipeQuery.data.status ?? "recipe not confirmed"}
-            </span>
             <div className="grid gap-1 text-sm font-medium text-slate-700 sm:w-56">
               <span>Selling Price</span>
               {isEditing ? (

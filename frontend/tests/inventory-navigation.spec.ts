@@ -59,6 +59,66 @@ test("inventory has three primary tabs and keeps stock tools under Stock", async
   await expect(page.getByRole("heading", { name: "Yield Estimator" })).toBeVisible();
 });
 
+test("Menu Products and Yield Estimator hide recipe confirmation labels", async ({ page }) => {
+  await setStaffRole(page, "admin");
+  await page.route("**/api/products", async (route) => {
+    await route.fulfill({
+      json: {
+        products: [{
+          id: "product-1",
+          name: "Salmon Roll",
+          category: "Classic Roll",
+          price: 250,
+          is_available: true,
+          recipes: [{ status: "recipe not confirmed", recipe_ingredients: [] }]
+        }]
+      }
+    });
+  });
+  await page.route("**/api/inventory/yield", async (route) => {
+    await route.fulfill({
+      json: {
+        products: [{
+          id: "product-1",
+          name: "Salmon Roll",
+          category: "Classic Roll",
+          maxPortions: 12,
+          limitingIngredient: "Salmon",
+          limitingStock: 120,
+          requiredPerPortion: 10,
+          potentialRevenue: 3000
+        }],
+        globalBottleneck: { ingredient: "Salmon", affectedProducts: ["Salmon Roll"], suggestion: "Restock salmon." }
+      }
+    });
+  });
+  await page.route("**/api/products/product-1/recipe", async (route) => {
+    await route.fulfill({
+      json: {
+        productId: "product-1",
+        productName: "Salmon Roll",
+        status: "recipe not confirmed",
+        sellingPrice: 250,
+        ingredients: [],
+        totalIngredientCost: 0,
+        profitMargin: 100
+      }
+    });
+  });
+
+  await page.goto("/staff/inventory");
+  await page.getByRole("button", { name: "Menu Products" }).click();
+  await page.getByRole("button", { name: "Edit Salmon Roll" }).click();
+  await expect(page.getByRole("heading", { name: "Edit Salmon Roll" })).toBeVisible();
+  await expect(page.getByText("recipe not confirmed", { exact: true })).toHaveCount(0);
+
+  await page.getByRole("button", { name: "Close dialog" }).click();
+  await page.getByRole("button", { name: "Yield Estimator" }).click();
+  await page.getByRole("button", { name: "Salmon Roll" }).click();
+  await expect(page.getByRole("heading", { name: "Salmon Roll Recipe" })).toBeVisible();
+  await expect(page.getByText("recipe not confirmed", { exact: true })).toHaveCount(0);
+});
+
 test("Reservations and Movements are direct primary tabs", async ({ page }) => {
   await setStaffRole(page, "inventory_manager");
   await page.goto("/staff/inventory");

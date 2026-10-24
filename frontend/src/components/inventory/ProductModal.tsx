@@ -392,14 +392,7 @@ export default function ProductModal({
         <section className="grid gap-4 rounded-md border border-slate-200 p-4">
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
             <div>
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <h3 className="text-sm font-semibold uppercase text-slate-500">Recipe Ingredients</h3>
-                {product && (
-                  <span className="rounded-full bg-amber-100 px-3 py-1 text-xs font-bold text-amber-900">
-                    {product.recipes?.[0]?.status ?? "recipe not confirmed"}
-                  </span>
-                )}
-              </div>
+              <h3 className="text-sm font-semibold uppercase text-slate-500">Recipe Ingredients</h3>
               <p className="mt-1 text-sm text-slate-500">From Materials List</p>
             </div>
             <Button type="button" variant="outline" disabled={materialsQuery.isLoading} onClick={addIngredient}>
