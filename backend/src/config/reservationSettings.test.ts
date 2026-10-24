@@ -1,11 +1,15 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { isDineInReservationLateAlert } from "./reservationSettings";
+import { isDineInReservationLateAlert, RESERVATION_SETTINGS } from "./reservationSettings";
 
 const oldReservationDate = new Date("2020-01-01T00:00:00.000Z");
 const lateTime = "12:00";
 const now = new Date("2020-01-01T05:30:00.000Z");
+
+test("maximum guests per booking defaults to 20", () => {
+  assert.equal(RESERVATION_SETTINGS.MAX_GUESTS_PER_BOOKING, 20);
+});
 
 test("late alert is available only for an unacknowledged confirmed or approved reservation", () => {
   assert.equal(isDineInReservationLateAlert(oldReservationDate, lateTime, "confirmed", false, now), true);

@@ -1,5 +1,5 @@
 export const RESERVATION_SETTINGS = {
-  MAX_GUESTS: 20,
+  MAX_GUESTS_PER_BOOKING: 20,
   MAX_PAX_PER_SLOT: 20,
   LATE_ALERT_MINUTES: 30,
   LATE_ACTION: "alert_staff" as const,

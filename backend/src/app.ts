@@ -843,7 +843,7 @@ const tableReservationBodySchema = z.object({
   customer_email: z.string().trim().email().max(254),
   date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
   time: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/),
-  party_size: z.coerce.number().int().min(1).max(RESERVATION_SETTINGS.MAX_GUESTS),
+  party_size: z.coerce.number().int().min(1).max(RESERVATION_SETTINGS.MAX_GUESTS_PER_BOOKING),
   reservation_type: z.enum(["dine_in", "unlimited"])
 });
 
@@ -2406,7 +2406,7 @@ app.get("/api/reservations/table-availability", async (req, res, next) => {
     const query = z.object({
       date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
       time: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/),
-      party_size: z.coerce.number().int().min(1).max(RESERVATION_SETTINGS.MAX_GUESTS)
+      party_size: z.coerce.number().int().min(1).max(RESERVATION_SETTINGS.MAX_GUESTS_PER_BOOKING)
     }).parse(req.query);
     const date = manilaDateToUtc(query.date);
     if (manilaDateKey(date) !== query.date) {

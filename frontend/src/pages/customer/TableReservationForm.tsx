@@ -289,13 +289,13 @@ export default function TableReservationForm() {
                 <button
                   type="button"
                   aria-label="Add one guest"
-                  onClick={() => setPartySize((value) => Math.min(rules?.MAX_GUESTS ?? 20, value + 1))}
-                  disabled={partySize >= (rules?.MAX_GUESTS ?? 20)}
+                  onClick={() => setPartySize((value) => Math.min(rules?.MAX_GUESTS_PER_BOOKING ?? 20, value + 1))}
+                  disabled={partySize >= (rules?.MAX_GUESTS_PER_BOOKING ?? 20)}
                 >
                   <Plus className="h-4 w-4" />
                 </button>
               </div>
-              <p className="mt-1 text-xs text-[var(--customer-muted)]">Maximum {rules?.MAX_GUESTS ?? 20} guests per booking.</p>
+              <p className="mt-1 text-xs text-[var(--customer-muted)]">Maximum {rules?.MAX_GUESTS_PER_BOOKING ?? 20} guests per booking.</p>
             </div>
 
             <fieldset>

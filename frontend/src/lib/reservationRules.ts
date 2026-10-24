@@ -1,7 +1,7 @@
 import { api } from "./api";
 
 export type ReservationRules = {
-  MAX_GUESTS: number;
+  MAX_GUESTS_PER_BOOKING: number;
   MAX_PAX_PER_SLOT: number;
   SLOT_DURATION_MINUTES: number;
   LATE_ALERT_MINUTES: number;

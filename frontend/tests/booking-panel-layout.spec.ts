@@ -17,7 +17,7 @@ const products = ["Sushi", "Sashimi"].flatMap((category) =>
 );
 
 const reservationRules = {
-  MAX_GUESTS: 20,
+  MAX_GUESTS_PER_BOOKING: 20,
   LATE_ALERT_MINUTES: 15,
   LATE_ACTION: "alert_staff",
   OPENING_TIME: "11:00",

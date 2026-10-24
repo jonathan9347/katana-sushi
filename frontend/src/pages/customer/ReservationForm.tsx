@@ -942,7 +942,7 @@ export default function ReservationForm() {
       !reservationRules ||
       !reservationTimeValid ||
       Number(form.party_size) < 1 ||
-      Number(form.party_size) > reservationRules.MAX_GUESTS
+      Number(form.party_size) > reservationRules.MAX_GUESTS_PER_BOOKING
     ) {
       setMessage("Check the guest details and choose a valid future date and time within opening hours.");
       setIsProcessingPayment(false);
@@ -1510,9 +1510,9 @@ export default function ReservationForm() {
                             <div className="reservation-guest-stepper">
                               <button type="button" aria-label="Remove one guest" onClick={() => setField("party_size", String(Math.max(1, Number(form.party_size) - 1)))} disabled={Number(form.party_size) <= 1}>−</button>
                               <span aria-live="polite">{form.party_size} {Number(form.party_size) === 1 ? "guest" : "guests"}</span>
-                              <button type="button" aria-label="Add one guest" onClick={() => setField("party_size", String(Math.min(reservationRules?.MAX_GUESTS ?? 20, Number(form.party_size) + 1)))} disabled={Number(form.party_size) >= (reservationRules?.MAX_GUESTS ?? 20)}>+</button>
+                              <button type="button" aria-label="Add one guest" onClick={() => setField("party_size", String(Math.min(reservationRules?.MAX_GUESTS_PER_BOOKING ?? 20, Number(form.party_size) + 1)))} disabled={Number(form.party_size) >= (reservationRules?.MAX_GUESTS_PER_BOOKING ?? 20)}>+</button>
                             </div>
-                            {Number(form.party_size) >= (reservationRules?.MAX_GUESTS ?? 20) && (
+                            {Number(form.party_size) >= (reservationRules?.MAX_GUESTS_PER_BOOKING ?? 20) && (
                               <p className="mt-2 text-xs text-katana-muted">For groups over 20, please use <Link className="underline" to="/catering">Catering</Link>.</p>
                             )}
                           </div>
