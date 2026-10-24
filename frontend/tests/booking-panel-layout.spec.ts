@@ -550,6 +550,24 @@ test("Catering staff workspace is list-first with one state-based next action", 
   await expect(page.getByRole("dialog", { name: "Catering event calendar" })).toContainText("Calendar is view-only.");
 });
 
+test("legacy catering dashboard route redirects to the Phase 7 workspace", async ({ page }) => {
+  await page.addInitScript(() => {
+    localStorage.setItem("katana_token", "test-token");
+    localStorage.setItem("katana_role", "admin");
+    localStorage.setItem("katana_user", JSON.stringify({
+      id: "test-admin",
+      email: "admin@example.test",
+      name: "Test Admin",
+      role: "admin"
+    }));
+  });
+  await mockApi(page);
+  await page.goto("/staff/catering/dashboard");
+
+  await expect(page).toHaveURL(/\/staff\/catering$/);
+  await expect(page.getByRole("heading", { name: "Catering operations" })).toBeVisible();
+});
+
 test("Catering status displays each saved station snapshot", async ({ page }) => {
   await mockApi(page);
   await page.goto("/reservation/status?bookingId=CAT-TEST-001");
