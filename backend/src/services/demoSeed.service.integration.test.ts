@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { PrismaClient } from "@prisma/client";
+import { INVENTORY_STANDARDS } from "../config/inventoryStandards";
 import { seedDemoData } from "./demoSeed.service";
 
 const testDatabaseUrl = process.env.DEMO_SEED_COPY_TEST_DATABASE_URL;
@@ -111,7 +112,7 @@ test("demo seed writes integer base-unit inventory and recipes to the isolated r
       ["Tuna Mayo Roll", "Spicy mayo", 10n, "ml"],
       ["Crunchy Roll", "Tempura flakes", 20n, "g"],
       ["Tori Teriyaki Roll", "Teriyaki sauce", 10n, "ml"],
-      ["Spicy Tuna Roll", "Aonori", 1n, "g"],
+      ["Spicy Tuna Roll", "Aonori", BigInt(INVENTORY_STANDARDS.ownerConfirmedAonoriGramsPerServing), "g"],
       ["Mango Hoso", "Crabstick", 3n, "piece"],
       ["Baked Sushi California Medium", "Rice", 300n, "g"],
       ["Baked Sushi California Medium", "Nori", 2n, "sheet"],

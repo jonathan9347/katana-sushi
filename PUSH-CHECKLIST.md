@@ -1,6 +1,6 @@
 # Push checklist
 
-- [ ] Confirm the estimated Aonori serving standard (1 g) with the owner or kitchen.
+- [x] Confirm the Aonori serving standard (1 g) with the owner.
 - [ ] Implement platter composition and component stock deduction; keep platters unavailable until both are in place.
 - [ ] Complete the deferred manual Phase 2 smoke test.
 - [ ] Complete and approve Phase 3 unified Reservations verification: role-scoped Tables, Catering, and Pickup views; Tables remains view-only, with seating only in the POS.

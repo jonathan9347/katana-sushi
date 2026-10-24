@@ -202,7 +202,7 @@ export async function seedDemoData(prisma: PrismaClient) {
         { material: "Tuna", quantity: 30, unit: "g" },
         { material: "Spicy mayo", quantity: 10, unit: "ml" },
         // Estimated at 1 g per serving; confirm with the owner or kitchen.
-        { material: "Aonori", quantity: 1, unit: "g" }
+        { material: "Aonori", quantity: INVENTORY_STANDARDS.ownerConfirmedAonoriGramsPerServing, unit: "g" }
       ]
     },
     {
