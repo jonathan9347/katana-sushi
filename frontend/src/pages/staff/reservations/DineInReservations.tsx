@@ -20,6 +20,7 @@ type StaffReservation = {
   time: string;
   guests: number;
   status: string;
+  late_alert?: boolean;
   reservation_type?: string;
   table_numbers: number[];
   package_name?: string | null;
@@ -290,6 +291,11 @@ export default function DineInReservations() {
                     </div>
                     <div className="flex flex-wrap items-center gap-2 sm:justify-end">
                       <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold capitalize text-slate-700">{formatStatus(reservation.status)}</span>
+                      {reservation.late_alert ? (
+                        <span role="status" className="rounded-full bg-amber-100 px-3 py-1 text-xs font-semibold text-amber-900">
+                          Late arrival alert
+                        </span>
+                      ) : null}
                       <span className="text-sm text-slate-600">
                         Tables: {reservation.table_numbers.length > 0 ? reservation.table_numbers.join(", ") : "Not assigned"}
                       </span>

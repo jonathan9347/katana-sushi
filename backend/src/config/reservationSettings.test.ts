@@ -13,6 +13,18 @@ test("late alert is available only for an unacknowledged confirmed or approved r
   assert.equal(isDineInReservationLateAlert(oldReservationDate, lateTime, "confirmed", true, now), false);
 });
 
+test("late alert starts exactly at LATE_ALERT_MINUTES", () => {
+  const scheduled = new Date("2020-01-01T04:00:00.000Z");
+  assert.equal(
+    isDineInReservationLateAlert(scheduled, lateTime, "confirmed", false, new Date("2020-01-01T04:29:59.999Z")),
+    false
+  );
+  assert.equal(
+    isDineInReservationLateAlert(scheduled, lateTime, "confirmed", false, new Date("2020-01-01T04:30:00.000Z")),
+    true
+  );
+});
+
 test("late alert clears for arrived, seated, cancelled, and other non-confirmed states", () => {
   for (const status of ["arrived", "seated", "preparing", "in_progress", "cancelled", "no_show"]) {
     assert.equal(

@@ -29,8 +29,21 @@ test("unified reservations page lists all three views and keeps pickup actions",
             time: "18:00",
             guests: 4,
             status: "confirmed",
+            late_alert: true,
             reservation_type: "dine_in",
             table_numbers: [2, 5]
+          }, {
+            id: "reservation-2",
+            type: "dine_in",
+            reference: "KTN-DINE-NOT-LATE",
+            customer_name: "On-time Guest",
+            date,
+            time: "18:30",
+            guests: 2,
+            status: "approved",
+            late_alert: false,
+            reservation_type: "dine_in",
+            table_numbers: [3]
           }, {
             id: "catering-1",
             type: "catering",
@@ -81,6 +94,11 @@ test("unified reservations page lists all three views and keeps pickup actions",
   await expect(page.getByRole("link", { name: "Reservations" })).toBeVisible();
   await expect(page.getByText("Test Guest")).toBeVisible();
   await expect(page.getByText("Tables: 2, 5")).toBeVisible();
+  const lateAlert = page.getByRole("status").filter({ hasText: "Late arrival alert" });
+  await expect(lateAlert).toBeVisible();
+  await expect(lateAlert).toHaveCount(1);
+  const onTimeReservation = page.locator("li").filter({ hasText: "On-time Guest" });
+  await expect(onTimeReservation.getByRole("status")).toHaveCount(0);
 
   const reservationsList = page.getByRole("region", { name: "Tables upcoming list" });
   await expect(reservationsList.getByRole("button")).toHaveCount(0);
