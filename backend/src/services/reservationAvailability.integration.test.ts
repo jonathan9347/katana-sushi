@@ -8,8 +8,11 @@ if (!testDatabaseUrl) {
 }
 
 const testDatabaseName = new URL(testDatabaseUrl).pathname.slice(1);
-if (!testDatabaseName.startsWith("katana_sushi_dev_3b_availability_")) {
-  throw new Error("Reservation availability integration tests only run on a dedicated restored 3b test copy.");
+if (
+  !testDatabaseName.startsWith("katana_sushi_dev_3b_availability_") &&
+  testDatabaseName !== "katana_sushi_dev_step4_7_phase2_pos_test"
+) {
+  throw new Error("Reservation availability integration tests only run on an approved restored test copy.");
 }
 
 process.env.DATABASE_URL = testDatabaseUrl;
@@ -44,18 +47,13 @@ let originalTables: Array<{
 }> = [];
 let originalEstimatedDuration = 120;
 let createdSessionIds: string[] = [];
+let createdTableIds: string[] = [];
 let requestSequence = 0;
 
 before(async () => {
   const database = await prisma.$queryRaw<Array<{ name: string }>>`SELECT current_database() AS name`;
   assert.equal(database[0]?.name, testDatabaseName, "Tests must connect to the new restored copy.");
   assert.equal(await checkDatabaseHealth(), true, "The restored test database must be reachable.");
-  assert.equal(
-    await prisma.diningTableSession.count({ where: { status: "active" } }),
-    0,
-    "The fresh restored copy must not contain active dining sessions."
-  );
-
   const settings = await prisma.systemSetting.findUniqueOrThrow({
     where: { singleton_key: "default" },
     select: {
@@ -113,6 +111,14 @@ after(async () => {
     await prisma.diningTableSession.updateMany({
       where: { id: { in: createdSessionIds }, status: "active" },
       data: { status: "closed", closed_at: new Date() }
+    });
+    await prisma.diningTableSession.deleteMany({
+      where: { id: { in: createdSessionIds } }
+    });
+  }
+  if (createdTableIds.length > 0) {
+    await prisma.table.deleteMany({
+      where: { id: { in: createdTableIds } }
     });
   }
   if (originalTables.length > 0) {
@@ -286,8 +292,20 @@ test("excludes unavailable and archived tables from customer availability", asyn
   });
 });
 
-test("counts active POS sessions for today but not future-date availability and keeps estimates planning-only", async () => {
-  const [table] = await setAvailableTables([8]);
+test("active POS sessions block same-day availability until bill-out but not future-date availability", async () => {
+  const maxTableNumber = await prisma.table.aggregate({ _max: { table_number: true } });
+  const table = await prisma.table.create({
+    data: {
+      table_number: (maxTableNumber._max.table_number ?? 0) + 1000,
+      capacity: 8,
+      status: "available",
+      is_archived: false,
+      is_temporary: false
+    },
+    select: { id: true, table_number: true }
+  });
+  createdTableIds.push(table.id);
+  await setAvailableTables([table.table_number]);
   const cashier = await prisma.user.findFirst({
     where: { role: "cashier" },
     select: { id: true }
@@ -313,7 +331,7 @@ test("counts active POS sessions for today but not future-date availability and 
   const updatedSettings = await updateEstimatedDuration(30);
   assert.equal(updatedSettings.estimated_dining_duration_minutes, 30);
   assert.equal(updatedSettings.reservation_duration_minutes, 90);
-  assert.equal(await availability(today, requestedTime, 1), "available");
+  assert.equal(await availability(today, requestedTime, 1), "full");
 
   const [tableAfterPlanning, sessionAfterPlanning, savedSettings, unlimitedSettings] = await Promise.all([
     prisma.table.findUniqueOrThrow({
@@ -342,6 +360,7 @@ test("counts active POS sessions for today but not future-date availability and 
     data: { status: "closed", closed_at: new Date() }
   });
   await prisma.table.update({ where: { id: table.id }, data: { status: "available" } });
+  assert.equal(await availability(today, requestedTime, 1), "available");
 });
 
 test("booking confirmation rejects a table taken after availability was checked", async () => {

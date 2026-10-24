@@ -2115,17 +2115,35 @@ function addMinutesToTime(time: string, minutes: number) {
   return `${String(Math.floor(totalMinutes / 60)).padStart(2, "0")}:${String(totalMinutes % 60).padStart(2, "0")}`;
 }
 
+async function getTableWindowMinutes(tx: Prisma.TransactionClient | typeof prisma) {
+  const settings = await tx.systemSetting.findUnique({
+    where: { singleton_key: "default" },
+    select: { estimated_dining_duration_minutes: true }
+  });
+  const minutes = settings?.estimated_dining_duration_minutes;
+  if (!Number.isInteger(minutes) || !minutes || minutes <= 0) {
+    throw new InventoryError(
+      "The table reservation window setting is missing or invalid. Contact an administrator.",
+      "INVALID_TABLE_WINDOW_SETTING",
+      503
+    );
+  }
+  return minutes;
+}
+
 async function getReservationSlotSummary(
   tx: Prisma.TransactionClient | typeof prisma,
   dateKey: string,
-  time: string
+  time: string,
+  configuredTableWindowMinutes?: number
 ) {
+  const tableWindowMinutes = configuredTableWindowMinutes ?? await getTableWindowMinutes(tx);
   const slotStart = getReservationSlotStart(
     time,
     RESERVATION_SETTINGS.OPENING_TIME,
-    RESERVATION_SETTINGS.SLOT_DURATION_MINUTES
+    tableWindowMinutes
   );
-  const slotEnd = addMinutesToTime(slotStart, RESERVATION_SETTINGS.SLOT_DURATION_MINUTES);
+  const slotEnd = addMinutesToTime(slotStart, tableWindowMinutes);
   const date = manilaDateToUtc(dateKey);
   const [tableCapacity, slot, bookedReservations] = await Promise.all([
     tx.table.aggregate({ where: { is_archived: false }, _sum: { capacity: true } }),
@@ -2178,20 +2196,7 @@ async function allocateReservationTables(
   time: string,
   partySize: number
 ) {
-  const settings = await tx.$queryRaw<Array<{ estimated_dining_duration_minutes: number }>>`
-    SELECT estimated_dining_duration_minutes
-    FROM system_settings
-    WHERE singleton_key = 'default'
-    LIMIT 1
-  `;
-  const estimatedDurationMinutes = Number(settings[0]?.estimated_dining_duration_minutes);
-  if (!Number.isInteger(estimatedDurationMinutes) || estimatedDurationMinutes <= 0) {
-    throw new InventoryError(
-      "The estimated dining duration setting is missing or invalid. Contact an administrator.",
-      "INVALID_DINING_DURATION_SETTING",
-      503
-    );
-  }
+  const tableWindowMinutes = await getTableWindowMinutes(tx);
 
   const [tables, assignments, sessions] = await Promise.all([
     tx.table.findMany({
@@ -2263,7 +2268,7 @@ async function allocateReservationTables(
   const unavailableForSlot = getTablesUnavailableForSlot(
     dateKey,
     time,
-    estimatedDurationMinutes,
+    tableWindowMinutes,
     reservationWindows,
     activeDiningSessions
   );
@@ -4965,12 +4970,13 @@ app.put("/api/staff/reservation-slot-capacity", async (req, res, next) => {
       return res.status(400).json({ message: "Choose a valid service date and time." });
     }
 
-    const slotStart = getReservationSlotStart(
-      body.time,
-      RESERVATION_SETTINGS.OPENING_TIME,
-      RESERVATION_SETTINGS.SLOT_DURATION_MINUTES
-    );
     const summary = await prisma.$transaction(async (tx) => {
+      const tableWindowMinutes = await getTableWindowMinutes(tx);
+      const slotStart = getReservationSlotStart(
+        body.time,
+        RESERVATION_SETTINGS.OPENING_TIME,
+        tableWindowMinutes
+      );
       await tx.reservationSlotCapacity.upsert({
         where: { service_date_slot_start: { service_date: body.date, slot_start: slotStart } },
         update: {},
@@ -4985,7 +4991,7 @@ app.put("/api/staff/reservation-slot-capacity", async (req, res, next) => {
         where: { service_date_slot_start: { service_date: body.date, slot_start: slotStart } },
         data: { walk_in_pax: body.walk_in_pax }
       });
-      return getReservationSlotSummary(tx, body.date, body.time);
+      return getReservationSlotSummary(tx, body.date, body.time, tableWindowMinutes);
     });
     return res.json(summary);
   } catch (error) {
