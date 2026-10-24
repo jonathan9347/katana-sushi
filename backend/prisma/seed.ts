@@ -1,6 +1,7 @@
 import bcrypt from "bcrypt";
 import { PrismaClient } from "@prisma/client";
 import { INVENTORY_STANDARDS } from "../src/config/inventoryStandards";
+import { CATERING_PACKAGE_SEEDS } from "../src/config/cateringPackages";
 import { assertDevelopmentDatabase } from "../src/lib/seedSafety";
 
 const prisma = new PrismaClient();
@@ -38,6 +39,9 @@ const rawMaterials: RawMaterialSeed[] = [
   { name: "Tamago", unit: "piece", current_stock: 80n, reorder_level: 20n, cost_per_unit: 18 },
   { name: "Cream cheese", unit: "g", current_stock: 4000n, reorder_level: 1000n, cost_per_unit: 0.43 },
   { name: "Tempura flakes", unit: "g", current_stock: 6000n, reorder_level: 2000n, cost_per_unit: 0.18 },
+  { name: "Tempura flour", unit: "g", current_stock: 0n, reorder_level: 0n, cost_per_unit: 0 },
+  { name: "Cooking oil", unit: "ml", current_stock: 0n, reorder_level: 0n, cost_per_unit: 0 },
+  { name: "Dipping sauce", unit: "ml", current_stock: 0n, reorder_level: 0n, cost_per_unit: 0 },
   { name: "Unagi", unit: "g", current_stock: 3000n, reorder_level: 1000n, cost_per_unit: 1.1 },
   { name: "Shrimp", unit: "g", current_stock: 7000n, reorder_level: 2000n, cost_per_unit: 0.52 },
   {
@@ -427,58 +431,7 @@ async function main() {
   });
 
   await prisma.cateringPackage.createMany({
-    data: [
-      {
-        id: "pkg_classic",
-        name: "Classic Station",
-        description: "California Maki, Mango Roll, Volcano Roll, Iced Tea",
-        pricePerPerson: 350,
-        minPax: 10,
-        maxPax: 100,
-        imageUrl: "/images/catering/classic-station.jpg",
-        items: ["California Maki", "Mango Roll", "Volcano Roll", "Iced Tea"]
-      },
-      {
-        id: "pkg_premium",
-        name: "Premium Station",
-        description: "Tori Teriyaki Roll, Salmon Cheese Maki, Futomaki, Iced Tea",
-        pricePerPerson: 550,
-        minPax: 10,
-        maxPax: 100,
-        imageUrl: "/images/catering/premium-station.jpg",
-        items: ["Tori Teriyaki Roll", "Salmon Cheese Maki", "Futomaki", "Iced Tea"]
-      },
-      {
-        id: "pkg_nigiri",
-        name: "Nigiri Station",
-        description: "Tamago Sushi, Salmon Nigiri, Kani Sushi, Iced Tea",
-        pricePerPerson: 300,
-        minPax: 10,
-        maxPax: 100,
-        imageUrl: "/images/catering/nigiri-station.jpg",
-        items: ["Tamago Sushi", "Salmon Nigiri", "Kani Sushi", "Iced Tea"]
-      },
-      {
-        id: "pkg_mix",
-        name: "Mix Station",
-        description: "California Maki, Mango Roll, Salmon Nigiri, Tamago Sushi, Iced Tea",
-        pricePerPerson: 450,
-        minPax: 10,
-        maxPax: 100,
-        imageUrl: "/images/catering/mix-station.jpg",
-        items: ["California Maki", "Mango Roll", "Salmon Nigiri", "Tamago Sushi", "Iced Tea"]
-      },
-      {
-        id: "pkg_sashimi",
-        name: "Sashimi Bar",
-        description: "Salmon Sashimi, Tuna Sashimi, Assorted Nigiri, Iced Tea",
-        pricePerPerson: 650,
-        minPax: 20,
-        maxPax: 100,
-        imageUrl: "/images/catering/sashimi-bar.jpg",
-        items: ["Salmon Sashimi", "Tuna Sashimi", "Assorted Nigiri", "Iced Tea"]
-      }
-    ]
+    data: CATERING_PACKAGE_SEEDS
   });
 
   await prisma.table.createMany({

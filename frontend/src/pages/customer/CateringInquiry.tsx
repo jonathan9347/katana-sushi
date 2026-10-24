@@ -35,8 +35,10 @@ type CateringPackage = {
 
 const stationLabels: Record<string, string> = {
   sushi_station: "Sushi Station",
-  sashimi_bar: "Sashimi Bar",
-  tempura_live: "Tempura Live"
+  whole_tuna: "Whole Tuna (standalone)",
+  tuna_add_on: "Tuna Add-on",
+  salmon_add_on: "Salmon Add-on",
+  tempura_live: "Tempura (50 pax)"
 };
 
 function today() {
@@ -63,7 +65,7 @@ export default function CateringInquiry() {
     venue_address: "",
     package_type: "sushi_station",
     selected_package_id: "",
-    sashimi_quantity_kg: "2",
+    package_quantity: "2",
     customer_name: "",
     customer_phone: "",
     customer_email: "",
@@ -90,11 +92,11 @@ export default function CateringInquiry() {
   const selectedPackage =
     stationOptions.find((item) => item.id === form.selected_package_id) ?? stationOptions[0];
   const selectedStationName = stationLabels[form.package_type] ?? form.package_type;
-  const quantityKg = Number(form.sashimi_quantity_kg) || 0;
+  const quantityKg = Number(form.package_quantity) || 0;
   const estimatedPrice = getOptionPrice(selectedPackage, quantityKg);
   const selectedOptionText = selectedPackage
-    ? form.package_type === "sashimi_bar"
-      ? `${selectedPackage.name} - ${form.sashimi_quantity_kg} kg - ${money(estimatedPrice)}`
+    ? selectedPackage.items?.pricingModel === "per_unit"
+      ? `${selectedPackage.name} - ${form.package_quantity} ${selectedPackage.items.unit ?? "kg"} - ${money(estimatedPrice)}`
       : selectedPackage.items?.pricingModel === "fixed"
         ? `${selectedPackage.description ?? selectedPackage.name} - ${selectedPackage.items.fixedPax ?? selectedPackage.minPax} pax - ${money(estimatedPrice)}`
         : `${selectedPackage.description ?? selectedPackage.name} - ${money(estimatedPrice)}`
@@ -117,9 +119,9 @@ export default function CateringInquiry() {
       ...current,
       package_type: stationType,
       selected_package_id: nextPackage?.id ?? "",
-      sashimi_quantity_kg: stationType === "sashimi_bar"
+      package_quantity: nextPackage?.items?.pricingModel === "per_unit"
         ? String(nextPackage?.items?.minimum ?? nextPackage?.items?.minKg ?? 1)
-        : current.sashimi_quantity_kg
+        : current.package_quantity
     }));
   }
 
@@ -128,9 +130,9 @@ export default function CateringInquiry() {
     setForm((current) => ({
       ...current,
       selected_package_id: packageId,
-      sashimi_quantity_kg: form.package_type === "sashimi_bar"
+      package_quantity: option?.items?.pricingModel === "per_unit"
         ? String(option?.items?.minimum ?? option?.items?.minKg ?? 1)
-        : current.sashimi_quantity_kg
+        : current.package_quantity
     }));
   }
 
@@ -190,7 +192,7 @@ export default function CateringInquiry() {
             <PartyPopper className="h-7 w-7 lg:h-9 lg:w-9" />
             <h1 className="mt-2 text-2xl font-black lg:text-3xl">Catering Inquiry</h1>
             <p className="mt-2 max-w-md text-sm font-medium text-slate-100">
-              Plan your special event with sushi station, sashimi bar, or live tempura.
+              Book a station package, add tuna or salmon by the kilogram, or inquire about standalone Whole Tuna.
             </p>
           </div>
         </div>
@@ -242,7 +244,7 @@ export default function CateringInquiry() {
               {estimatedPrice > 0 && <p className="font-black text-red-700">{money(estimatedPrice)}</p>}
             </div>
 
-            {stationOptions.length > 1 && form.package_type !== "sashimi_bar" && (
+            {stationOptions.length > 1 && (
               <div className="mt-3 space-y-3">
                 <label className="block">
                   <span className="mb-1 block text-xs font-bold uppercase tracking-wide text-slate-500">Pax option</span>
@@ -267,10 +269,10 @@ export default function CateringInquiry() {
               </div>
             )}
 
-            {form.package_type === "sashimi_bar" && (
+            {selectedPackage?.items?.pricingModel === "per_unit" && (
               <div className="mt-3 grid gap-3">
                 <label className="block">
-                  <span className="mb-1 block text-xs font-bold uppercase tracking-wide text-slate-500">Sashimi option</span>
+                  <span className="mb-1 block text-xs font-bold uppercase tracking-wide text-slate-500">Package option</span>
                   <select className="customer-input" value={selectedPackage?.id ?? ""} onChange={(event) => selectPackage(event.target.value)}>
                     {stationOptions.map((option) => (
                       <option key={option.id} value={option.id}>{option.name} - {money(option.items?.pricePerUnit ?? option.items?.pricePerKg ?? 0)}/{option.items?.unit ?? "kg"}</option>
@@ -278,7 +280,9 @@ export default function CateringInquiry() {
                   </select>
                 </label>
                 <label className="block">
-                  <span className="mb-1 block text-xs font-bold uppercase tracking-wide text-slate-500">Quantity (kg)</span>
+                  <span className="mb-1 block text-xs font-bold uppercase tracking-wide text-slate-500">
+                    Quantity ({selectedPackage.items?.unit ?? "kg"})
+                  </span>
                   <input
                     className="customer-input"
                     type="number"
@@ -286,12 +290,12 @@ export default function CateringInquiry() {
                     max={maximumKg}
                     step={stepKg}
                     inputMode="numeric"
-                    value={form.sashimi_quantity_kg}
+                    value={form.package_quantity}
                     onChange={(event) => {
                       const value = event.target.value;
                       const quantity = Number(value);
                       setField(
-                        "sashimi_quantity_kg",
+                        "package_quantity",
                         value && maximumKg !== undefined && Number.isFinite(quantity)
                           ? String(Math.min(quantity, maximumKg))
                           : value
@@ -303,7 +307,7 @@ export default function CateringInquiry() {
               </div>
             )}
 
-            {stationOptions.length === 1 && selectedPackage && form.package_type !== "sashimi_bar" && (
+            {stationOptions.length === 1 && selectedPackage && selectedPackage.items?.pricingModel !== "per_unit" && (
               <div className="mt-3 rounded-md border border-slate-200 bg-white p-3">
                 <p className="font-bold text-slate-950">{selectedPackage.description ?? selectedPackage.name}</p>
                 <p className="mt-1 text-sm">{getOptionPrice(selectedPackage, 0) > 0
@@ -339,12 +343,10 @@ export default function CateringInquiry() {
             <h3 className="font-bold uppercase text-slate-950 dark:text-slate-50">Catering Reservation Rules</h3>
 
             <ul className="mt-3 list-disc space-y-2 pl-5">
-              <li>Reservations are subject to confirmation by our event team.</li>
-              <li>Minimum reservation is for 10 pax.</li>
-              <li>Reserved guests are charged based on the reserved headcount.</li>
-              <li>Dining time is limited to 1 hour and 30 minutes upon serving of food.</li>
-              <li>Please arrive on time to avoid delays.</li>
-              <li>Reservations delayed by more than 15 minutes may be released to the next guest.</li>
+              <li>Station packages are subject to confirmation by our event team.</li>
+              <li>Whole Tuna is booked on its own from 20 to 40 kg at PHP 1,200 per kg.</li>
+              <li>Tuna and Salmon per-kilogram add-ons are intended for station packages.</li>
+              <li>Tempura is fixed at 50 pax for PHP 6,000.</li>
             </ul>
           </section>
           <button

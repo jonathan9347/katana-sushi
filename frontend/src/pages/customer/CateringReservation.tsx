@@ -71,8 +71,11 @@ function getStationType(item: CateringPackage) {
     return item.stationType;
   }
 
+  if (item.id.includes("whole_tuna") || item.id.includes("sashimi_20") || item.id.includes("sashimi_30")) {
+    return "whole_tuna";
+  }
   if (item.id.includes("sashimi")) {
-    return "sashimi_bar";
+    return item.id.includes("salmon") ? "salmon_add_on" : "tuna_add_on";
   }
 
   if (item.id.includes("tempura")) {
@@ -82,14 +85,34 @@ function getStationType(item: CateringPackage) {
   return "sushi_station";
 }
 
-function getPackagePrice(item?: CateringPackage, sashimiQuantityKg?: number) {
+function isPerUnitPackage(item?: CateringPackage) {
+  return Boolean(
+    item?.items?.pricingModel === "per_unit" ||
+    item?.items?.pricingType === "range" ||
+    item?.items?.pricePerUnit !== undefined ||
+    item?.items?.pricePerKg !== undefined
+  );
+}
+
+function getStationName(id: string) {
+  const names: Record<string, string> = {
+    sushi_station: "Sushi Station",
+    whole_tuna: "Whole Tuna (standalone)",
+    tuna_add_on: "Tuna Add-on",
+    salmon_add_on: "Salmon Add-on",
+    tempura_live: "Tempura (50 pax)"
+  };
+  return names[id] ?? id.split(/[_\s-]+/).map((part) => `${part.charAt(0).toUpperCase()}${part.slice(1)}`).join(" ");
+}
+
+function getPackagePrice(item?: CateringPackage, quantity?: number) {
   if (!item?.items) {
     return 0;
   }
 
   if (item.items.pricingModel === "per_unit" || item.items.pricingType === "range") {
     const rate = item.items.pricePerUnit ?? item.items.pricePerKg ?? 0;
-    return rate * (sashimiQuantityKg ?? 0);
+    return rate * (quantity ?? 0);
   }
 
   if (item.items.pricingModel === "fixed" || item.items.pricingType === "flat") {
@@ -176,7 +199,7 @@ export default function CateringReservation() {
     venue_address: string;
     station_types: string[];
     package_by_station: { [stationId: string]: string };
-    sashimi_quantity_kg: string;
+    package_quantities: Record<string, string>;
     customer_name: string;
     customer_phone: string;
     customer_email: string;
@@ -191,7 +214,7 @@ export default function CateringReservation() {
     venue_address: "",
     station_types: [],
     package_by_station: {},
-    sashimi_quantity_kg: "",
+    package_quantities: {},
     customer_name: "",
     customer_phone: "",
     customer_email: "",
@@ -226,7 +249,7 @@ export default function CateringReservation() {
     const stationTypes = Array.from(new Set(packages.map(getStationType)));
     return stationTypes.map((id) => ({
       id,
-      name: id.split(/[_\s-]+/).map((part) => `${part.charAt(0).toUpperCase()}${part.slice(1)}`).join(" ")
+      name: getStationName(id)
     }));
   }, [packages]);
   const packagesByStation = useMemo(() => {
@@ -243,22 +266,35 @@ export default function CateringReservation() {
     selectedPackageByStation[s.id] = (packagesByStation[s.id] ?? []).find((p) => p.id === pkgId);
   });
 
-  const headcountNumber = Math.max(
-    systemSettings.minimum_catering_pax,
-    ...form.station_types.map((stationId) => {
-      const selectedPackage = selectedPackageByStation[stationId];
-      return selectedPackage && getStationType(selectedPackage) !== "sashimi_bar" ? selectedPackage.minPax : 0;
-    })
+  const selectedPackages = form.station_types
+    .map((stationId) => selectedPackageByStation[stationId])
+    .filter((item): item is CateringPackage => Boolean(item));
+  const selectedBasePackages = selectedPackages.filter((item) =>
+    ["sushi_station", "tempura_live"].includes(getStationType(item))
   );
+  const headcountNumber = selectedBasePackages.length > 0
+    ? Math.max(
+      systemSettings.minimum_catering_pax,
+      ...form.station_types.map((stationId) => {
+        const selectedPackage = selectedPackageByStation[stationId];
+        return selectedPackage && ["sushi_station", "tempura_live"].includes(getStationType(selectedPackage))
+          ? getStationType(selectedPackage) === "tempura_live"
+            ? selectedPackage.items?.fixedPax ?? selectedPackage.minPax
+            : selectedPackage.minPax
+          : 0;
+      })
+    )
+    : null;
   const subtotal = useMemo(() => {
     return stations.reduce((sum, s) => {
       if (!form.station_types.includes(s.id)) return sum;
       const pkg = selectedPackageByStation[s.id];
-      const sashimiQuantityKg = s.id === "sashimi_bar" ? Number(form.sashimi_quantity_kg) || undefined : undefined;
-      return sum + getPackagePrice(pkg, sashimiQuantityKg);
+      const quantity = pkg && isPerUnitPackage(pkg)
+        ? Number(form.package_quantities[pkg.id]) || undefined
+        : undefined;
+      return sum + getPackagePrice(pkg, quantity);
     }, 0);
-  }, [form.station_types, packagesByStation, form.package_by_station, form.sashimi_quantity_kg]);
-  const selectedPackages = form.station_types.map((stationId) => selectedPackageByStation[stationId]).filter(Boolean);
+  }, [form.station_types, packagesByStation, form.package_by_station, form.package_quantities]);
   const hasQuoteOnlyOptions = selectedPackages.some((item) => item?.items?.pricingType === "quote");
   const hasPricedOptions = selectedPackages.some((item) => item?.items?.pricingType !== "quote");
   const isZeroQuoteOnlyReservation = hasQuoteOnlyOptions;
@@ -307,23 +343,33 @@ export default function CateringReservation() {
       return "Choose an option for each selected station.";
     }
 
-    if (form.station_types.includes("sashimi_bar")) {
-      const sashimiPackage = selectedPackageByStation.sashimi_bar;
-      const quantityKg = Number(form.sashimi_quantity_kg);
-      const minimumKg = sashimiPackage?.items?.minimum ?? sashimiPackage?.items?.minKg;
-      const stepKg = sashimiPackage?.items?.step ?? sashimiPackage?.items?.stepKg ?? 1;
-      const maximumKg = sashimiPackage?.items?.maximum ?? sashimiPackage?.items?.maxKg;
-
+    const selectedStationTypes = selectedPackages.map((item) => item ? getStationType(item) : "");
+    if (selectedStationTypes.includes("whole_tuna") && selectedStationTypes.length !== 1) {
+      return "Whole Tuna can only be booked by itself.";
+    }
+    const hasBasePackage = selectedStationTypes.some((id) => id === "sushi_station" || id === "tempura_live");
+    if (
+      selectedStationTypes.some((id) => id === "tuna_add_on" || id === "salmon_add_on") &&
+      !hasBasePackage
+    ) {
+      return "Tuna and Salmon add-ons must be added to a station package.";
+    }
+    for (const item of selectedPackages) {
+      if (!item || !isPerUnitPackage(item)) continue;
+      const quantity = Number(form.package_quantities[item.id]);
+      const minimum = item.items?.minimum ?? item.items?.minKg;
+      const maximum = item.items?.maximum ?? item.items?.maxKg;
+      const step = item.items?.step ?? item.items?.stepKg ?? 1;
       if (
-        !Number.isInteger(quantityKg) ||
-        typeof minimumKg !== "number" ||
-        !Number.isFinite(stepKg) ||
-        stepKg <= 0 ||
-        quantityKg < minimumKg ||
-        (typeof maximumKg === "number" && quantityKg > maximumKg) ||
-        Math.abs((quantityKg - minimumKg) / stepKg - Math.round((quantityKg - minimumKg) / stepKg)) > 1e-9
+        !Number.isInteger(quantity) ||
+        typeof minimum !== "number" ||
+        !Number.isFinite(step) ||
+        step <= 0 ||
+        quantity < minimum ||
+        (typeof maximum === "number" && quantity > maximum) ||
+        Math.abs((quantity - minimum) / step - Math.round((quantity - minimum) / step)) > 1e-9
       ) {
-        return "Enter an exact sashimi quantity within the selected option's kilogram range.";
+        return `Enter a valid ${item.items?.unit ?? "kg"} quantity for ${item.name}.`;
       }
     }
 
@@ -375,9 +421,11 @@ export default function CateringReservation() {
         event_date: form.event_date,
         event_time: form.event_time,
         event_type_other: form.event_type === "Others" ? form.event_type_other.trim() : null,
-        ...(form.station_types.includes("sashimi_bar")
-          ? { sashimi_quantity_kg: Number(form.sashimi_quantity_kg) }
-          : {}),
+        package_quantities: Object.fromEntries(
+          selectedPackages
+            .filter((item): item is CateringPackage => Boolean(item) && isPerUnitPackage(item))
+            .map((item) => [item.id, Number(form.package_quantities[item.id])])
+        ),
         headcount: headcountNumber,
         venue_address: form.venue_address,
         package_id: form.package_by_station[form.station_types[0]] ?? "",
@@ -485,12 +533,13 @@ export default function CateringReservation() {
                   const optionCards = options.map((item) => {
                     const images = getPackageImages(item);
                     const optionSelected = selectedPkg?.id === item.id;
-                    const isSashimiOption = item.items?.pricingModel === "per_unit" || item.items?.pricePerUnit !== undefined || item.items?.pricePerKg !== undefined;
-                    const sashimiQuantityKg = Number(form.sashimi_quantity_kg);
-                    const hasSashimiQuantity = form.sashimi_quantity_kg !== "" && Number.isFinite(sashimiQuantityKg);
-                    const minSashimiKg = item.items?.minimum ?? item.items?.minKg ?? 1;
-                    const sashimiStepKg = item.items?.step ?? item.items?.stepKg ?? 1;
-                    const maxSashimiKg = item.items?.maximum ?? item.items?.maxKg;
+                    const isQuantityPackage = isPerUnitPackage(item);
+                    const quantityValue = form.package_quantities[item.id] ?? "";
+                    const quantity = Number(quantityValue);
+                    const hasQuantity = quantityValue !== "" && Number.isFinite(quantity);
+                    const minQuantity = item.items?.minimum ?? item.items?.minKg ?? 1;
+                    const quantityStep = item.items?.step ?? item.items?.stepKg ?? 1;
+                    const maxQuantity = item.items?.maximum ?? item.items?.maxKg;
 
                     return (
                       <div
@@ -506,11 +555,14 @@ export default function CateringReservation() {
                             setForm((current) => ({
                               ...current,
                               package_by_station: { ...current.package_by_station, [station.id]: item.id },
-                              sashimi_quantity_kg: isSashimiOption
-                                ? current.package_by_station[station.id] !== item.id || !current.sashimi_quantity_kg
-                                  ? String(minSashimiKg)
-                                  : current.sashimi_quantity_kg
-                                : current.sashimi_quantity_kg
+                              package_quantities: isQuantityPackage
+                                ? {
+                                  ...current.package_quantities,
+                                  [item.id]: current.package_by_station[station.id] !== item.id || !current.package_quantities[item.id]
+                                    ? String(minQuantity)
+                                    : current.package_quantities[item.id]
+                                }
+                                : current.package_quantities
                             }));
                           }}
                           className="block w-full text-left"
@@ -546,8 +598,8 @@ export default function CateringReservation() {
                             <div className="min-w-0">
                               <p className="break-words text-sm font-bold text-white md:text-base">{item.description ?? item.name}</p>
                               <p className="mt-1 text-xs uppercase tracking-wide text-katana-muted">
-                                {isSashimiOption
-                                  ? `${minSashimiKg}-${maxSashimiKg ?? "∞"} ${item.items?.unit ?? "kg"}`
+                                {isQuantityPackage
+                                  ? `${minQuantity}-${maxQuantity ?? "∞"} ${item.items?.unit ?? "kg"}`
                                   : item.items?.pricingModel === "fixed"
                                     ? `${item.items.fixedPax ?? item.minPax} pax`
                                     : `${item.minPax}-${item.maxPax} pax`}
@@ -558,47 +610,62 @@ export default function CateringReservation() {
                             </p>
                           </div>
                         </button>
-                        {optionSelected && isSashimiOption && (
+                        {optionSelected && isQuantityPackage && (
                           <label className="grid gap-2 border-t border-katana-border p-4">
-                            <span className="customer-label">Exact sashimi quantity (kg) *</span>
+                            <span className="customer-label">Exact {item.name} quantity ({item.items?.unit ?? "kg"}) *</span>
                             <div className="flex items-center gap-2">
                               <button
                                 type="button"
                                 aria-label={`Decrease ${item.name} quantity`}
-                                disabled={!hasSashimiQuantity || sashimiQuantityKg <= minSashimiKg}
+                                disabled={!hasQuantity || quantity <= minQuantity}
                                 className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-katana-border bg-katana-surface text-lg font-bold text-white transition hover:border-katana-red disabled:cursor-not-allowed disabled:opacity-40"
-                                onClick={() => setField("sashimi_quantity_kg", String(Math.max(minSashimiKg, sashimiQuantityKg - sashimiStepKg)))}
+                                onClick={() => setForm((current) => ({
+                                  ...current,
+                                  package_quantities: {
+                                    ...current.package_quantities,
+                                    [item.id]: String(Math.max(minQuantity, quantity - quantityStep))
+                                  }
+                                }))}
                               >
                                 -
                               </button>
                               <input
                                 className="customer-input text-center"
                                 type="number"
-                                min={minSashimiKg}
-                                max={maxSashimiKg}
-                                step={sashimiStepKg}
+                                min={minQuantity}
+                                max={maxQuantity}
+                                step={quantityStep}
                                 inputMode="numeric"
-                                value={form.sashimi_quantity_kg}
+                                value={quantityValue}
                                 onChange={(event) => {
                                   const value = event.target.value;
-                                  const quantity = Number(value);
-                                  setField(
-                                    "sashimi_quantity_kg",
-                                    value && maxSashimiKg !== undefined && Number.isFinite(quantity)
-                                      ? String(Math.min(quantity, maxSashimiKg))
-                                      : value
-                                  );
+                                  const parsedQuantity = Number(value);
+                                  setForm((current) => ({
+                                    ...current,
+                                    package_quantities: {
+                                      ...current.package_quantities,
+                                      [item.id]: value && maxQuantity !== undefined && Number.isFinite(parsedQuantity)
+                                        ? String(Math.min(parsedQuantity, maxQuantity))
+                                        : value
+                                    }
+                                  }));
                                 }}
                                 required
                               />
                               <button
                                 type="button"
                                 aria-label={`Increase ${item.name} quantity`}
-                                disabled={hasSashimiQuantity && maxSashimiKg !== undefined && sashimiQuantityKg >= maxSashimiKg}
+                                disabled={hasQuantity && maxQuantity !== undefined && quantity >= maxQuantity}
                                 className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-katana-border bg-katana-surface text-lg font-bold text-white transition hover:border-katana-red disabled:cursor-not-allowed disabled:opacity-40"
                                 onClick={() => {
-                                  const currentQuantity = hasSashimiQuantity ? sashimiQuantityKg : minSashimiKg - sashimiStepKg;
-                                  setField("sashimi_quantity_kg", String(Math.min(maxSashimiKg ?? Number.POSITIVE_INFINITY, currentQuantity + sashimiStepKg)));
+                                  const currentQuantity = hasQuantity ? quantity : minQuantity - quantityStep;
+                                  setForm((current) => ({
+                                    ...current,
+                                    package_quantities: {
+                                      ...current.package_quantities,
+                                      [item.id]: String(Math.min(maxQuantity ?? Number.POSITIVE_INFINITY, currentQuantity + quantityStep))
+                                    }
+                                  }));
                                 }}
                               >
                                 +
@@ -634,13 +701,22 @@ export default function CateringReservation() {
                               if (!isSelected && options.length === 1) {
                                 nextPackages[station.id] = options[0].id;
                               }
+                              const nextQuantities = { ...current.package_quantities };
+                              if (
+                                !isSelected &&
+                                options.length === 1 &&
+                                isPerUnitPackage(options[0]) &&
+                                !nextQuantities[options[0].id]
+                              ) {
+                                nextQuantities[options[0].id] = String(
+                                  options[0].items?.minimum ?? options[0].items?.minKg ?? 1
+                                );
+                              }
                               return {
                                 ...current,
                                 station_types: nextSelectedStations,
                                 package_by_station: nextPackages,
-                                sashimi_quantity_kg: isSelected && station.id === "sashimi_bar"
-                                  ? ""
-                                  : current.sashimi_quantity_kg
+                                package_quantities: nextQuantities
                               };
                             });
                           }}
@@ -775,18 +851,19 @@ export default function CateringReservation() {
                     );
                   }
 
-                  const isSashimi = id === "sashimi_bar";
-                  const quantityKg = isSashimi ? Number(form.sashimi_quantity_kg) || 0 : undefined;
-                  const needsSashimiQuantity = isSashimi && !form.sashimi_quantity_kg;
-                  const lineTotal = getPackagePrice(option, quantityKg);
+                  const isQuantityPackage = isPerUnitPackage(option);
+                  const quantityValue = form.package_quantities[option.id] ?? "";
+                  const quantity = isQuantityPackage ? Number(quantityValue) || 0 : undefined;
+                  const needsQuantity = isQuantityPackage && !quantityValue;
+                  const lineTotal = getPackagePrice(option, quantity);
 
                   return (
                     <div key={id} className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-3">
-                      <span className="break-words">{option.description ?? option.name}{isSashimi && form.sashimi_quantity_kg ? ` · ${form.sashimi_quantity_kg} kg` : ""}</span>
+                      <span className="break-words">{option.description ?? option.name}{isQuantityPackage && quantityValue ? ` · ${quantityValue} ${option.items?.unit ?? "kg"}` : ""}</span>
                       <span className="text-right font-semibold text-white">
                         {option.items?.pricingType === "quote"
                           ? "Custom quote"
-                          : needsSashimiQuantity
+                          : needsQuantity
                             ? "Set quantity"
                             : money(lineTotal)}
                       </span>
@@ -795,7 +872,7 @@ export default function CateringReservation() {
                 })}
                 <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3">
                   <span>Headcount</span>
-                  <span className="text-right">{headcountNumber} pax</span>
+                  <span className="text-right">{headcountNumber === null ? "Not applicable" : `${headcountNumber} pax`}</span>
                 </div>
               </div>
               <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-2 border-b border-katana-border pb-2 text-sm text-neutral-300">

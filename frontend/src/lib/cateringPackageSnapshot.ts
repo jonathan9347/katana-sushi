@@ -19,9 +19,11 @@ function isPackageSnapshot(value: unknown): value is PackageSnapshot {
 
 function stationLabel(stationType: string) {
   const labels: Record<string, string> = {
-    sashimi_bar: "Sashimi Bar",
     sushi_station: "Sushi Station",
-    tempura_live: "Tempura Live"
+    whole_tuna: "Whole Tuna",
+    tuna_add_on: "Tuna Add-on",
+    salmon_add_on: "Salmon Add-on",
+    tempura_live: "Tempura"
   };
   return labels[stationType] ?? stationType.split(/[_\s-]+/).map((part) =>
     `${part.charAt(0).toUpperCase()}${part.slice(1)}`
@@ -39,7 +41,10 @@ export function formatCateringPackageSnapshots(value: unknown): string[] {
       : typeof snapshot.packageName === "string" ? snapshot.packageName : station;
     const price = typeof snapshot.price === "number" ? formatCurrencyPHP(snapshot.price) : "Price unavailable";
 
-    if (stationType === "sashimi_bar" && typeof snapshot.quantity === "number") {
+    if (
+      ["whole_tuna", "tuna_add_on", "salmon_add_on"].includes(stationType) &&
+      typeof snapshot.quantity === "number"
+    ) {
       const unit = typeof snapshot.unit === "string" ? snapshot.unit : "kg";
       const rate = typeof snapshot.rate === "number"
         ? ` · ${formatCurrencyPHP(snapshot.rate)}/${unit}`

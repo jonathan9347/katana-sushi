@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import { Sparkles } from "lucide-react";
+import { CalendarDays, Sparkles } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../../../lib/api";
 import { formatManilaDate, formatTime12, manilaDateKey, todayManilaDateKey } from "../../../lib/dateTime";
@@ -115,8 +115,10 @@ function isActive(status: string) {
 }
 
 export default function CateringReservations() {
-  const [selectedDate, setSelectedDate] = useState(today());
+  const [selectedDate, setSelectedDate] = useState("");
   const [cursor, setCursor] = useState(() => new Date(`${today()}T00:00:00+08:00`));
+  const [calendarOpen, setCalendarOpen] = useState(false);
+  const [statusFilter, setStatusFilter] = useState("open");
   const [activeReservation, setActiveReservation] = useState<CateringReservation | null>(null);
   const [approvalTarget, setApprovalTarget] = useState<CateringReservation | null>(null);
   const [mobilizationFeeInput, setMobilizationFeeInput] = useState("0");
@@ -179,10 +181,22 @@ export default function CateringReservations() {
     return map;
   }, [activeReservations]);
 
-  const selectedReservations = useMemo(
-    () => (eventsByDate.get(selectedDate) ? activeReservations.filter((reservation) => manilaDateKey(reservation.date) === selectedDate) : []).sort((a, b) => a.reference.localeCompare(b.reference)),
-    [activeReservations, eventsByDate, selectedDate]
-  );
+  const selectedReservations = useMemo(() => {
+    return reservations
+      .filter((reservation) => !selectedDate || manilaDateKey(reservation.date) === selectedDate)
+      .filter((reservation) => {
+        if (statusFilter === "open") return isActive(reservation.status);
+        if (statusFilter === "needs_action") return reservation.status === "pending_approval";
+        if (statusFilter === "active") return ["confirmed", "in_progress", "pending_final_payment", "preparing"].includes(reservation.status);
+        if (statusFilter === "completed") return reservation.status === "completed";
+        return true;
+      })
+      .sort((a, b) =>
+        manilaDateKey(a.date).localeCompare(manilaDateKey(b.date)) ||
+        (a.time ?? "").localeCompare(b.time ?? "") ||
+        a.reference.localeCompare(b.reference)
+      );
+  }, [reservations, selectedDate, statusFilter]);
 
   const pendingCount = reservations.filter((reservation) => reservation.status === "pending_approval").length;
   const activeCount = activeReservations.length;
@@ -226,6 +240,11 @@ export default function CateringReservations() {
     try {
       await api.put(`/api/staff/catering/reservations/${reservation.id}/decline`, { reason: reason.trim() });
       await query.refetch();
+      if (Number(reservation.downpayment_amount ?? 0) > 0) {
+        toast("Request declined. Any refund must be handled manually.");
+      }
+    } catch (error) {
+      toast(getApiErrorMessage(error, "Unable to decline the catering request."));
     } finally {
       setActionLoading((current) => ({ ...current, [reservation.id]: false }));
     }
@@ -238,6 +257,8 @@ export default function CateringReservations() {
     try {
       await api.put(`/api/staff/catering/reservations/${reservation.id}/no-show`, { reason: reason.trim() });
       await query.refetch();
+    } catch (error) {
+      toast(getApiErrorMessage(error, "Unable to mark the catering reservation as a no-show."));
     } finally {
       setActionLoading((current) => ({ ...current, [reservation.id]: false }));
     }
@@ -248,6 +269,8 @@ export default function CateringReservations() {
     try {
       await api.put(`/api/staff/catering/reservations/${reservation.id}/start-event`);
       await query.refetch();
+    } catch (error) {
+      toast(getApiErrorMessage(error, "Unable to start catering preparation."));
     } finally {
       setActionLoading((current) => ({ ...current, [reservation.id]: false }));
     }
@@ -263,6 +286,8 @@ export default function CateringReservations() {
       setCancelReason("");
       await query.refetch();
       toast("Catering reservation cancelled.");
+    } catch (error) {
+      toast(getApiErrorMessage(error, "Unable to cancel the catering reservation."));
     } finally {
       setActionLoading((current) => ({ ...current, [reservation.id]: false }));
     }
@@ -379,7 +404,7 @@ export default function CateringReservations() {
         <div className="flex flex-col gap-4 border-b border-slate-200 px-6 py-6 lg:flex-row lg:items-center lg:justify-between">
           <div>
             <p className="text-xs font-semibold uppercase tracking-wide text-red-700">Catering management</p>
-            <h1 className="mt-2 text-3xl font-black uppercase tracking-tight text-slate-950">Calendar first event control</h1>
+            <h1 className="mt-2 text-3xl font-black uppercase tracking-tight text-slate-950">Catering operations</h1>
           </div>
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
             <div className="rounded-3xl border border-slate-200 bg-slate-50 p-4">
@@ -391,8 +416,8 @@ export default function CateringReservations() {
               <p className="mt-2 text-3xl font-black text-amber-700">{pendingCount}</p>
             </div>
             <div className="rounded-3xl border border-slate-200 bg-slate-50 p-4">
-              <p className="text-xs uppercase tracking-wide text-slate-500">Selected date</p>
-              <p className="mt-2 text-3xl font-black text-slate-950">{formatManilaDate(selectedDate)}</p>
+              <p className="text-xs uppercase tracking-wide text-slate-500">Bookings shown</p>
+              <p className="mt-2 text-3xl font-black text-slate-950">{reservations.length}</p>
             </div>
           </div>
           {canEditPhotos && (
@@ -405,33 +430,55 @@ export default function CateringReservations() {
           )}
         </div>
 
-        <div className="grid gap-5 p-4 sm:p-5 xl:grid-cols-[minmax(0,1.5fr)_minmax(0,1fr)]">
-          <div className="space-y-6 xl:h-[calc(100vh-15rem)] xl:overflow-y-auto xl:overscroll-contain">
-            <MiniCalendar
-              month={cursor}
-              selectedDate={selectedDate}
-              eventsByDate={eventsByDate}
-              onPreviousMonth={() => shiftMonth(-1)}
-              onNextMonth={() => shiftMonth(1)}
-              onSelectDate={setSelectedDate}
-            />
-          </div>
-
-          <div className="space-y-6 xl:h-[calc(100vh-15rem)] xl:overflow-y-auto xl:overscroll-contain">
+        <div className="grid gap-5 p-4 sm:p-5">
+          <div className="space-y-6">
             <div className="rounded-3xl border border-slate-200 bg-slate-50 p-5">
               <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
                 <div>
-                  <p className="text-xs uppercase tracking-wide text-slate-500">Event stream</p>
+                  <p className="text-xs uppercase tracking-wide text-slate-500">Bookings</p>
                   <p className="mt-2 text-lg font-black text-slate-950">{selectedReservations.length} event{selectedReservations.length === 1 ? "" : "s"}</p>
                 </div>
-                <div className="inline-flex items-center gap-2 rounded-full bg-white px-3 py-2 text-xs font-semibold uppercase text-slate-600 shadow-sm">
-                  <Sparkles className="h-4 w-4 text-red-700" /> Live status
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="inline-flex items-center gap-2 rounded-full bg-white px-3 py-2 text-xs font-semibold uppercase text-slate-600 shadow-sm">
+                    <Sparkles className="h-4 w-4 text-red-700" /> Live status
+                  </span>
+                  <Button variant="outline" size="sm" onClick={() => setCalendarOpen(true)}>
+                    <CalendarDays className="mr-2 h-4 w-4" /> Event calendar
+                  </Button>
+                  {selectedDate && (
+                    <Button variant="ghost" size="sm" onClick={() => setSelectedDate("")}>
+                      Clear date filter
+                    </Button>
+                  )}
                 </div>
+              </div>
+
+              <div className="mt-4 flex flex-wrap gap-2" aria-label="Catering booking filters">
+                {[
+                  ["open", "Open"],
+                  ["needs_action", "Needs approval"],
+                  ["active", "Active"],
+                  ["completed", "Completed"],
+                  ["all", "All"]
+                ].map(([value, label]) => (
+                  <Button
+                    key={value}
+                    size="sm"
+                    variant={statusFilter === value ? "default" : "outline"}
+                    aria-pressed={statusFilter === value}
+                    onClick={() => setStatusFilter(value)}
+                  >
+                    {label}
+                  </Button>
+                ))}
+                <span className="self-center text-sm text-slate-600">
+                  {selectedDate ? formatManilaDate(selectedDate) : "All event dates"}
+                </span>
               </div>
 
               <div className="mt-5 grid gap-4">
                 {selectedReservations.length === 0 ? (
-                  <div className="rounded-3xl border border-dashed border-slate-200 bg-white p-6 text-sm text-slate-600">No catering events booked for this date.</div>
+                  <div className="rounded-3xl border border-dashed border-slate-200 bg-white p-6 text-sm text-slate-600">No catering bookings match these filters.</div>
                 ) : (
                   selectedReservations.map((reservation) => (
                     <article key={reservation.id} className="relative overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm">
@@ -476,17 +523,28 @@ export default function CateringReservations() {
                               }}
                               disabled={actionLoading[reservation.id]}
                             >
-                              {actionLoading[reservation.id] ? "Processing..." : "Approve"}
+                              {actionLoading[reservation.id] ? "Processing..." : "Approve request"}
                             </Button>
                           ) : null}
                           {reservation.status === "confirmed" ? (
-                            <Button variant="outline" size="sm" onClick={() => void handleStart(reservation)} disabled={actionLoading[reservation.id]}>
-                              {actionLoading[reservation.id] ? "Processing..." : "Start"}
+                            <Button size="sm" onClick={() => void handleStart(reservation)} disabled={actionLoading[reservation.id]}>
+                              {actionLoading[reservation.id] ? "Processing..." : "Start preparation"}
                             </Button>
                           ) : null}
-                          {(reservation.status === "in_progress" || reservation.status === "pending_final_payment") ? (
-                            <Button variant={hasOpenPayment(reservation) ? "outline" : "danger"} size="sm" onClick={() => void handleComplete(reservation)} disabled={actionLoading[reservation.id] || hasOpenPayment(reservation)}>
-                              {actionLoading[reservation.id] ? "Processing..." : hasOpenPayment(reservation) ? "Pending payment" : "Complete"}
+                          {reservation.status === "in_progress" ? (
+                            hasOpenPayment(reservation) ? (
+                              <Button size="sm" variant="outline" onClick={() => setActiveReservation(reservation)}>
+                                Record balance
+                              </Button>
+                            ) : (
+                              <Button variant="danger" size="sm" onClick={() => void handleComplete(reservation)} disabled={actionLoading[reservation.id]}>
+                                {actionLoading[reservation.id] ? "Processing..." : "Complete event"}
+                              </Button>
+                            )
+                          ) : null}
+                          {reservation.status === "pending_final_payment" ? (
+                            <Button size="sm" variant="outline" onClick={() => setActiveReservation(reservation)}>
+                              Record balance
                             </Button>
                           ) : null}
                         </div>
@@ -522,12 +580,27 @@ export default function CateringReservations() {
               </div>
               <div className="rounded-3xl border border-slate-200 bg-white p-5">
                 <p className="text-xs uppercase tracking-wide text-slate-500">Workflow tip</p>
-                <p className="mt-2 text-sm text-slate-700">Approve pending events from the date panel and manage active bookings from one calendar-first screen.</p>
+                <p className="mt-2 text-sm text-slate-700">Use the booking list for daily work. Each booking has one next-step action; the calendar is a read-only date filter.</p>
               </div>
             </div>
           </div>
         </div>
       </section>
+
+      <Dialog open={calendarOpen} title="Catering event calendar" onClose={() => setCalendarOpen(false)} panelClassName="max-w-4xl">
+        <p className="mb-3 text-sm text-slate-600">Calendar is view-only. Selecting a date filters the booking list.</p>
+        <MiniCalendar
+          month={cursor}
+          selectedDate={selectedDate}
+          eventsByDate={eventsByDate}
+          onPreviousMonth={() => shiftMonth(-1)}
+          onNextMonth={() => shiftMonth(1)}
+          onSelectDate={(date) => {
+            setSelectedDate(date);
+            setCalendarOpen(false);
+          }}
+        />
+      </Dialog>
 
       <ReservationDetailsModal
         open={Boolean(activeReservation)}
@@ -573,6 +646,11 @@ export default function CateringReservations() {
       <Dialog open={Boolean(cancelTarget)} title="Cancel catering reservation" onClose={() => setCancelTarget(null)} panelClassName="max-w-xl">
         {cancelTarget ? (
           <div className="grid gap-4">
+            <p className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+              {["in_progress", "preparing"].includes(cancelTarget.status)
+                ? "Preparation has started. All remaining locked ingredients will be recorded as Waste."
+                : "Preparation has not started. Locked ingredients will be released back to available stock."}
+            </p>
             <label className="grid gap-1 text-sm font-semibold text-slate-700">
               Cancellation reason
               <textarea required className="min-h-24 rounded-md border border-slate-300 px-3 py-2 text-sm" value={cancelReason} onChange={(event) => setCancelReason(event.target.value)} />

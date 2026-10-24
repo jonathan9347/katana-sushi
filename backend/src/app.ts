@@ -20,6 +20,14 @@ import { assertDevelopmentDatabase } from "./lib/seedSafety";
 import { getBeverageStockMaterialName } from "./lib/beverageStock";
 import { getProductCartCompatibility } from "./services/productCartCompatibility.service";
 import {
+  getCateringPackagePrice as calculateCateringPackagePrice,
+  getCateringInventoryRequirements,
+  getCateringInitialPayment,
+  getCateringQuantityRules,
+  getCateringSelectionError,
+  isCateringQuantityValid
+} from "./services/cateringBooking.service";
+import {
   assertEnoughAvailable,
   assertBatchQuantitiesMatchOnHand,
   assertReservationIngredientAvailability,
@@ -859,6 +867,7 @@ const cateringReservationBodySchema = z.object({
   event_type_other: z.string().trim().max(60).optional().nullable(),
   package_id: z.string().min(1),
   package_ids: z.array(z.string().min(1)).min(1).optional(),
+  package_quantities: z.record(z.string(), z.coerce.number().positive()).optional(),
   sashimi_quantity_kg: z.number().int().positive().optional(),
   payment_plan: z.enum(["downpayment", "full_payment"]),
   payment_method: z.enum(["cash", "gcash", "bank_transfer"]).optional(),
@@ -1056,29 +1065,6 @@ async function getVerifiedDownpayment(
   return { ...intent, transactionId: intent.transactionId };
 }
 
-const sushiStationInclusions = [
-  "California Maki",
-  "Mango Roll",
-  "Volcano Roll",
-  "Tori Teriyaki Roll",
-  "Salmon Cheese Maki",
-  "Futo California",
-  "Tamago Sushi",
-  "Kani Sushi",
-  "Salmon Nigiri"
-];
-
-const cateringPackageInventoryInclusions: Record<string, string[]> = {
-  pkg_sushi_50_60: sushiStationInclusions,
-  pkg_sushi_75_85: sushiStationInclusions,
-  pkg_sushi_100_120: sushiStationInclusions,
-  pkg_sushi_150_170: sushiStationInclusions,
-  pkg_sushi_200_220: sushiStationInclusions,
-  pkg_sashimi_20_29: ["Whole tuna sashimi service"],
-  pkg_sashimi_30_40: ["Whole tuna sashimi service"],
-  pkg_tempura_live: ["Live tempura cooking station"]
-};
-
 function getCateringPackageItems(items: Prisma.JsonValue | null | undefined): Prisma.JsonObject {
   if (!items || typeof items !== "object" || Array.isArray(items)) {
     return {};
@@ -1091,50 +1077,7 @@ function getCateringPackagePrice(
   stationPackage: { items: Prisma.JsonValue | null },
   quantity?: number
 ): number {
-  const items = getCateringPackageItems(stationPackage.items);
-  const pricingType = items.pricingType;
-  const pricingModel = items.pricingModel;
-
-  if (pricingType === "quote" || pricingModel === "quote") {
-    return 0;
-  }
-
-  const perUnitPrice = typeof items.pricePerUnit === "number"
-    ? items.pricePerUnit
-    : typeof items.pricePerKg === "number"
-      ? items.pricePerKg
-      : null;
-  if (pricingType === "range" || pricingType === "per_unit" || pricingModel === "per_unit") {
-    if (
-      perUnitPrice === null ||
-      !Number.isFinite(perUnitPrice) ||
-      perUnitPrice < 0 ||
-      quantity === undefined ||
-      !Number.isFinite(quantity) ||
-      quantity <= 0
-    ) {
-      throw new Error("Catering package has invalid per-unit pricing data.");
-    }
-    return perUnitPrice * quantity;
-  }
-
-  const fixedPrice = typeof items.fixedPrice === "number" ? items.fixedPrice : items.flatPrice;
-  if (pricingModel === "fixed" || pricingType === "flat") {
-    if (typeof fixedPrice !== "number" || !Number.isFinite(fixedPrice) || fixedPrice < 0) {
-      throw new Error("Catering package has invalid fixed pricing data.");
-    }
-    return fixedPrice;
-  }
-
-  if (pricingModel === "tier") {
-    const tierPrice = typeof fixedPrice === "number" ? fixedPrice : items.minPrice;
-    if (typeof tierPrice !== "number" || !Number.isFinite(tierPrice) || tierPrice < 0) {
-      throw new Error("Catering package has invalid tier pricing data.");
-    }
-    return tierPrice;
-  }
-
-  throw new Error("Catering package has an unsupported pricing configuration.");
+  return calculateCateringPackagePrice(stationPackage.items, quantity);
 }
 
 function normalizeProductName(value: string) {
@@ -1145,8 +1088,51 @@ function normalizeProductName(value: string) {
     .trim();
 }
 
-function getCateringPackageProductNames(packageId: string) {
-  return cateringPackageInventoryInclusions[packageId] ?? [];
+function getCateringPackageProductNames(items: Prisma.JsonValue | null | undefined) {
+  const inclusions = getCateringPackageItems(items).inclusions;
+  if (!Array.isArray(inclusions)) {
+    return [];
+  }
+
+  return inclusions.flatMap((inclusion) => {
+    if (typeof inclusion === "string") return [inclusion];
+    if (
+      inclusion !== null &&
+      typeof inclusion === "object" &&
+      !Array.isArray(inclusion) &&
+      typeof inclusion.name === "string"
+    ) {
+      return [inclusion.name];
+    }
+    return [];
+  });
+}
+
+function getCateringReservationPackageIds(packageIds: Prisma.JsonValue | null, fallbackPackageId?: string | null) {
+  if (Array.isArray(packageIds)) {
+    const ids = packageIds.filter((value): value is string => typeof value === "string");
+    if (ids.length > 0) return ids;
+  }
+  return fallbackPackageId ? [fallbackPackageId] : [];
+}
+
+function getCateringReservationPackageQuantities(packageSnapshot: Prisma.JsonValue | null) {
+  const quantities: Record<string, number> = {};
+  if (!Array.isArray(packageSnapshot)) {
+    return quantities;
+  }
+
+  for (const entry of packageSnapshot) {
+    const snapshot = getCateringPackageItems(entry);
+    if (
+      snapshot.pricingModel === "per_unit" &&
+      typeof snapshot.packageId === "string" &&
+      typeof snapshot.quantity === "number"
+    ) {
+      quantities[snapshot.packageId] = snapshot.quantity;
+    }
+  }
+  return quantities;
 }
 
 async function findCateringStationPackage(packageId: string) {
@@ -1469,23 +1455,77 @@ async function createCateringIngredientLocks(
   reservationId: string,
   packageIds: string[],
   headcount: number,
+  packageQuantities: Record<string, number>,
   userId?: string
 ) {
-  const packageProductNames = [...new Set(packageIds.flatMap(getCateringPackageProductNames))];
-
-  if (packageProductNames.length === 0) {
-    throw new InventoryError(
-      "This catering package has no menu items linked to inventory recipes.",
-      "CATERING_PACKAGE_RECIPE_MISSING",
-      409
-    );
-  }
-
   const reservation = await tx.cateringReservation.findUnique({
     where: { id: reservationId },
     select: { reservation_id: true }
   });
   const bookingReference = reservation?.reservation_id ?? reservationId;
+  const packages = await tx.cateringPackage.findMany({
+    where: { id: { in: packageIds } }
+  });
+  if (packages.length !== packageIds.length) {
+    throw new InventoryError("A selected catering package is no longer available.", "CATERING_PACKAGE_MISSING", 409);
+  }
+  const packageProductNames = [...new Set(
+    packages
+      .filter((item) => item.stationType === "sushi_station")
+      .flatMap((item) => getCateringPackageProductNames(item.items))
+  )];
+  const locksByMaterial = new Map<string, { raw_material_id: string; reserved_quantity: number; unit: string }>();
+
+  const addMaterialRequirement = async (name: string, quantity: number, unit: string) => {
+    const material = await tx.rawMaterial.findFirst({
+      where: { name: { equals: name, mode: "insensitive" } }
+    });
+    if (!material) {
+      throw new InventoryError(
+        `Catering stock item "${name}" is not configured in inventory.`,
+        "CATERING_MATERIAL_NOT_FOUND",
+        409
+      );
+    }
+    if (!inventoryUnitsMatch(unit, material.unit)) {
+      throw new InventoryError(
+        `Catering stock unit for ${name} must be ${unit}, but inventory uses ${material.unit}.`,
+        "UNIT_MISMATCH",
+        409
+      );
+    }
+    validateInventoryQuantity(quantity, material.unit);
+    const existing = locksByMaterial.get(material.id);
+    if (existing) {
+      existing.reserved_quantity += quantity;
+    } else {
+      locksByMaterial.set(material.id, {
+        raw_material_id: material.id,
+        reserved_quantity: quantity,
+        unit: material.unit
+      });
+    }
+  };
+
+  for (const item of packages) {
+    let requirements;
+    try {
+      requirements = getCateringInventoryRequirements(item.stationType, packageQuantities[item.id]);
+    } catch (error) {
+      throw new InventoryError(
+        error instanceof Error ? error.message : "Catering stock requirements are invalid.",
+        "CATERING_QUANTITY_REQUIRED",
+        409
+      );
+    }
+    for (const requirement of requirements) {
+      await addMaterialRequirement(
+        requirement.materialName,
+        requirement.quantity,
+        requirement.unit
+      );
+    }
+  }
 
   const products = await tx.sellingProduct.findMany({
     where: { is_deleted: false },
@@ -1517,7 +1557,6 @@ async function createCateringIngredientLocks(
       409
     );
   }
-  const locksByMaterial = new Map<string, { raw_material_id: string; reserved_quantity: number; unit: string }>();
 
   for (const product of selectedProducts) {
     if (!product) continue;
@@ -1539,6 +1578,9 @@ async function createCateringIngredientLocks(
           409
         );
       }
+      if (!Number.isInteger(headcount) || headcount <= 0) {
+        throw new InventoryError("A sushi station must include a valid guest count.", "CATERING_HEADCOUNT_REQUIRED", 409);
+      }
       const reservedQuantity = Number(ingredient.quantity_per_yield) * headcount;
       const existing = locksByMaterial.get(material.id);
 
@@ -1555,7 +1597,11 @@ async function createCateringIngredientLocks(
   }
 
   if (locksByMaterial.size === 0) {
-    return;
+    throw new InventoryError(
+      "This catering package has no menu items linked to inventory recipes.",
+      "CATERING_PACKAGE_RECIPE_MISSING",
+      409
+    );
   }
 
   for (const lock of locksByMaterial.values()) {
@@ -2724,63 +2770,73 @@ app.post("/api/catering/reservations", async (req, res, next) => {
     if (!selectedPackage) {
       return res.status(404).json({ message: "Selected catering package not found" });
     }
-    const selectedStationTypes = selectedPackagesInOrder.map((item) => item.stationType);
-    if (new Set(selectedStationTypes).size !== selectedStationTypes.length) {
-      return res.status(400).json({ message: "Select only one option for each catering station." });
+    const selectedStationTypes = selectedPackagesInOrder
+      .map((item) => item.stationType)
+      .filter((stationType): stationType is string => typeof stationType === "string");
+    const selectionError = getCateringSelectionError(selectedStationTypes);
+    if (selectionError) {
+      return res.status(400).json({ message: selectionError });
     }
-    const selectedSashimiPackage = selectedPackagesInOrder.find((item) => item.stationType === "sashimi_bar");
-    if (selectedSashimiPackage) {
-      const items = getCateringPackageItems(selectedSashimiPackage.items);
-      const minimumKg = typeof items.minimum === "number"
-        ? items.minimum
-        : typeof items.minKg === "number" ? items.minKg : undefined;
-      const maximumKg = typeof items.maximum === "number"
-        ? items.maximum
-        : typeof items.maxKg === "number" ? items.maxKg : undefined;
-      const stepKg = typeof items.step === "number"
-        ? items.step
-        : typeof items.stepKg === "number" ? items.stepKg : 1;
-      const quantityKg = body.sashimi_quantity_kg;
-
-      if (
-        typeof minimumKg !== "number" ||
-        typeof quantityKg !== "number" ||
-        !Number.isFinite(stepKg) ||
-        stepKg <= 0 ||
-        quantityKg < minimumKg ||
-        (maximumKg !== undefined && quantityKg > maximumKg) ||
-        Math.abs((quantityKg - minimumKg) / stepKg - Math.round((quantityKg - minimumKg) / stepKg)) > 1e-9
-      ) {
-        return res.status(400).json({ message: "Select a sashimi quantity that meets the selected option's minimum, step, and maximum." });
+    const packageQuantities: Record<string, number> = { ...body.package_quantities };
+    const perUnitPackages = selectedPackagesInOrder.filter((item) => {
+      const packageItems = getCateringPackageItems(item.items);
+      return packageItems.pricingModel === "per_unit" || packageItems.pricingType === "range";
+    });
+    if (body.sashimi_quantity_kg !== undefined) {
+      if (perUnitPackages.length !== 1 || packageQuantities[perUnitPackages[0].id] !== undefined) {
+        return res.status(400).json({ message: "Use a quantity for each selected per-kilogram item." });
       }
-    } else if (body.sashimi_quantity_kg !== undefined) {
-      return res.status(400).json({ message: "A sashimi quantity is only valid when the Sashimi Bar is selected." });
+      packageQuantities[perUnitPackages[0].id] = body.sashimi_quantity_kg;
+    }
+    const unselectedQuantityId = Object.keys(packageQuantities).find((id) => !selectedPackageIds.includes(id));
+    if (unselectedQuantityId) {
+      return res.status(400).json({ message: "A quantity was supplied for an unselected catering package." });
+    }
+    for (const item of perUnitPackages) {
+      const quantity = packageQuantities[item.id];
+      let rules;
+      try {
+        rules = getCateringQuantityRules(getCateringPackageItems(item.items));
+      } catch (error) {
+        return res.status(500).json({ message: error instanceof Error ? error.message : "Catering package quantity rules are invalid." });
+      }
+      if (quantity === undefined || !isCateringQuantityValid(quantity, rules)) {
+        return res.status(400).json({
+          message: `Select a ${rules.unit} quantity from ${rules.minimum} to ${rules.maximum ?? "unlimited"} in steps of ${rules.step}.`
+        });
+      }
+    }
+    if (Object.keys(packageQuantities).length !== perUnitPackages.length) {
+      return res.status(400).json({ message: "A quantity is only valid for selected per-kilogram catering items." });
     }
     const selectedSushiPackage = selectedPackagesInOrder.find((item) => item.stationType === "sushi_station");
     const selectedTempuraPackage = selectedPackagesInOrder.find((item) => item.stationType === "tempura_live");
+    const selectedWholeTunaPackage = selectedPackagesInOrder.find((item) => item.stationType === "whole_tuna");
     const tempuraItems = selectedTempuraPackage ? getCateringPackageItems(selectedTempuraPackage.items) : null;
-    const headcount = selectedSushiPackage
-      ? selectedSushiPackage.minPax
-      : selectedTempuraPackage
-        ? typeof tempuraItems?.fixedPax === "number" ? tempuraItems.fixedPax : selectedTempuraPackage.minPax
-        : null;
+    const baseHeadcounts = [
+      ...(selectedSushiPackage ? [selectedSushiPackage.minPax] : []),
+      ...(selectedTempuraPackage
+        ? [typeof tempuraItems?.fixedPax === "number" ? tempuraItems.fixedPax : selectedTempuraPackage.minPax]
+        : [])
+    ];
+    const headcount = baseHeadcounts.length > 0 ? Math.max(...baseHeadcounts) : null;
     if (headcount !== null && headcount < systemSettings.minimum_catering_pax) {
       return res.status(400).json({ message: `Catering requires at least ${systemSettings.minimum_catering_pax} pax.` });
     }
     const subtotal = selectedPackagesInOrder.reduce(
       (total, item) => total + getCateringPackagePrice(
         item,
-        item.id === selectedSashimiPackage?.id ? body.sashimi_quantity_kg : undefined
+        packageQuantities[item.id]
       ),
       0
     );
     const packageSnapshots = selectedPackagesInOrder.map((item) => {
       const packageItems = getCateringPackageItems(item.items);
-      const isSashimi = item.id === selectedSashimiPackage?.id;
       const isSushi = item.stationType === "sushi_station";
       const isTempura = item.stationType === "tempura_live";
-      const quantity = isSashimi
-        ? body.sashimi_quantity_kg!
+      const isPerUnit = packageQuantities[item.id] !== undefined;
+      const quantity = isPerUnit
+        ? packageQuantities[item.id]
         : isSushi
           ? item.minPax
           : isTempura && typeof packageItems.fixedPax === "number"
@@ -2791,7 +2847,7 @@ app.post("/api/catering/reservations", async (req, res, next) => {
         : typeof packageItems.pricePerKg === "number"
           ? packageItems.pricePerKg
           : null;
-      const linePrice = getCateringPackagePrice(item, isSashimi ? body.sashimi_quantity_kg : undefined);
+      const linePrice = getCateringPackagePrice(item, packageQuantities[item.id]);
 
       return {
         packageId: item.id,
@@ -2814,9 +2870,10 @@ app.post("/api/catering/reservations", async (req, res, next) => {
     const tax = 0;
     const total_price = Number(subtotal.toFixed(2));
     const isFullPayment = body.payment_plan === "full_payment";
-    const expectedInitialPayment = isFullPayment
-      ? total_price
-      : Number((total_price * 0.5).toFixed(2));
+    const expectedInitialPayment = getCateringInitialPayment(
+      total_price,
+      isFullPayment ? "full_payment" : "downpayment"
+    );
 
     const reservation_id = body.reservation_id ?? (await generateReadableId("CAT", body.event_date, "reservation_id"));
     const verifiedPayment = body.payment_transaction_id
@@ -2847,6 +2904,7 @@ app.post("/api/catering/reservations", async (req, res, next) => {
           existing.event_time === body.event_time &&
           existing.payment_plan === body.payment_plan &&
           JSON.stringify(existingPackageIds) === JSON.stringify(selectedPackageIds) &&
+          JSON.stringify(existing.package_snapshot ?? []) === JSON.stringify(packageSnapshots) &&
           Math.abs(Number(existing.package_total || existing.total_price) - total_price) < 0.01;
         if (!sameRequest) {
           return res.status(409).json({ message: "This reservation reference is already associated with a different request." });
@@ -2896,7 +2954,7 @@ app.post("/api/catering/reservations", async (req, res, next) => {
           customer_phone: body.customer_phone,
           customer_email: body.customer_email,
           event_date: body.event_date,
-          headcount: body.headcount,
+          headcount,
           venue_type: body.venue_address,
           event_type: body.event_type,
           event_type_other: body.event_type_other || null,
@@ -2915,7 +2973,9 @@ app.post("/api/catering/reservations", async (req, res, next) => {
           customer_email: body.customer_email,
           event_date: body.event_date,
           event_time: body.event_time,
-          sashimi_quantity_kg: body.sashimi_quantity_kg ?? null,
+          sashimi_quantity_kg: selectedWholeTunaPackage
+            ? packageQuantities[selectedWholeTunaPackage.id]
+            : body.sashimi_quantity_kg ?? null,
           headcount,
           package_id: body.package_id,
           package_ids: selectedPackageIds,
@@ -3405,6 +3465,10 @@ app.put("/api/staff/catering/reservations/:id/approve", async (req, res, next) =
         throw new InventoryError("A recorded downpayment is required before approval.", "DOWNPAYMENT_REQUIRED", 409);
       }
 
+      const packageIds = getCateringReservationPackageIds(current.package_ids, current.package_id);
+      if (packageIds.length === 0) {
+        throw new InventoryError("This booking has no selected catering packages.", "CATERING_PACKAGE_MISSING", 409);
+      }
       const packageTotal = Number(current.package_total || current.total_price);
       const totalPrice = roundMoney(packageTotal + body.mobilization_fee);
       const remainingBalance = roundMoney(Math.max(totalPrice - Number(current.downpayment_amount), 0));
@@ -3424,6 +3488,14 @@ app.put("/api/staff/catering/reservations/:id/approve", async (req, res, next) =
           status: "confirmed"
         }
       });
+      await createCateringIngredientLocks(
+        tx,
+        current.id,
+        packageIds,
+        current.headcount ?? 0,
+        getCateringReservationPackageQuantities(current.package_snapshot),
+        user.sub
+      );
       await addReservationActivity(tx, {
         cateringReservationId: updated.id,
         eventType: "status_changed",
@@ -3487,24 +3559,6 @@ app.put("/api/staff/catering/reservations/:id/decline", async (req, res, next) =
       if (!["pending", "pending_approval"].includes(current.status ?? "")) {
         throw new InventoryError("Only a pending catering booking can be declined.", "BOOKING_NOT_PENDING", 409);
       }
-      if (current.payments.some((payment) => payment.payment_stage === "refund")) {
-        throw new InventoryError("The downpayment has already been refunded.", "REFUND_ALREADY_RECORDED", 409);
-      }
-
-      const refundAmount = Number(current.downpayment_amount);
-      if (refundAmount > 0) {
-        await tx.reservationPayment.create({
-          data: {
-            catering_reservation_id: current.id,
-            payment_stage: "refund",
-            method: current.downpayment_method ?? "cash",
-            amount: refundAmount,
-            reference_number: current.downpayment_transaction_id,
-            source: "staff",
-            recorded_by_id: user.sub
-          }
-        });
-      }
       if (current.inquiry_id) {
         await tx.cateringInquiry.update({
           where: { id: current.inquiry_id },
@@ -3515,10 +3569,11 @@ app.put("/api/staff/catering/reservations/:id/decline", async (req, res, next) =
         where: { id: current.id },
         data: {
           status: "declined",
-          remaining_balance: Number(current.total_price),
-          final_payment_status: "refunded",
-          full_payment_paid: false,
-          full_payment_date: null
+          remaining_balance: Math.max(
+            Number(current.total_price) - Number(current.downpayment_amount),
+            0
+          ),
+          final_payment_status: current.full_payment_paid ? "paid" : "pending"
         },
         include: { payments: true }
       });
@@ -3530,7 +3585,7 @@ app.put("/api/staff/catering/reservations/:id/decline", async (req, res, next) =
         actorType: "staff",
         actorId: user.sub,
         reason: body.reason,
-        details: { refund_amount: refundAmount }
+        details: { refund_handled_manually: true }
       });
       return updated;
     });
@@ -3553,11 +3608,7 @@ app.put("/api/staff/catering/reservations/:id/cancel", async (req, res, next) =>
       amount: z.coerce.number().min(0).optional(),
       payment_method: z.enum(["cash", "gcash", "bank_transfer"]).optional(),
       reference_number: z.string().optional().nullable(),
-      cash_received: z.coerce.number().min(0).optional().nullable(),
-      prepared_ingredients: z.array(z.object({
-        raw_material_id: z.string().min(1),
-        quantity: z.coerce.number().int().positive()
-      })).optional()
+      cash_received: z.coerce.number().min(0).optional().nullable()
     }).parse(req.body);
 
     const reservation = await prisma.$transaction(async (tx) => {
@@ -3575,16 +3626,46 @@ app.put("/api/staff/catering/reservations/:id/cancel", async (req, res, next) =>
         throw new InventoryError("This catering booking is already closed.", "BOOKING_ALREADY_CLOSED", 409);
       }
 
-      if (body.prepared_ingredients?.length) {
-        throw new InventoryError(
-          "Prepared ingredient quantities are no longer recorded during catering cancellation. Refresh the staff page and cancel again.",
-          "CATERING_INVENTORY_DISABLED",
-          409
-        );
-      }
-
       if (current.payments.some((payment) => payment.payment_stage === "forfeited_fee")) {
         throw new InventoryError("This catering booking was already cancelled and cannot be cancelled again.", "BOOKING_ALREADY_CANCELLED", 409);
+      }
+
+      const preparationStarted = ["in_progress", "preparing"].includes(current.status ?? "");
+      if (preparationStarted) {
+        const locks = await tx.cateringIngredientLock.findMany({
+          where: { catering_reservation_id: current.id, is_released: false }
+        });
+        const quantitiesByMaterial = new Map<string, number>();
+        for (const lock of locks) {
+          quantitiesByMaterial.set(
+            lock.raw_material_id,
+            (quantitiesByMaterial.get(lock.raw_material_id) ?? 0) + Number(lock.reserved_quantity)
+          );
+        }
+        for (const [materialId, quantity] of quantitiesByMaterial) {
+          await wasteCateringReservationIngredients(tx, {
+            reservationId: current.id,
+            materialId,
+            quantity,
+            bookingReference: current.reservation_id ?? current.id,
+            actorId: user.sub,
+            reason: `Catering event cancelled after preparation started: ${body.reason}`
+          });
+        }
+        if (locks.length === 0) {
+          await tx.cateringReservation.update({
+            where: { id: current.id },
+            data: { ingredients_locked: false }
+          });
+        }
+      } else {
+        await cancelReservationIngredientLocks(
+          tx,
+          current.id,
+          user.sub,
+          body.reason,
+          current.reservation_id ?? current.id
+        );
       }
 
       const forfeitureAmount = Number(current.downpayment_amount);
@@ -3633,7 +3714,10 @@ app.put("/api/staff/catering/reservations/:id/cancel", async (req, res, next) =>
         actorType: "staff",
         actorId: user.sub,
         reason: body.reason,
-        details: { forfeited_amount: forfeitureAmount }
+        details: {
+          forfeited_amount: forfeitureAmount,
+          ingredients_disposition: preparationStarted ? "wasted" : "released"
+        }
       });
       return updated;
     });
@@ -3723,6 +3807,21 @@ app.put("/api/staff/catering/reservations/:id/start-event", async (req, res, nex
 
       if (current.status !== "confirmed") {
         throw new InventoryError("Only a confirmed catering booking can be started.", "BOOKING_NOT_CONFIRMED", 409);
+      }
+
+      if (!current.ingredients_locked) {
+        const packageIds = getCateringReservationPackageIds(current.package_ids, current.package_id);
+        if (packageIds.length === 0) {
+          throw new InventoryError("This booking has no selected catering packages.", "CATERING_PACKAGE_MISSING", 409);
+        }
+        await createCateringIngredientLocks(
+          tx,
+          current.id,
+          packageIds,
+          current.headcount ?? 0,
+          getCateringReservationPackageQuantities(current.package_snapshot),
+          user.sub
+        );
       }
 
       const started = await tx.cateringReservation.update({
@@ -5298,14 +5397,21 @@ async function completeCateringReservation(req: Request, res: Response, next: Ne
         throw new InventoryError("This catering booking is already closed.", "BOOKING_ALREADY_CLOSED", 409);
       }
 
-      if (!["confirmed", "in_progress", "pending_final_payment", "preparing"].includes(current.status ?? "")) {
-        throw new InventoryError("Only an active catering booking can be completed.", "BOOKING_NOT_ACTIVE", 409);
+      if (!["in_progress", "preparing"].includes(current.status ?? "")) {
+        throw new InventoryError("Start catering preparation before completing this booking.", "BOOKING_NOT_IN_PROGRESS", 409);
       }
 
       const { remaining_balance: remainingBalance } = paymentSummaryFields(current);
       if (remainingBalance > 0) {
         throw new InventoryError("Full payment is required before this catering booking can be completed.", "FULL_PAYMENT_REQUIRED", 409);
       }
+
+      await releaseCateringLocks(
+        tx,
+        current.id,
+        user.sub,
+        current.reservation_id ?? current.id
+      );
 
       const completed = await tx.cateringReservation.update({
         where: { id: req.params.id },
@@ -10258,24 +10364,12 @@ async function processReservationBookingDates() {
       const current = await tx.cateringReservation.findUnique({ where: { id }, include: { payments: true } });
       if (!current || !["pending", "pending_approval"].includes(current.status ?? "")) return;
       const refundAmount = Number(current.downpayment_amount);
-      if (refundAmount > 0 && !current.payments.some((payment) => payment.payment_stage === "refund")) {
-        await tx.reservationPayment.create({
-          data: {
-            catering_reservation_id: current.id,
-            payment_stage: "refund",
-            method: current.downpayment_method ?? "cash",
-            amount: refundAmount,
-            reference_number: current.downpayment_transaction_id,
-            source: "system"
-          }
-        });
-      }
       const expired = await tx.cateringReservation.update({
         where: { id },
         data: {
           status: "expired",
-          remaining_balance: Number(current.total_price),
-          final_payment_status: refundAmount > 0 ? "refunded" : "expired"
+          remaining_balance: Math.max(Number(current.total_price) - refundAmount, 0),
+          final_payment_status: current.full_payment_paid ? "paid" : "expired"
         }
       });
       await addReservationActivity(tx, {
@@ -10285,7 +10379,7 @@ async function processReservationBookingDates() {
         toStatus: expired.status,
         actorType: "system",
         reason: "Booking date passed before approval",
-        details: { refund_amount: refundAmount }
+        details: { refund_handled_manually: refundAmount > 0 }
       });
     }, { maxWait: 10_000, timeout: 30_000 });
   }
