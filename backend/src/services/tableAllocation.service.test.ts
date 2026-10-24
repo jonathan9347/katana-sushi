@@ -23,6 +23,22 @@ test("fits six guests with a 2-seat plus 4-seat table", () => {
   });
 });
 
+test("prefers fewer unused seats when table counts are equal", () => {
+  const result = findBestTableCombination(6, [
+    { id: "two-seat", table_number: 1, capacity: 2 },
+    { id: "four-seat", table_number: 2, capacity: 4 },
+    { id: "four-seat-a", table_number: 3, capacity: 4 },
+    { id: "four-seat-b", table_number: 4, capacity: 4 }
+  ]);
+
+  assert.deepEqual(result, {
+    tableIds: ["two-seat", "four-seat"],
+    totalCapacity: 6,
+    unusedSeats: 0,
+    tableCount: 2
+  });
+});
+
 test("prefers the minimum number of tables even if a single larger table wastes fewer seats", () => {
   const result = findBestTableCombination(5, [
     { id: "a", table_number: 1, capacity: 2 },
@@ -139,12 +155,12 @@ test("same-day active POS sessions stay unavailable regardless of elapsed window
 
 test("uses stable table ID order to break otherwise equal allocation ties", () => {
   const result = findBestTableCombination(2, [
-    { id: "b", table_number: 2, capacity: 2 },
-    { id: "a", table_number: 1, capacity: 2 }
+    { id: "table-b", table_number: 1, capacity: 2 },
+    { id: "table-a", table_number: 99, capacity: 2 }
   ]);
 
   assert.deepEqual(result, {
-    tableIds: ["a"],
+    tableIds: ["table-a"],
     totalCapacity: 2,
     unusedSeats: 0,
     tableCount: 1
