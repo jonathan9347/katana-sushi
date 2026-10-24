@@ -193,8 +193,7 @@ function orderBody(
   fixture: Fixture,
   idempotencyKey: string,
   quantity = 2,
-  expectedUnitPrice = fixture.price,
-  guestNumber?: number
+  expectedUnitPrice = fixture.price
 ) {
   return {
     idempotencyKey: `${testRunKey}-${idempotencyKey}`,
@@ -202,8 +201,7 @@ function orderBody(
     items: [{
       productId: fixture.productId,
       quantity,
-      expectedUnitPrice,
-      ...(guestNumber === undefined ? {} : { guestNumber })
+      expectedUnitPrice
     }]
   };
 }
@@ -655,12 +653,28 @@ test("preserves beverage stock-name lookup for products without recipe ingredien
   }), 1);
 });
 
-test("still supports optional guest assignment for legacy sessions that have guest records", async () => {
+test("rejects guestNumber in new order item requests", async () => {
   const fixture = await createFixture();
   assert.ok(fixture.sessionId);
+  const body = orderBody(fixture, "guest-assignment-rejected-0001", 1);
+  const response = await request(
+    `/api/pos/dining/sessions/${fixture.sessionId}/orders`,
+    { ...body, items: [{ ...body.items[0], guestNumber: 1 }] }
+  );
+  assert.equal(response.status, 400, await response.text());
+  assert.equal(await prisma.diningOrder.count({ where: { dining_session_id: fixture.sessionId } }), 0);
+  assert.deepEqual(await readStock(fixture), { onHand: 20, batchRemaining: 20 });
+
   const guest = await prisma.diningGuest.create({
     data: { dining_session_id: fixture.sessionId, guest_number: 1 }
   });
+  const patchResponse = await request(
+    `/api/pos/dining/sessions/${fixture.sessionId}/guests/${guest.id}`,
+    { discountType: "senior" },
+    "PATCH"
+  );
+  assert.equal(patchResponse.status, 404);
+});
 
   test("starts Unlimited with explicit headcount on a guestless session and starts the timer at the button action", async () => {
     const fixture = await createFixture();
@@ -768,16 +782,6 @@ test("still supports optional guest assignment for legacy sessions that have gue
       where: { id: settings.id },
       data: { extension_minutes: originalValue }
     });
-  });
-  const response = await request(
-    `/api/pos/dining/sessions/${fixture.sessionId}/orders`,
-    orderBody(fixture, "step42-optional-guest-00001", 1, fixture.price, guest.guest_number)
-  );
-  const responseText = await response.text();
-  assert.equal(response.status, 201, responseText);
-  const payload = JSON.parse(responseText) as { order: { items: Array<{ guest_id: string | null }> } };
-  assert.equal(payload.order.items[0].guest_id, guest.id);
-  assert.deepEqual(await readStock(fixture), { onHand: 18, batchRemaining: 18 });
 });
 
 test("atomic walk-in confirmation creates one session and deducts stock once across retries", async (t) => {
@@ -922,6 +926,7 @@ test("atomic Unlimited confirmation supports a paid a-la-carte line in the same 
     order: {
       id: string;
       order_type: string;
+      unlimited_session_id: string | null;
       items: Array<{ selling_product_id: string; unit_price: number }>;
     };
   };
@@ -932,6 +937,13 @@ test("atomic Unlimited confirmation supports a paid a-la-carte line in the same 
   );
   assert.deepEqual(await readStock(regular), { onHand: 18, batchRemaining: 18 });
   assert.deepEqual(await readStock(included), { onHand: 18, batchRemaining: 18 });
+  assert.ok(result.order.unlimited_session_id);
+  const endSessionResponse = await request(
+    `/api/pos/dining/unlimited-sessions/${result.order.unlimited_session_id}/end`,
+    { leftovers: [] },
+    "POST"
+  );
+  assert.equal(endSessionResponse.status, 200, await endSessionResponse.text());
 
   const previewResponse = await request(
     `/api/pos/dining/sessions/${regular.sessionId}/checkout-preview?guestCount=10&seniorPwdCount=3`,

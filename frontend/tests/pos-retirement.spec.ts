@@ -35,7 +35,7 @@ test("redirects the retired Table Service URL to the main POS", async ({ page })
   await page.goto("/staff/pos/dining");
 
   await expect(page).toHaveURL(/\/staff\/pos$/);
-  await expect(page.getByRole("heading", { name: "Takeout Sale" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Point of Sale" })).toBeVisible();
   await expect(page.getByRole("link", { name: "Table Service" })).toHaveCount(0);
 });
 

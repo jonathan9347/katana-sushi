@@ -1,15 +1,13 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
-import { Minus, Plus, Printer, Settings, ShoppingCart, Trash2 } from "lucide-react";
+import { Printer } from "lucide-react";
 import PaymentModal from "./PaymentModal";
 import { PosCartKey, PosProduct, usePosCart } from "./store";
 import { api } from "../../../lib/api";
 import { defaultSystemSettings, fetchSystemSettings, type SystemSettings } from "../../../lib/systemSettings";
 import { useToast } from "../../../hooks/useToast";
-import { formatManilaDateTime } from "../../../lib/dateTime";
 import { Button } from "../../../components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "../../../components/ui/card";
 import { Select } from "../../../components/ui/select";
 import { Dialog } from "../../../components/ui/dialog";
 import DiningService, {
@@ -20,7 +18,6 @@ import DiningService, {
 import UnlimitedTimer from "../../../components/pos/UnlimitedTimer";
 import PosOrderBuilder from "./PosOrderBuilder";
 import PosHeader from "./PosHeader";
-import SectionNav, { SectionNavTab } from "../../../components/layout/SectionNav";
 
 type PosTransaction = {
   id: string;
@@ -96,11 +93,6 @@ type UnlimitedPricingSettings = {
 type SelectionView = "menu" | "table-board" | "reservation-list" | "pickup-list";
 type DialogStep = "service" | "entry" | null;
 
-const posTabs: Array<SectionNavTab> = [
-  { id: "history", label: "Transaction History", to: "/staff/pos/history" },
-  { id: "settings", label: "Unli Settings", icon: <Settings className="h-4 w-4" />, to: "/staff/pos/unlimited-settings" }
-];
-
 function getStoredRole() {
   if (!localStorage.getItem("katana_token")) {
     return "staff";
@@ -163,7 +155,6 @@ export default function PosPage() {
   const rotateDraftKey = usePosCart((state) => state.rotateDraftKey);
   const queryClient = useQueryClient();
   const { toast } = useToast();
-  const legacyWorkflowRef = useRef<HTMLElement>(null);
 
   const productsQuery = useQuery({
     queryKey: ["products"],
@@ -252,15 +243,6 @@ export default function PosPage() {
       total: Number(subtotal.toFixed(2))
     };
   }, [items]);
-
-  const categories = useMemo(() => {
-    const productCategories = new Set((productsQuery.data ?? []).map((product) => product.category));
-    return ["All", ...Array.from(productCategories).sort()];
-  }, [productsQuery.data]);
-
-  const visibleProducts = useMemo(() => {
-    return (productsQuery.data ?? []).filter((product) => category === "All" || product.category === category);
-  }, [category, productsQuery.data]);
 
   function addItem(product: PosProduct) {
     const compatibility = product.cart_compatibility;
@@ -857,282 +839,6 @@ export default function PosPage() {
           </section>
         ) : null}
 
-        {false && selectionView === "menu" && isDineIn && selectedDiningSessionId ? (
-          <section ref={legacyWorkflowRef} aria-label="Temporary legacy dine-in workflow" className="space-y-3 rounded-lg border border-amber-300 bg-amber-50 p-3">
-            <p role="note" className="text-sm font-semibold text-amber-950">
-              Temporary legacy dine-in workflow. These existing table actions remain only until the transactional order-first steps replace them.
-            </p>
-          {selectedDiningSessionId ? (
-            <DiningService
-              key={`dining-order-${selectedDiningSessionId}`}
-              mode="service"
-              embedded
-              initialSessionId={selectedDiningSessionId}
-              onSessionSelected={setSelectedDiningSessionId}
-              onBackToBoard={() => {
-                setSelectedDiningSessionId("");
-                setTableBoardPurpose("existing_table");
-                setSelectionView("table-board");
-              }}
-            />
-          ) : (
-            <DiningService
-              key="dining-board"
-              mode="board"
-              embedded
-              onSessionSelected={setSelectedDiningSessionId}
-            />
-          )}
-          </section>
-        ) : isPickupCustomer ? (
-          <section ref={legacyWorkflowRef} aria-label="Temporary legacy pickup fulfillment" className="hidden">
-          <p role="note" className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm font-semibold text-amber-950">
-            Temporary legacy pickup search and checkout panel; it remains until the pickup prompt is moved into the shared layout.
-          </p>
-          <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(320px,0.8fr)]">
-            <Card className="min-w-0">
-              <CardHeader>
-                <CardTitle>Find pickup orders</CardTitle>
-              </CardHeader>
-              <CardContent className="grid gap-4">
-                <label className="grid gap-1 text-sm font-medium text-slate-700">
-                  <span>Order ID</span>
-                  <input
-                    className="h-11 rounded-md border border-slate-300 px-3 text-sm outline-none focus:border-red-700 focus:ring-2 focus:ring-red-100"
-                    autoComplete="off"
-                    value={pickupSearch}
-                    onChange={(event) => {
-                      setPickupSearch(event.target.value);
-                      setSelectedPickupOrder(null);
-                    }}
-                    placeholder="Enter at least 2 characters"
-                  />
-                </label>
-                {pickupSearch.trim().length < 2 && (
-                  <p className="text-sm text-slate-500">Enter at least 2 characters of the order ID or customer name. Preparing and Ready orders are available.</p>
-                )}
-                {pickupOrdersQuery.isLoading && <p className="text-sm text-slate-500">Searching pickup orders...</p>}
-                {pickupOrdersQuery.isError && <p role="alert" className="text-sm text-red-700">Unable to search pickup orders. Please retry.</p>}
-                {pickupSearch.trim().length >= 2 && pickupOrdersQuery.isSuccess && pickupOrdersQuery.data.length === 0 && (
-                  <p className="text-sm text-slate-500">No preparing or ready pickup orders match that ID.</p>
-                )}
-                <div className="grid gap-2">
-                  {pickupOrdersQuery.data?.map((order) => (
-                    <button
-                      key={order.order_number}
-                      type="button"
-                      aria-pressed={selectedPickupOrder?.order_number === order.order_number}
-                      onClick={() => setSelectedPickupOrder(order)}
-                      className={`flex items-center justify-between gap-3 rounded-md border p-3 text-left ${selectedPickupOrder?.order_number === order.order_number ? "border-red-700 bg-red-50" : "border-slate-200 bg-white hover:bg-slate-50"}`}
-                    >
-                      <span>
-                        <span className="block font-semibold text-slate-950">{order.order_number}</span>
-                        <span className="block text-xs capitalize text-slate-500">{order.status}</span>
-                      </span>
-                      <span className="text-sm font-bold text-slate-900">{money(order.total)}</span>
-                    </button>
-                  ))}
-                </div>
-              </CardContent>
-            </Card>
-
-            <Card className="min-w-0">
-              <CardHeader>
-                <CardTitle>Pickup checkout</CardTitle>
-              </CardHeader>
-              <CardContent className="grid content-start gap-4">
-                {!selectedPickupOrder ? (
-                  <p className="rounded-md border border-dashed border-slate-300 p-6 text-center text-sm text-slate-500">
-                    Select a preparing or ready pickup order to load its cart.
-                  </p>
-                ) : (
-                  <>
-                    <div>
-                      <p className="font-semibold text-slate-950">{selectedPickupOrder.customer_name}</p>
-                      <p className="text-sm text-slate-500">{selectedPickupOrder.order_number}</p>
-                      <p className={`mt-2 text-sm font-semibold ${selectedPickupOrder.status === "ready" ? "text-emerald-800" : "text-amber-800"}`}>
-                        {selectedPickupOrder.status === "ready" ? "Ready for pickup" : "Preparing"}
-                      </p>
-                      {selectedPickupOrder.pickup_time ? (
-                        <p className="text-sm text-slate-600">
-                          Pickup Time: {formatManilaDateTime(selectedPickupOrder.pickup_time, { hour: "numeric", minute: "2-digit" })}
-                        </p>
-                      ) : null}
-                    </div>
-                    <div className="grid gap-2">
-                      {selectedPickupOrder.items.map((item, index) => (
-                        <div key={`${selectedPickupOrder.order_number}-${index}`} className="flex justify-between gap-3 rounded-md border border-slate-200 p-3 text-sm">
-                          <span>{item.quantity} × {item.name}</span>
-                          <span className="font-semibold">{money(item.total_price)}</span>
-                        </div>
-                      ))}
-                    </div>
-                    <div className="grid gap-2 border-t border-slate-200 pt-4 text-sm">
-                      <TotalLine label="Total" value={selectedPickupOrder.total} strong />
-                      {selectedPickupOrder.payment_status === "paid" ? (
-                        <>
-                          <p className="text-sm text-emerald-800">
-                            Already paid{selectedPickupOrder.payment_method ? ` · ${selectedPickupOrder.payment_method.replace(/_/g, " ")}` : ""}. No payment will be collected again.
-                          </p>
-                        </>
-                      ) : (
-                        <>
-                          <p className="text-sm text-amber-800">Payment is due at pickup. Collect cash before handover.</p>
-                        </>
-                      )}
-                      <p className="text-xs text-slate-500">Use the single action button in the order panel to complete pickup.</p>
-                    </div>
-                  </>
-                )}
-              </CardContent>
-            </Card>
-          </div>
-          </section>
-        ) : (
-        <div className="hidden">
-        <div className="grid gap-4 lg:grid-cols-[220px_minmax(0,1fr)] lg:items-start">
-          <aside className="lg:sticky lg:top-6">
-            <SectionNav orientation="vertical" tabs={posTabs} />
-          </aside>
-
-          <section className="min-w-0">
-            <div className="grid min-h-[calc(100vh-112px)] gap-4 xl:grid-cols-[7fr_3fr]">
-              <>
-          <Card className="min-w-0">
-            <CardHeader className="gap-3">
-              <div className="flex items-center justify-between gap-3">
-                <CardTitle>Products</CardTitle>
-                <Select className="h-11 w-56" value={category} onChange={(event) => setCategory(event.target.value)}>
-                  {categories.map((item) => (
-                    <option key={item} value={item}>
-                      {item}
-                    </option>
-                  ))}
-                </Select>
-              </div>
-            </CardHeader>
-            <CardContent>
-              {productsQuery.isLoading && <p className="text-sm text-slate-500">Loading products...</p>}
-              {productsQuery.isError && <p className="text-sm text-red-700">Unable to load products.</p>}
-              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4">
-                {visibleProducts.map((product) => {
-                  const cartQuantity = items.find((item) => item.product.id === product.id)?.quantity ?? 0;
-                  const availableStock = product.available_stock === null || product.available_stock === undefined
-                    ? 0
-                    : Math.floor(product.available_stock);
-                  const isSoldOut = availableStock === 0;
-                  const disabled = product.is_available === false || isSoldOut || cartQuantity >= availableStock;
-
-                  return (
-                    <button
-                      key={product.id}
-                      className="flex min-h-32 flex-col justify-between rounded-md border border-slate-200 bg-white p-4 text-left shadow-sm transition hover:border-red-200 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60"
-                      disabled={disabled}
-                      type="button"
-                      onClick={() => addItem(product)}
-                    >
-                      <span>
-                        <span className="block text-base font-semibold text-slate-950">{product.name}</span>
-                        <span className="mt-1 block text-xs font-medium uppercase text-slate-500">{product.category}</span>
-                      </span>
-                      <span className="mt-3 flex items-end justify-between gap-2">
-                        <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-bold ${isSoldOut || product.is_available === false ? "bg-red-100 text-red-800" : "bg-emerald-100 text-emerald-800"}`}>
-                          {product.is_available === false
-                            ? `Unavailable · ${availableStock} in stock`
-                            : isSoldOut
-                              ? "Out of stock · 0 available"
-                              : `${availableStock} available`}
-                        </span>
-                        <span className="text-lg font-semibold text-red-700">{money(Number(product.price))}</span>
-                      </span>
-                    </button>
-                  );
-                })}
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card className="min-w-0">
-            <CardHeader>
-              <CardTitle>Cart</CardTitle>
-            </CardHeader>
-            <CardContent className="grid h-full content-start gap-4">
-              <div className="grid gap-3">
-                <label className="grid gap-1 text-sm font-medium text-slate-700">
-                  <span>Customer Name</span>
-                  <input
-                    className="h-11 rounded-md border border-slate-300 px-3 text-sm outline-none focus:border-red-700 focus:ring-2 focus:ring-red-100"
-                    placeholder="Optional"
-                    value={customerName}
-                    onChange={(event) => setCustomerName(event.target.value)}
-                  />
-                </label>
-              </div>
-
-              <div className="grid max-h-[38vh] gap-2 overflow-y-auto pr-1">
-                {items.length === 0 && (
-                  <div className="grid justify-items-center gap-2 rounded-md border border-dashed border-slate-300 p-6 text-center text-sm text-slate-500">
-                    <ShoppingCart className="h-8 w-8" />
-                    Cart is empty
-                  </div>
-                )}
-                {items.map((item) => {
-                  const currentProduct = productsQuery.data?.find((product) => product.id === item.product.id) ?? item.product;
-
-                  return (
-                  <div key={item.product.id} className="rounded-md border border-slate-200 bg-white p-3">
-                    <div className="flex items-start justify-between gap-3">
-                      <div>
-                        <p className="font-semibold text-slate-950">{item.product.name}</p>
-                        <p className="text-sm text-slate-500">{money(Number(item.product.price))}</p>
-                      </div>
-                      <Button size="sm" variant="ghost" onClick={() => removeItem(item.product.id)}>
-                        <Trash2 className="h-4 w-4" />
-                      </Button>
-                    </div>
-                    <div className="mt-3 flex items-center justify-between">
-                      <div className="flex items-center gap-2">
-                        <Button size="sm" variant="outline" onClick={() => decrementItem(item.product.id)}>
-                          <Minus className="h-4 w-4" />
-                        </Button>
-                        <span className="grid h-11 min-w-11 place-items-center rounded-md border border-slate-200 text-sm font-semibold">
-                          {item.quantity}
-                        </span>
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          disabled={currentProduct.available_stock != null && item.quantity >= currentProduct.available_stock}
-                          onClick={() => addItem(currentProduct)}
-                        >
-                          <Plus className="h-4 w-4" />
-                        </Button>
-                      </div>
-                      <p className="font-semibold text-slate-950">{money(Number(item.product.price) * item.quantity)}</p>
-                    </div>
-                  </div>
-                  );
-                })}
-              </div>
-
-              <div className="mt-auto grid gap-2 border-t border-slate-200 pt-4 text-sm">
-                <TotalLine label="Subtotal" value={totals.subtotal} />
-                <TotalLine label="Total" value={totals.total} strong />
-                <Button
-                  className="mt-2 min-h-12"
-                  disabled={items.length === 0 || checkoutMutation.isPending}
-                  onClick={handleCheckout}
-                >
-                  Checkout
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
-          </>
-            </div>
-          </section>
-        </div>
-        </div>
-        )}
       </div>
 
       <Dialog

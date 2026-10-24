@@ -60,13 +60,12 @@ const checkoutBodySchema = z.object({
 const diningOrderItemSchema = z.object({
   productId: z.string().min(1),
   orderType: z.enum(["ala_carte", "unlimited"]).optional(),
-  guestNumber: z.coerce.number().int().positive().optional(),
   quantity: z.coerce.number().int().min(1).max(100),
   expectedUnitPrice: z.coerce.number().finite().min(0).refine(
     (value) => Math.abs(value * 100 - Math.round(value * 100)) < 1e-8,
     "Expected unit price must be in cents."
   )
-});
+}).strict();
 const diningOrderCommitSchema = z.object({
   idempotencyKey: z.string().min(16).max(128),
   orderType: z.enum(["ala_carte", "unlimited"]),
@@ -182,7 +181,6 @@ function isSameOrderRequest(
     unlimited_session_id: string | null;
     items: Array<{
       selling_product_id: string | null;
-      guest: { guest_number: number } | null;
       quantity: number;
       unit_price: number;
     }>;
@@ -190,15 +188,15 @@ function isSameOrderRequest(
   input: {
     orderType: string;
     unlimitedSessionId?: string;
-    items: Array<{ productId: string; guestNumber?: number; quantity: number; expectedUnitPrice: number }>;
+    items: Array<{ productId: string; quantity: number; expectedUnitPrice: number }>;
   },
   sessionId: string
 ) {
   const requested = input.items.map((item) =>
-    `${item.productId}:${item.guestNumber ?? ""}:${item.quantity}:${money(item.expectedUnitPrice)}`
+    `${item.productId}:${item.quantity}:${money(item.expectedUnitPrice)}`
   ).sort();
   const saved = order.items.map((item) =>
-    `${item.selling_product_id ?? ""}:${item.guest?.guest_number ?? ""}:${item.quantity}:${money(Number(item.unit_price))}`
+    `${item.selling_product_id ?? ""}:${item.quantity}:${money(Number(item.unit_price))}`
   ).sort();
   return order.dining_session_id === sessionId
     && order.order_type === input.orderType
@@ -397,11 +395,6 @@ async function commitDineInOrder(
     return { order: racedOrder, replayed: true };
   }
 
-  const guestByNumber = new Map(session.guests.map((guest) => [guest.guest_number, guest]));
-  if (body.items.some((item) => item.guestNumber !== undefined && !guestByNumber.has(item.guestNumber))) {
-    throw new InventoryError("Choose a valid customer number for every item.", "GUEST_NOT_FOUND", 400);
-  }
-
   const products = await tx.sellingProduct.findMany({
     where: {
       id: { in: body.items.map((item) => item.productId) },
@@ -478,7 +471,7 @@ async function commitDineInOrder(
             ? 0
             : money(Number(product.price));
           return {
-            guest_id: item.guestNumber === undefined ? null : guestByNumber.get(item.guestNumber)!.id,
+            guest_id: null,
             selling_product_id: product.id,
             name_snapshot: product.name,
             quantity: item.quantity,
@@ -1200,29 +1193,6 @@ router.patch(
   })
 );
 
-router.patch(
-  "/api/pos/dining/sessions/:id/guests/:guestId",
-  roleGuard(["admin", "cashier"]),
-  asyncRoute(async (req, res) => {
-    const body = z.object({ discountType: z.enum(["none", "senior", "pwd"]) }).parse(req.body);
-    const sessionId = z.string().min(1).parse(req.params.id);
-    const guestId = z.string().min(1).parse(req.params.guestId);
-    const guest = await prisma.$transaction(async (tx) => {
-      const session = await tx.diningTableSession.findUnique({ where: { id: sessionId } });
-      if (!session || session.status !== "active") {
-        throw new InventoryError("Active dining session not found.", "SESSION_NOT_FOUND", 404);
-      }
-      const updated = await tx.diningGuest.updateMany({
-        where: { id: guestId, dining_session_id: sessionId },
-        data: { discount_type: body.discountType }
-      });
-      if (updated.count === 0) throw new InventoryError("Guest number not found.", "GUEST_NOT_FOUND", 404);
-      return tx.diningGuest.findUnique({ where: { id: guestId } });
-    });
-    return res.json({ guest });
-  })
-);
-
 router.get(
   "/api/pos/dining/orders/:id",
   roleGuard(["admin", "cashier"]),
@@ -1589,7 +1559,7 @@ router.get(
       include: {
         dining_session: { include: { table: true } },
         unlimited_session: true,
-        items: { include: { guest: true } }
+        items: true
       },
       orderBy: { created_at: "asc" },
       take: 100
@@ -1892,7 +1862,6 @@ router.get(
       guest_count: totals.guestCount,
       a_la_carte_lines: totals.aLaCarteItems.map((item) => ({
         name: item.name_snapshot,
-        guest_number: item.guest?.guest_number ?? null,
         quantity: item.quantity,
         unit_price: Number(item.unit_price),
         total_price: Number(item.total_price)

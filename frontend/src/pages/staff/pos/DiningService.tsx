@@ -18,7 +18,6 @@ type TicketItem = {
   id: string;
   name_snapshot: string;
   quantity: number;
-  guest: Guest | null;
 };
 
 type KitchenOrder = {
@@ -124,7 +123,7 @@ type CheckoutPreview = {
   session_id: string;
   table_number: number;
   guest_count: number;
-  a_la_carte_lines: Array<{ name: string; guest_number: number | null; quantity: number; unit_price: number; total_price: number }>;
+  a_la_carte_lines: Array<{ name: string; quantity: number; unit_price: number; total_price: number }>;
   unlimited_order_lines: Array<{ name: string; quantity: number; unit_price: number; total_price: number }>;
   unlimited_lines: Array<{ name: string; quantity: number; unit_price: number; total_price: number }>;
   leftover_lines: Array<{ name: string; quantity: number; total: number }>;
@@ -753,10 +752,7 @@ export default function DiningService({
         <h1>Table ${order.dining_session.table.table_number}</h1>
         <p>${order.order_type === "unlimited" ? "UNLIMITED" : "A LA CARTE"} · ${escapeHtml(order.order_number)}</p>
         <p>${formatTime(order.created_at)}</p><hr />
-        <ul>${order.items.map((item) => {
-          const guestLabel = item.guest ? `Guest ${item.guest.guest_number}: ` : "";
-          return `<li>${guestLabel}${item.quantity} × ${escapeHtml(item.name_snapshot)}</li>`;
-        }).join("")}</ul>
+        <ul>${order.items.map((item) => `<li>${item.quantity} × ${escapeHtml(item.name_snapshot)}</li>`).join("")}</ul>
         <script>window.print();window.close();</script>
       </body></html>
     `);
@@ -789,7 +785,7 @@ export default function DiningService({
                 <ul className="my-4 divide-y divide-slate-100">
                   {order.items.map((item) => (
                     <li key={item.id} className="py-2 text-sm font-semibold">
-                      {item.guest ? `Guest ${item.guest.guest_number} · ` : ""}{item.quantity} × {item.name_snapshot}
+                      {item.quantity} × {item.name_snapshot}
                     </li>
                   ))}
                 </ul>
@@ -1626,7 +1622,7 @@ function CheckoutBill({
       {preview.a_la_carte_lines.map((line, index) => (
         <BillLine
           key={`ala-${index}`}
-          label={`${line.guest_number === null ? "" : `Guest ${line.guest_number} · `}${line.quantity} × ${line.name}`}
+          label={`${line.quantity} × ${line.name}`}
           amount={line.total_price}
         />
       ))}
