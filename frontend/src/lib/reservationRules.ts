@@ -20,6 +20,8 @@ export type ReservationRulesResponse = {
   fetched_at: number;
 };
 
+const RESERVATION_SLOT_INTERVAL_MINUTES = 30;
+
 export async function fetchReservationRules(): Promise<ReservationRulesResponse> {
   const response = await api.get<{ settings: ReservationRules; server_now: string }>("/api/reservations/rules");
   return { ...response.data, fetched_at: performance.now() };
@@ -83,6 +85,22 @@ export function isValidReservationTime(date: string, time: string, rules: Reserv
 
   const bookingEpoch = Date.parse(`${date}T${time}:00+08:00`);
   return Number.isFinite(bookingEpoch) && bookingEpoch > now.getTime() + rules.MIN_LEAD_MINUTES * 60_000;
+}
+
+export function getReservationTimeSlots(date: string, rules: ReservationRules, now: Date) {
+  const opening = timeToMinutes(rules.OPENING_TIME);
+  const closing = timeToMinutes(rules.LAST_BOOKING_TIME);
+  const firstSlot = Math.ceil(opening / RESERVATION_SLOT_INTERVAL_MINUTES) * RESERVATION_SLOT_INTERVAL_MINUTES;
+  const slots: string[] = [];
+
+  for (let minutes = firstSlot; minutes <= closing; minutes += RESERVATION_SLOT_INTERVAL_MINUTES) {
+    const time = minutesToTime(minutes);
+    if (isValidReservationTime(date, time, rules, now)) {
+      slots.push(time);
+    }
+  }
+
+  return slots;
 }
 
 export function clampReservationTime(date: string, time: string, rules: ReservationRules, now: Date) {

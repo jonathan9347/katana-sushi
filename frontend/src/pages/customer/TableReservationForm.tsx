@@ -1,7 +1,7 @@
 import { FormEvent, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { CalendarCheck, Minus, Plus } from "lucide-react";
-import { useQuery } from "@tanstack/react-query";
+import { useQueries, useQuery } from "@tanstack/react-query";
 import BackToHome from "../../components/layout/BackToHome";
 import { Dialog } from "../../components/ui/dialog";
 import { api } from "../../lib/api";
@@ -9,6 +9,7 @@ import { getApiErrorMessage } from "../../lib/errors";
 import { formatTime12, todayManilaDateKey } from "../../lib/dateTime";
 import {
   fetchReservationRules,
+  getReservationTimeSlots,
   getServerNow,
   isValidReservationTime,
   manilaDateKeyAt
@@ -48,54 +49,37 @@ export default function TableReservationForm() {
   const rules = rulesQuery.data?.settings;
   const serverNow = rulesQuery.data ? getServerNow(rulesQuery.data) : new Date();
   const serverToday = rules ? manilaDateKeyAt(serverNow, rules.TIME_ZONE) : todayManilaDateKey();
-  const timeIsValid = Boolean(rules && isValidReservationTime(date, time, rules, serverNow));
-  const [hourText, minuteText] = time ? time.split(":") : ["", ""];
-  const hour24 = Number(hourText || rules?.OPENING_TIME.split(":")[0] || 12);
-  const displayHour = hour24 % 12 || 12;
-  const period = hour24 >= 12 ? "PM" : "AM";
-
-  const availabilityQuery = useQuery({
-    queryKey: ["table-reservation-availability", date, time, partySize],
-    queryFn: async () => (await api.get<SlotAvailability>(
-      "/api/reservations/table-availability",
-      { params: { date, time, party_size: partySize } }
-    )).data,
-    enabled: timeIsValid,
-    retry: 1,
-    staleTime: 10_000,
-    refetchInterval: 30_000,
-    refetchOnWindowFocus: true
+  const slotTimes = useMemo(
+    () => rules && rulesQuery.data
+      ? getReservationTimeSlots(date, rules, getServerNow(rulesQuery.data))
+      : [],
+    [date, rules, rulesQuery.data]
+  );
+  const slotAvailabilityQueries = useQueries({
+    queries: slotTimes.map((slotTime) => ({
+      queryKey: ["table-reservation-availability", date, slotTime, partySize],
+      queryFn: async () => (await api.get<SlotAvailability>(
+        "/api/reservations/table-availability",
+        { params: { date, time: slotTime, party_size: partySize } }
+      )).data,
+      enabled: Boolean(rules),
+      retry: 1,
+      staleTime: 10_000,
+      refetchInterval: 30_000,
+      refetchOnWindowFocus: true
+    }))
   });
-  const availability = availabilityQuery.data;
+  const timeIsValid = Boolean(rules && isValidReservationTime(date, time, rules, serverNow));
+  const selectedSlotIndex = slotTimes.indexOf(time);
+  const availabilityQuery = selectedSlotIndex >= 0 ? slotAvailabilityQueries[selectedSlotIndex] : undefined;
+  const availability = availabilityQuery?.data;
   const isFull = availability?.availability === "full";
   const canContinue = timeIsValid &&
-    availabilityQuery.isSuccess &&
+    availabilityQuery?.isSuccess === true &&
     Boolean(availability) &&
     !isFull &&
     !isSubmitting;
   const timeLabel = useMemo(() => time ? formatTime12(time) : "Choose a time", [time]);
-
-  function setDigitalTime(hourValue: number, minuteValue: number, nextPeriod: "AM" | "PM") {
-    const boundedHour = Math.max(1, Math.min(12, Math.floor(hourValue)));
-    const boundedMinute = Math.max(0, Math.min(59, Math.floor(minuteValue)));
-    const hour24Value = (boundedHour % 12) + (nextPeriod === "PM" ? 12 : 0);
-    const candidate = `${String(hour24Value).padStart(2, "0")}:${String(boundedMinute).padStart(2, "0")}`;
-    setTime(candidate);
-  }
-
-  function updateTimeSegment(value: string, segment: "hour" | "minute") {
-    if (value === "") {
-      setTime("");
-      return;
-    }
-    const numeric = Number(value);
-    if (!Number.isFinite(numeric)) return;
-    setDigitalTime(
-      segment === "hour" ? numeric : displayHour,
-      segment === "minute" ? numeric : Number(minuteText || 0),
-      period
-    );
-  }
 
   function openContactForm() {
     setMessage("");
@@ -107,7 +91,7 @@ export default function TableReservationForm() {
       setMessage("Choose a future date and time within restaurant hours.");
       return;
     }
-    if (!availability || availabilityQuery.isError || availabilityQuery.isLoading) {
+    if (!availability || availabilityQuery?.isError || availabilityQuery?.isLoading) {
       setMessage("Confirming seat availability. Please try again shortly.");
       return;
     }
@@ -218,50 +202,44 @@ export default function TableReservationForm() {
                 <legend className="customer-label">Reservation time *</legend>
                 {rules ? (
                   <>
-                    <div className="reservation-time-picker mt-1" role="group" aria-label="Reservation time">
-                      <input
-                        className="reservation-time-segment"
-                        type="number"
-                        min={1}
-                        max={12}
-                        step={1}
-                        aria-label="Hour"
-                        value={time ? displayHour : ""}
-                        placeholder="hh"
-                        onChange={(event) => updateTimeSegment(event.target.value, "hour")}
-                      />
-                      <span className="reservation-time-separator" aria-hidden="true">:</span>
-                      <input
-                        className="reservation-time-segment reservation-time-minute"
-                        type="number"
-                        min={0}
-                        max={59}
-                        step={1}
-                        aria-label="Minute"
-                        value={minuteText}
-                        placeholder="mm"
-                        onChange={(event) => updateTimeSegment(event.target.value, "minute")}
-                      />
-                      <span className="reservation-time-period" aria-label="AM or PM">
-                        {(["AM", "PM"] as const).map((value) => (
+                    <div className="reservation-time-slots mt-2" role="group" aria-label="Available reservation times">
+                      {slotTimes.map((slotTime, index) => {
+                        const query = slotAvailabilityQueries[index];
+                        const label = formatTime12(slotTime);
+                        const status = query.isLoading
+                          ? "Checking"
+                          : query.isError
+                            ? "Unavailable"
+                            : query.data?.availability === "full"
+                              ? "Full"
+                              : "Available";
+                        return (
                           <button
-                            key={value}
+                            key={slotTime}
                             type="button"
-                            aria-pressed={Boolean(time) && period === value}
-                            className={Boolean(time) && period === value ? "is-selected" : ""}
-                            onClick={() => setDigitalTime(displayHour, Number(minuteText || 0), value)}
+                            className={`reservation-time-slot${time === slotTime ? " is-selected" : ""}${status === "Full" ? " is-full" : ""}`}
+                            aria-label={`${label}, ${status}`}
+                            aria-pressed={time === slotTime}
+                            disabled={query.isLoading || status === "Full"}
+                            onClick={() => {
+                              setTime(slotTime);
+                              if (query.isError) void query.refetch();
+                            }}
                           >
-                            {value}
+                            <span>{label}</span>
+                            <span className="reservation-time-slot-status">{status}</span>
                           </button>
-                        ))}
-                      </span>
+                        );
+                      })}
                     </div>
+                    {slotTimes.length === 0 && (
+                      <p className="mt-2 text-sm text-[var(--customer-muted)]" role="status">
+                        No reservation times remain for this date.
+                      </p>
+                    )}
                     <p className="mt-2 text-xs text-[var(--customer-muted)]">
                       Open {formatTime12(rules.OPENING_TIME)} to {formatTime12(rules.CLOSING_TIME)}.
                     </p>
-                    {!timeIsValid && time && (
-                      <p className="mt-1 text-xs text-katana-red" role="status">Choose a future time within restaurant hours.</p>
-                    )}
                   </>
                 ) : rulesQuery.isError ? (
                   <div className="mt-2 text-sm text-katana-red" role="alert">
@@ -285,7 +263,10 @@ export default function TableReservationForm() {
                 >
                   <Minus className="h-4 w-4" />
                 </button>
-                <span aria-live="polite">{partySize}</span>
+                <span aria-live="polite">
+                  <strong>{partySize}</strong>
+                  <small>guests</small>
+                </span>
                 <button
                   type="button"
                   aria-label="Add one guest"
@@ -366,10 +347,10 @@ export default function TableReservationForm() {
 
             <div className="min-h-12 text-sm" aria-live="polite">
               {!timeIsValid ? (
-                <p className="text-[var(--customer-muted)]">Choose a valid future time to check seat availability.</p>
-              ) : availabilityQuery.isLoading ? (
+                <p className="text-[var(--customer-muted)]">Choose a time to check seat availability.</p>
+              ) : availabilityQuery?.isLoading ? (
                 <p className="text-[var(--customer-muted)]">Checking seat availability...</p>
-              ) : availabilityQuery.isError ? (
+              ) : availabilityQuery?.isError ? (
                 <p className="text-katana-red">Seat availability could not be checked. Please retry.</p>
               ) : availability ? (
                 <p className={isFull ? "font-semibold text-katana-red" : "font-semibold text-emerald-500"}>

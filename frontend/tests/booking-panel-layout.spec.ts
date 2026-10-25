@@ -223,7 +223,10 @@ async function mockApi(page: Page, packages: typeof cateringPackages = []) {
         payment_plan: "pay_at_venue"
       };
     } else if (url.pathname === "/api/reservations/table-availability") {
-      body = { availability: "available", checked_at: new Date().toISOString() };
+      body = {
+        availability: url.searchParams.get("time") === "12:00" ? "full" : "available",
+        checked_at: new Date().toISOString()
+      };
     } else if (url.pathname === "/api/reservations/table" && route.request().method() === "POST") {
       body = { booking_id: "KTN-DINE-TEST-001", status: "confirmed" };
     } else if (url.pathname === "/api/reservations/rules") {
@@ -869,9 +872,7 @@ test("successful dine-in reservation links to its Status page", async ({ page })
   await page.goto("/reserve/book");
 
   await page.getByLabel("Date *").fill("2099-01-01");
-  await page.getByLabel("Hour").fill("12");
-  await page.getByLabel("Minute").fill("0");
-  await page.getByRole("button", { name: "PM", exact: true }).click();
+  await page.getByRole("button", { name: "12:30 PM, Available" }).click();
 
   const confirmBooking = page.getByRole("button", { name: "Confirm booking" });
   await expect(confirmBooking).toBeEnabled();
@@ -887,6 +888,35 @@ test("successful dine-in reservation links to its Status page", async ({ page })
   await expect(statusLink).toHaveAttribute("href", "/reservation/status?bookingId=KTN-DINE-TEST-001");
   await statusLink.click();
   await expect(page).toHaveURL(/\/reservation\/status\?bookingId=KTN-DINE-TEST-001$/);
+});
+
+test("table booking displays available/full time slots and the configured guest limit", async ({ page }) => {
+  await mockApi(page);
+  const availabilityRequests: URL[] = [];
+  page.on("request", (request) => {
+    const url = new URL(request.url());
+    if (url.pathname === "/api/reservations/table-availability") {
+      availabilityRequests.push(url);
+    }
+  });
+
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto("/reserve/book");
+  await page.getByLabel("Date *").fill("2099-01-01");
+
+  const fullSlot = page.getByRole("button", { name: "12:00 PM, Full" });
+  const availableSlot = page.getByRole("button", { name: "12:30 PM, Available" });
+  await expect(fullSlot).toBeDisabled();
+  await expect(availableSlot).toBeEnabled();
+  await availableSlot.click();
+  await expect(availableSlot).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByText("Maximum 20 guests per booking.")).toBeVisible();
+  await expect(page.getByText(/seats? available|guest count/i)).toHaveCount(0);
+  await expect.poll(() => availabilityRequests.some((url) =>
+    url.searchParams.get("date") === "2099-01-01"
+    && url.searchParams.get("time") === "12:30"
+    && url.searchParams.get("party_size") === "1"
+  )).toBe(true);
 });
 
 test("staff login remains outside the customer navigation layout", async ({ page }) => {

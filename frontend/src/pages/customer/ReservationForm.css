@@ -776,6 +776,68 @@
   min-width: 0;
 }
 
+.customer-reservation-form .reservation-time-slots {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(8rem, 1fr));
+  gap: 0.5rem;
+}
+
+.customer-reservation-form .reservation-time-slot {
+  display: flex;
+  min-width: 0;
+  min-height: 3.5rem;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 0.15rem;
+  border: 1px solid var(--customer-border);
+  border-radius: 0.75rem;
+  background: var(--customer-surface-2);
+  padding: 0.5rem 0.75rem;
+  color: var(--customer-text);
+  text-align: left;
+  transition: background-color 160ms ease, border-color 160ms ease, box-shadow 160ms ease;
+}
+
+.customer-reservation-form .reservation-time-slot:not(:disabled):hover {
+  border-color: #dc2626;
+}
+
+.customer-reservation-form .reservation-time-slot.is-selected {
+  border-color: #dc2626;
+  background: color-mix(in srgb, #dc2626 14%, var(--customer-surface));
+  box-shadow: 0 0 0 1px #dc2626;
+}
+
+.customer-reservation-form .reservation-time-slot.is-full {
+  cursor: not-allowed;
+  opacity: 0.65;
+}
+
+.customer-reservation-form .reservation-time-slot:focus-visible {
+  outline: 2px solid #dc2626;
+  outline-offset: 2px;
+}
+
+.customer-reservation-form .reservation-time-slot > span:first-child {
+  font-size: 0.875rem;
+  font-weight: 750;
+}
+
+.customer-reservation-form .reservation-time-slot-status {
+  color: var(--customer-muted);
+  font-size: 0.7rem;
+  font-weight: 650;
+}
+
+.customer-reservation-form .reservation-time-slot:not(.is-full) .reservation-time-slot-status {
+  color: #16a34a;
+}
+
+.customer-reservation-form .reservation-time-slot.is-full .reservation-time-slot-status {
+  color: #dc2626;
+}
+
 .customer-reservation-form .reservation-time-picker {
   display: flex;
   height: 2.625rem;
@@ -871,27 +933,32 @@
 
 .customer-reservation-form .reservation-guest-stepper {
   display: grid;
-  height: 2.625rem;
-  grid-template-columns: 2.25rem minmax(0, 1fr) 2.25rem;
+  width: min(100%, 15rem);
+  min-height: 3.25rem;
+  grid-template-columns: 2.75rem minmax(0, 1fr) 2.75rem;
   align-items: center;
-  border: 1px solid var(--customer-border);
-  border-radius: 0.625rem;
-  background: var(--customer-surface-2);
-  padding: 0 0.3rem;
+  gap: 0.5rem;
 }
 
 .customer-reservation-form .reservation-guest-stepper button {
   display: inline-flex;
-  width: 2.25rem;
-  height: 2rem;
+  width: 2.75rem;
+  height: 2.75rem;
   align-items: center;
   justify-content: center;
   border: 1px solid var(--customer-border);
-  border-radius: 0.4rem;
-  background: var(--customer-surface);
+  border-radius: 0.75rem;
+  background: var(--customer-surface-2);
   color: var(--customer-text);
   font-size: 1.1rem;
   font-weight: 700;
+  transition: background-color 160ms ease, border-color 160ms ease, color 160ms ease, opacity 160ms ease;
+}
+
+.customer-reservation-form .reservation-guest-stepper button:not(:disabled):hover {
+  border-color: #dc2626;
+  background: #dc2626;
+  color: #ffffff;
 }
 
 .customer-reservation-form .reservation-guest-stepper button:disabled {
@@ -905,10 +972,26 @@
 }
 
 .customer-reservation-form .reservation-guest-stepper span {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  line-height: 1;
   color: var(--customer-text);
   text-align: center;
-  font-size: 0.8rem;
+  font-size: 0.7rem;
   font-weight: 700;
+}
+
+.customer-reservation-form .reservation-guest-stepper strong {
+  font-size: 1.25rem;
+  font-weight: 800;
+}
+
+.customer-reservation-form .reservation-guest-stepper small {
+  margin-top: 0.2rem;
+  color: var(--customer-muted);
+  font-size: 0.625rem;
+  font-weight: 600;
 }
 
 @media (min-width: 1024px) {
