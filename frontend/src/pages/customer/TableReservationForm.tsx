@@ -1,7 +1,7 @@
 import { FormEvent, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { CalendarCheck, Minus, Plus } from "lucide-react";
-import { useQueries, useQuery } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import BackToHome from "../../components/layout/BackToHome";
 import { Dialog } from "../../components/ui/dialog";
 import { api } from "../../lib/api";
@@ -9,7 +9,6 @@ import { getApiErrorMessage } from "../../lib/errors";
 import { formatTime12, todayManilaDateKey } from "../../lib/dateTime";
 import {
   fetchReservationRules,
-  getReservationTimeSlots,
   getServerNow,
   isValidReservationTime,
   manilaDateKeyAt
@@ -49,33 +48,23 @@ export default function TableReservationForm() {
   const rules = rulesQuery.data?.settings;
   const serverNow = rulesQuery.data ? getServerNow(rulesQuery.data) : new Date();
   const serverToday = rules ? manilaDateKeyAt(serverNow, rules.TIME_ZONE) : todayManilaDateKey();
-  const slotTimes = useMemo(
-    () => rules && rulesQuery.data
-      ? getReservationTimeSlots(date, rules, getServerNow(rulesQuery.data))
-      : [],
-    [date, rules, rulesQuery.data]
-  );
-  const slotAvailabilityQueries = useQueries({
-    queries: slotTimes.map((slotTime) => ({
-      queryKey: ["table-reservation-availability", date, slotTime, partySize],
-      queryFn: async () => (await api.get<SlotAvailability>(
-        "/api/reservations/table-availability",
-        { params: { date, time: slotTime, party_size: partySize } }
-      )).data,
-      enabled: Boolean(rules),
-      retry: 1,
-      staleTime: 10_000,
-      refetchInterval: 30_000,
-      refetchOnWindowFocus: true
-    }))
-  });
   const timeIsValid = Boolean(rules && isValidReservationTime(date, time, rules, serverNow));
-  const selectedSlotIndex = slotTimes.indexOf(time);
-  const availabilityQuery = selectedSlotIndex >= 0 ? slotAvailabilityQueries[selectedSlotIndex] : undefined;
-  const availability = availabilityQuery?.data;
+  const availabilityQuery = useQuery({
+    queryKey: ["table-reservation-availability", date, time, partySize],
+    queryFn: async () => (await api.get<SlotAvailability>(
+      "/api/reservations/table-availability",
+      { params: { date, time, party_size: partySize } }
+    )).data,
+    enabled: timeIsValid,
+    retry: 1,
+    staleTime: 10_000,
+    refetchInterval: 30_000,
+    refetchOnWindowFocus: true
+  });
+  const availability = availabilityQuery.data;
   const isFull = availability?.availability === "full";
   const canContinue = timeIsValid &&
-    availabilityQuery?.isSuccess === true &&
+    availabilityQuery.isSuccess &&
     Boolean(availability) &&
     !isFull &&
     !isSubmitting;
@@ -202,41 +191,34 @@ export default function TableReservationForm() {
                 <legend className="customer-label">Reservation time *</legend>
                 {rules ? (
                   <>
-                    <div className="reservation-time-slots mt-2" role="group" aria-label="Available reservation times">
-                      {slotTimes.map((slotTime, index) => {
-                        const query = slotAvailabilityQueries[index];
-                        const label = formatTime12(slotTime);
-                        const status = query.isLoading
-                          ? "Checking"
-                          : query.isError
-                            ? "Unavailable"
-                            : query.data?.availability === "full"
-                              ? "Full"
-                              : "Available";
-                        return (
-                          <button
-                            key={slotTime}
-                            type="button"
-                            className={`reservation-time-slot${time === slotTime ? " is-selected" : ""}${status === "Full" ? " is-full" : ""}`}
-                            aria-label={`${label}, ${status}`}
-                            aria-pressed={time === slotTime}
-                            disabled={query.isLoading || status === "Full"}
-                            onClick={() => {
-                              setTime(slotTime);
-                              if (query.isError) void query.refetch();
-                            }}
-                          >
-                            <span>{label}</span>
-                            <span className="reservation-time-slot-status">{status}</span>
-                          </button>
-                        );
-                      })}
+                    <div className="reservation-time-entry mt-1">
+                      <input
+                        className="customer-input min-w-0 flex-1"
+                        type="time"
+                        aria-label="Reservation time"
+                        min={rules.OPENING_TIME}
+                        max={rules.LAST_BOOKING_TIME}
+                        step={60}
+                        value={time}
+                        onChange={(event) => setTime(event.target.value)}
+                        required
+                      />
+                      <span
+                        className={`reservation-availability-status${availability?.availability === "available" ? " is-available" : ""}${isFull ? " is-full" : ""}`}
+                        data-testid="table-reservation-availability"
+                        role="status"
+                      >
+                        {!timeIsValid
+                          ? "Choose a time"
+                          : availabilityQuery.isLoading
+                            ? "Checking..."
+                            : availabilityQuery.isError
+                              ? "Unavailable"
+                              : availability
+                                ? isFull ? "Full" : "Available"
+                                : "Checking..."}
+                      </span>
                     </div>
-                    {slotTimes.length === 0 && (
-                      <p className="mt-2 text-sm text-[var(--customer-muted)]" role="status">
-                        No reservation times remain for this date.
-                      </p>
-                    )}
                     <p className="mt-2 text-xs text-[var(--customer-muted)]">
                       Open {formatTime12(rules.OPENING_TIME)} to {formatTime12(rules.CLOSING_TIME)}.
                     </p>

@@ -872,7 +872,7 @@ test("successful dine-in reservation links to its Status page", async ({ page })
   await page.goto("/reserve/book");
 
   await page.getByLabel("Date *").fill("2099-01-01");
-  await page.getByRole("button", { name: "12:30 PM, Available" }).click();
+  await page.getByLabel("Reservation time").fill("12:30");
 
   const confirmBooking = page.getByRole("button", { name: "Confirm booking" });
   await expect(confirmBooking).toBeEnabled();
@@ -890,7 +890,7 @@ test("successful dine-in reservation links to its Status page", async ({ page })
   await expect(page).toHaveURL(/\/reservation\/status\?bookingId=KTN-DINE-TEST-001$/);
 });
 
-test("table booking displays available/full time slots and the configured guest limit", async ({ page }) => {
+test("table booking checks manual time changes and keeps the configured guest limit", async ({ page }) => {
   await mockApi(page);
   const availabilityRequests: URL[] = [];
   page.on("request", (request) => {
@@ -904,18 +904,24 @@ test("table booking displays available/full time slots and the configured guest 
   await page.goto("/reserve/book");
   await page.getByLabel("Date *").fill("2099-01-01");
 
-  const fullSlot = page.getByRole("button", { name: "12:00 PM, Full" });
-  const availableSlot = page.getByRole("button", { name: "12:30 PM, Available" });
-  await expect(fullSlot).toBeDisabled();
-  await expect(availableSlot).toBeEnabled();
-  await availableSlot.click();
-  await expect(availableSlot).toHaveAttribute("aria-pressed", "true");
+  const timeInput = page.getByLabel("Reservation time");
+  const availability = page.getByTestId("table-reservation-availability");
+  await timeInput.fill("12:00");
+  await expect(availability).toHaveText("Full");
+  await timeInput.fill("12:30");
+  await expect(availability).toHaveText("Available");
   await expect(page.getByText("Maximum 20 guests per booking.")).toBeVisible();
   await expect(page.getByText(/seats? available|guest count/i)).toHaveCount(0);
   await expect.poll(() => availabilityRequests.some((url) =>
     url.searchParams.get("date") === "2099-01-01"
     && url.searchParams.get("time") === "12:30"
     && url.searchParams.get("party_size") === "1"
+  )).toBe(true);
+  await page.getByRole("button", { name: "Add one guest" }).click();
+  await expect.poll(() => availabilityRequests.some((url) =>
+    url.searchParams.get("date") === "2099-01-01"
+    && url.searchParams.get("time") === "12:30"
+    && url.searchParams.get("party_size") === "2"
   )).toBe(true);
 });
 

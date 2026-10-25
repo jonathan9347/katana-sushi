@@ -776,65 +776,25 @@
   min-width: 0;
 }
 
-.customer-reservation-form .reservation-time-slots {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(8rem, 1fr));
-  gap: 0.5rem;
-}
-
-.customer-reservation-form .reservation-time-slot {
+.customer-reservation-form .reservation-time-entry {
   display: flex;
   min-width: 0;
-  min-height: 3.5rem;
-  flex-direction: column;
-  align-items: flex-start;
-  justify-content: center;
-  gap: 0.15rem;
-  border: 1px solid var(--customer-border);
-  border-radius: 0.75rem;
-  background: var(--customer-surface-2);
-  padding: 0.5rem 0.75rem;
-  color: var(--customer-text);
-  text-align: left;
-  transition: background-color 160ms ease, border-color 160ms ease, box-shadow 160ms ease;
+  align-items: center;
+  gap: 0.75rem;
 }
 
-.customer-reservation-form .reservation-time-slot:not(:disabled):hover {
-  border-color: #dc2626;
-}
-
-.customer-reservation-form .reservation-time-slot.is-selected {
-  border-color: #dc2626;
-  background: color-mix(in srgb, #dc2626 14%, var(--customer-surface));
-  box-shadow: 0 0 0 1px #dc2626;
-}
-
-.customer-reservation-form .reservation-time-slot.is-full {
-  cursor: not-allowed;
-  opacity: 0.65;
-}
-
-.customer-reservation-form .reservation-time-slot:focus-visible {
-  outline: 2px solid #dc2626;
-  outline-offset: 2px;
-}
-
-.customer-reservation-form .reservation-time-slot > span:first-child {
-  font-size: 0.875rem;
-  font-weight: 750;
-}
-
-.customer-reservation-form .reservation-time-slot-status {
+.customer-reservation-form .reservation-availability-status {
+  flex: 0 0 auto;
   color: var(--customer-muted);
-  font-size: 0.7rem;
-  font-weight: 650;
+  font-size: 0.8rem;
+  font-weight: 700;
 }
 
-.customer-reservation-form .reservation-time-slot:not(.is-full) .reservation-time-slot-status {
+.customer-reservation-form .reservation-availability-status.is-available {
   color: #16a34a;
 }
 
-.customer-reservation-form .reservation-time-slot.is-full .reservation-time-slot-status {
+.customer-reservation-form .reservation-availability-status.is-full {
   color: #dc2626;
 }
 
