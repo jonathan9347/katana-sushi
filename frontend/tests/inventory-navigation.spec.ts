@@ -288,3 +288,38 @@ test("Stock Reserved column uses the Pickup and Catering quantity", async ({ pag
   await expect(row.getByRole("cell").nth(3)).toHaveText("5");
   await expect(row.getByRole("cell").nth(4)).toHaveText("10");
 });
+
+test("Stock uses PAR level wording while retaining the reorder API field", async ({ page }) => {
+  await setStaffRole(page, "admin");
+  await page.route("**/api/inventory/materials", async (route) => {
+    await route.fulfill({
+      json: {
+        materials: [{
+          id: "material-1",
+          name: "Inventory Fixture Rice",
+          category: "Raw Material",
+          unit: "g",
+          current_stock: 20,
+          reserved_quantity: 0,
+          available_quantity: 1,
+          reorder_level: 2,
+          cost_per_unit: 1,
+          reserved_for: []
+        }]
+      }
+    });
+  });
+
+  await page.goto("/staff/inventory");
+  const stockFilter = page.getByRole("combobox", { name: "Filter materials by stock status" });
+  await expect(stockFilter.locator("option")).toContainText(["At or below PAR level"]);
+  await stockFilter.selectOption("low");
+
+  const row = page.getByRole("row").filter({ hasText: "Inventory Fixture Rice" });
+  await expect(page.getByRole("columnheader", { name: "PAR Level" })).toBeVisible();
+  await expect(row.getByText("Below PAR level.")).toBeVisible();
+
+  await page.getByRole("button", { name: "Add New Material" }).click();
+  await expect(page.getByText("PAR Level (whole units)")).toBeVisible();
+  await expect(page.getByText(/Reorder Level/i)).toHaveCount(0);
+});

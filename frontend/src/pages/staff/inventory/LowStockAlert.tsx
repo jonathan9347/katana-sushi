@@ -24,7 +24,7 @@ export default function LowStockAlert() {
       <CardContent>
         {lowStockQuery.isLoading && <p className="text-sm text-slate-500">Checking stock levels...</p>}
         {lowStockQuery.isError && <p className="text-sm text-red-700">Unable to load low stock alerts.</p>}
-        {lowStockQuery.data?.length === 0 && <p className="text-sm text-slate-500">No materials are below reorder level.</p>}
+        {lowStockQuery.data?.length === 0 && <p className="text-sm text-slate-500">No materials are below PAR level.</p>}
         <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
           {lowStockQuery.data?.map((material) => (
             <div key={material.id} className="rounded-lg border border-red-200 bg-red-50 p-4">
@@ -33,7 +33,7 @@ export default function LowStockAlert() {
                 <div className="min-w-0 flex-1">
                   <h3 className="font-semibold text-red-950">{material.name}</h3>
                   <p className="mt-1 text-sm text-red-800">
-                    {Number(material.available_quantity).toLocaleString()} {material.unit} available. Reorder at{" "}
+                    {Number(material.available_quantity).toLocaleString()} {material.unit} available. PAR level is{" "}
                     {Number(material.reorder_level).toLocaleString()} {material.unit}.
                   </p>
                 </div>

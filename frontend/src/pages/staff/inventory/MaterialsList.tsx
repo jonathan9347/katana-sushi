@@ -329,7 +329,7 @@ export default function MaterialsList({ role, onNavigateStockView, onOpenReserva
           >
             <option value="all">All stock status</option>
             <option value="issues">Inconsistent or negative</option>
-            <option value="low">Low stock</option>
+            <option value="low">At or below PAR level</option>
             <option value="negative">Negative available</option>
             <option value="expiring">Expiring within 7 days</option>
           </select>
@@ -382,7 +382,7 @@ export default function MaterialsList({ role, onNavigateStockView, onOpenReserva
                           <TableHead>On hand</TableHead>
                           <TableHead>Reserved</TableHead>
                           <TableHead>Available</TableHead>
-                          <TableHead>Reorder Level</TableHead>
+                          <TableHead>PAR Level</TableHead>
                           <TableHead>Cost per 100 g, 100 ml, or item</TableHead>
                           <TableHead>Status</TableHead>
                           <TableHead>Actions</TableHead>
@@ -443,7 +443,7 @@ export default function MaterialsList({ role, onNavigateStockView, onOpenReserva
                                 {available.toLocaleString()}
                                 {batchMismatch && <p className="mt-1 text-xs font-semibold">Batch total does not match on hand.</p>}
                                 {available < 0 && <p className="mt-1 text-xs font-semibold">Short by {Math.abs(available).toLocaleString()} {material.unit}.</p>}
-                                {!batchMismatch && available >= 0 && isLowStock && <p className="mt-1 text-xs font-semibold">Below reorder level.</p>}
+                                {!batchMismatch && available >= 0 && isLowStock && <p className="mt-1 text-xs font-semibold">Below PAR level.</p>}
                               </TableCell>
                               <TableCell>{Number(material.reorder_level).toLocaleString()}</TableCell>
                               <TableCell>{formatCostPerDisplayUnit(material.cost_per_unit, material.unit)}</TableCell>
@@ -698,7 +698,7 @@ function MaterialFields({
     { key: "name", label: "Name", editable: true },
     { key: "category", label: "Category", editable: true },
     { key: "unit", label: "Unit", editable: true },
-    { key: "reorder_level", label: "Reorder Level (whole units)", editable: true },
+    { key: "reorder_level", label: "PAR Level (whole units)", editable: true },
     { key: "cost_per_unit", label: `Cost per ${costDisplayUnit(form.unit)}`, editable: true }
   ];
 

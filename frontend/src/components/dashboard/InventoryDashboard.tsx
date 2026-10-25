@@ -5,7 +5,7 @@ export default function InventoryDashboard() {
     <div className="space-y-6">
       <div className="grid gap-6 xl:grid-cols-4 lg:grid-cols-2">
         <DashboardWidget title="Total Materials" icon="📦" value={26} subtitle="Items tracked in inventory" />
-        <DashboardWidget title="Low Stock" icon="⚠️" value={3} subtitle="Items below reorder level" />
+        <DashboardWidget title="Low Stock" icon="⚠️" value={3} subtitle="Items below PAR level" />
         <DashboardWidget title="Critical" icon="🔥" value={1} subtitle="Urgent restock required" />
         <DashboardWidget title="Yield Estimate" icon="💹" value="₱45,000" subtitle="Potential value from current stock" />
       </div>
