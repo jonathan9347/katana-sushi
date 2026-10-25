@@ -1,6 +1,6 @@
 import { FormEvent, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
-import { Banknote, CheckCircle2, ChevronRight, Landmark, Send, ShieldCheck, Smartphone } from "lucide-react";
+import { Banknote, CheckCircle2, Landmark, Send, ShieldCheck, Smartphone } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { Dialog } from "../../components/ui/dialog";
 import BackToHome from "../../components/layout/BackToHome";
@@ -779,57 +779,51 @@ export default function CateringReservation() {
                 ? "fixed inset-x-0 bottom-0 z-50 flex max-h-[85dvh] flex-col overflow-y-auto overscroll-contain rounded-t-2xl border border-katana-border bg-[var(--customer-surface)] p-4 pb-[max(1rem,env(safe-area-inset-bottom))] shadow-2xl"
                 : "hidden"} catering-booking-panel space-y-3 lg:space-y-0 lg:gap-3 lg:sticky lg:top-3 lg:h-[calc(100dvh-1.5rem)] lg:max-h-[calc(100dvh-1.5rem)] lg:overflow-hidden lg:overscroll-contain lg:rounded-none lg:border-0 lg:bg-transparent lg:p-0 lg:shadow-none lg:flex lg:flex-col`}
             >
-            <div className="flex items-center justify-between lg:hidden">
+            <div className="flex items-center justify-between gap-2">
               <h2 className="text-sm font-bold text-[var(--customer-text)]">Event and booking details</h2>
-              <button type="button" className="customer-btn-secondary px-3 py-2 text-xs" onClick={() => setMobileSummaryOpen(false)}>Close</button>
+              <span className="hidden text-right text-xs font-semibold text-neutral-300 sm:block">{form.station_types.length} stations · {money(totalPriceTotal)}</span>
+              <button type="button" className="customer-btn-secondary px-3 py-2 text-xs lg:hidden" onClick={() => setMobileSummaryOpen(false)}>Close</button>
             </div>
-            <details className="catering-booking-details group rounded-xl border border-katana-border bg-katana-elevated p-4">
-              <summary className="flex cursor-pointer list-none items-center gap-2 font-bold text-white [&::-webkit-details-marker]:hidden">
-                <ChevronRight aria-hidden="true" className="h-4 w-4 shrink-0 transition-transform group-open:rotate-90" />
-                <span className="min-w-0 flex-1 text-sm">Event and booking details</span>
-                <span className="text-right text-xs font-semibold text-neutral-300">{form.station_types.length} stations · {money(totalPriceTotal)}</span>
-              </summary>
-              <div className="catering-booking-event-fields mt-3 space-y-3">
-            <section className="border-b border-katana-border pb-3">
-              <h3 className="text-sm font-bold uppercase tracking-wide text-white">Event details</h3>
-              <div className="mt-3 grid gap-2 sm:grid-cols-2">
-                <label className="block">
-                  <span className="customer-label">Event Date *</span>
-                  <input className="customer-input py-2.5" type="date" min={earliestEventDate()} value={form.event_date} onChange={(event) => setField("event_date", event.target.value)} required />
-                </label>
-                <label className="block">
-                  <span className="customer-label">Event Time *</span>
-                  <input className="customer-input py-2.5" type="time" value={form.event_time} onChange={(event) => setField("event_time", event.target.value)} required />
-                </label>
-                <label className="block sm:col-span-2">
-                  <span className="customer-label">Type of Event *</span>
-                  <select className="customer-input py-2.5" value={form.event_type} onChange={(event) => setField("event_type", event.target.value)} required>
-                    <option value="">Select event type</option>
-                    <option value="Wedding">Wedding</option>
-                    <option value="Birthday">Birthday</option>
-                    <option value="Corporate Event">Corporate Event</option>
-                    <option value="Private Party">Private Party</option>
-                    <option value="Graduation">Graduation</option>
-                    <option value="Others">Others</option>
-                  </select>
-                </label>
-                {form.event_type === "Others" && (
-                  <label className="block sm:col-span-2">
-                    <span className="customer-label">Please specify *</span>
-                    <input
-                      className="customer-input py-2.5"
-                      maxLength={60}
-                      value={form.event_type_other}
-                      onChange={(event) => setField("event_type_other", event.target.value)}
-                      required
-                    />
-                  </label>
-                )}
+            <section className="catering-booking-details rounded-xl border border-katana-border bg-katana-elevated p-4">
+              <div className="catering-booking-event-fields space-y-3">
+                <section className="border-b border-katana-border pb-2">
+                  <div className="grid gap-2 sm:grid-cols-2">
+                    <label className="block">
+                      <span className="customer-label">Event Date *</span>
+                      <input className="customer-input py-2.5" type="date" min={earliestEventDate()} value={form.event_date} onChange={(event) => setField("event_date", event.target.value)} required />
+                    </label>
+                    <label className="block">
+                      <span className="customer-label">Event Time *</span>
+                      <input className="customer-input py-2.5" type="time" value={form.event_time} onChange={(event) => setField("event_time", event.target.value)} required />
+                    </label>
+                    <label className="block sm:col-span-2">
+                      <span className="customer-label">Type of Event *</span>
+                      <select className="customer-input py-2.5" value={form.event_type} onChange={(event) => setField("event_type", event.target.value)} required>
+                        <option value="">Select event type</option>
+                        <option value="Wedding">Wedding</option>
+                        <option value="Birthday">Birthday</option>
+                        <option value="Corporate Event">Corporate Event</option>
+                        <option value="Private Party">Private Party</option>
+                        <option value="Graduation">Graduation</option>
+                        <option value="Others">Others</option>
+                      </select>
+                    </label>
+                    {form.event_type === "Others" && (
+                      <label className="block sm:col-span-2">
+                        <span className="customer-label">Please specify *</span>
+                        <input
+                          className="customer-input py-2.5"
+                          maxLength={60}
+                          value={form.event_type_other}
+                          onChange={(event) => setField("event_type_other", event.target.value)}
+                          required
+                        />
+                      </label>
+                    )}
+                  </div>
+                </section>
               </div>
             </section>
-
-              </div>
-            </details>
             <div className="catering-booking-checkout space-y-3 lg:min-h-0 lg:flex lg:flex-col lg:space-y-0 lg:gap-3 lg:shrink lg:border-t lg:border-katana-border lg:bg-[var(--customer-surface)] lg:pt-2">
               {isZeroQuoteOnlyReservation && (
                 <p className="rounded-lg border border-amber-300/30 bg-amber-300/10 px-3 py-2 text-sm font-semibold text-amber-100">

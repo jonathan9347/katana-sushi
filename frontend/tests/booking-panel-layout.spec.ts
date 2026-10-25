@@ -315,36 +315,30 @@ test("table booking route uses the minimal Back control instead of the Home head
   await expect(page.getByTestId("desktop-customer-nav")).toHaveCount(0);
 });
 
-test("Catering panel stays at the viewport edge and its details card collapses independently", async ({ page }) => {
+test("Catering event and booking details stay open at the viewport edge", async ({ page }) => {
   await mockApi(page);
   await page.setViewportSize(viewportSizes[0]);
   await page.goto("/catering/book");
   const panel = page.locator("#catering-mobile-details");
   const back = page.getByRole("link", { name: "Back to home" });
-  const details = page.locator("details.catering-booking-details");
+  const details = page.locator(".catering-booking-details");
+  const eventFields = panel.locator(".catering-booking-event-fields");
   const action = panel.getByRole("button", { name: "Review request" });
 
   await expect(panel).toBeVisible();
   await expect(back).toHaveAttribute("href", "/");
   await expect(page.locator('nav a[href="/"]')).toHaveCount(0);
+  await expect(panel.getByRole("heading", { name: "Event and booking details" })).toBeVisible();
+  await expect(panel.getByText("Event details", { exact: true })).toHaveCount(0);
+  await expect(page.locator("details.catering-booking-details")).toHaveCount(0);
 
   for (const viewport of viewportSizes) {
     await page.setViewportSize(viewport);
     await expectPanelBounds(page, "#catering-mobile-details", viewport.height);
     await expect(action).toBeInViewport();
-    await expect(details).not.toHaveAttribute("open", "");
-
-    await details.locator(":scope > summary").click();
-    await expect(details).toHaveAttribute("open", "");
-    await expect(details).toHaveCSS("overflow-y", "visible");
-    const expandedHeight = await details.evaluate((element) => element.getBoundingClientRect().height);
-    const chevron = details.locator(":scope > summary svg");
-    await expect(chevron).toHaveCSS("transform", "matrix(0, 1, -1, 0, 0, 0)");
-    await details.locator(":scope > summary").click();
-    await expect(details).not.toHaveAttribute("open", "");
-    const collapsedHeight = await details.evaluate((element) => element.getBoundingClientRect().height);
-    expect(collapsedHeight).toBeLessThan(expandedHeight);
-    expect(await details.evaluate((element) => element.nextElementSibling?.textContent)).toContain("Headcount");
+    await expect(details).toBeVisible();
+    await expect(eventFields.getByLabel("Event Date *")).toBeVisible();
+    await expect(eventFields.getByLabel("Event Time *")).toBeVisible();
     await expect(action).toBeInViewport();
   }
 
@@ -408,7 +402,6 @@ test("Whole Tuna is priced from 20 kg and cannot be mixed with station packages"
   await expect(page.locator("#catering-mobile-details")).toContainText("₱24,000.00");
   await expect(page.locator("#catering-mobile-details")).toContainText("Not applicable");
 
-  await page.locator("#catering-mobile-details details.catering-booking-details > summary").click();
   await page.getByLabel("Event Time *").fill("18:00");
   await page.getByLabel("Type of Event *").selectOption("Wedding");
   await page.getByRole("checkbox").nth(0).check();
@@ -427,7 +420,6 @@ test("Catering requires event details, an order, payment choice, and acknowledge
   await expect(page.getByRole("alert")).toContainText("Choose a future event date and time.");
   await expect(page.getByRole("dialog")).toHaveCount(0);
 
-  await panel.locator("details.catering-booking-details > summary").click();
   await page.getByLabel("Event Date *").fill("2099-01-01");
   await page.getByLabel("Event Time *").fill("18:00");
   await page.getByLabel("Type of Event *").selectOption("Wedding");
@@ -460,7 +452,7 @@ test("Catering requires event details, an order, payment choice, and acknowledge
   await expect(page.getByRole("dialog", { name: "Your contact details" })).toBeVisible();
 });
 
-test("Catering right panel keeps expanded content and actions within the viewport", async ({ page }) => {
+test("Catering right panel keeps event details and actions within the viewport", async ({ page }) => {
   await mockApi(page, cateringPackages);
   await page.goto("/catering/book");
 
@@ -469,7 +461,6 @@ test("Catering right panel keeps expanded content and actions within the viewpor
   await page.getByRole("checkbox").nth(0).check();
   await page.getByRole("checkbox").nth(4).check();
   const panel = page.locator("#catering-mobile-details");
-  await panel.locator("details.catering-booking-details > summary").click();
   await panel.getByRole("radio", { name: /Pay 50% of package total/ }).check();
 
   for (const viewport of viewportSizes) {
@@ -478,7 +469,7 @@ test("Catering right panel keeps expanded content and actions within the viewpor
     await expect(panel.getByRole("button", { name: "Review request" })).toBeInViewport();
 
     const fit = await panel.evaluate((element) => {
-      const details = element.querySelector("details.catering-booking-details");
+      const bookingDetails = element.querySelector(".catering-booking-details");
       const eventFields = element.querySelector(".catering-booking-event-fields");
       const checkout = element.querySelector(".catering-booking-checkout");
       const rect = (node: Element | null) => {
@@ -488,19 +479,19 @@ test("Catering right panel keeps expanded content and actions within the viewpor
       };
       return {
         panelFits: element.scrollHeight <= element.clientHeight,
-        detailsFits: details ? details.scrollHeight <= details.clientHeight : false,
+        bookingDetailsFit: bookingDetails ? bookingDetails.scrollHeight <= bookingDetails.clientHeight : false,
         eventFieldsFits: eventFields ? eventFields.scrollHeight <= eventFields.clientHeight : false,
         checkoutFits: checkout ? checkout.scrollHeight <= checkout.clientHeight : false,
-        detailsBounds: rect(details),
+        bookingDetailsBounds: rect(bookingDetails),
         eventFieldsBounds: rect(eventFields)
       };
     });
 
     expect(fit.panelFits, JSON.stringify({ viewport, fit })).toBeTruthy();
-    expect(fit.detailsFits, JSON.stringify({ viewport, fit })).toBeTruthy();
+    expect(fit.bookingDetailsFit, JSON.stringify({ viewport, fit })).toBeTruthy();
     expect(fit.eventFieldsFits, JSON.stringify({ viewport, fit })).toBeTruthy();
     expect(fit.checkoutFits, JSON.stringify({ viewport, fit })).toBeTruthy();
-    expect(fit.eventFieldsBounds?.bottom).toBeLessThanOrEqual(fit.detailsBounds?.bottom ?? 0);
+    expect(fit.eventFieldsBounds?.bottom).toBeLessThanOrEqual(fit.bookingDetailsBounds?.bottom ?? 0);
   }
 });
 
