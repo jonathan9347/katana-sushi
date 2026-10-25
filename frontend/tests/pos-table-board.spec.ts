@@ -177,8 +177,7 @@ test("existing-table board only selects occupied tables with a live session", as
   await expect(orderBuilder.getByRole("button", { name: "Print order" })).toBeVisible();
   await expect(orderBuilder.getByRole("button", { name: "Bill out" })).toBeVisible();
   await expect(orderBuilder.getByRole("button", { name: "Checkout" })).toHaveCount(0);
-  await page.getByRole("button", { name: "Open table session tools" }).click();
-  await expect(page.getByRole("heading", { name: "Table 11" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Open table session tools" })).toHaveCount(0);
 });
 
 test("opens Manage tables from the main POS and preserves table creation and link controls", async ({ page }) => {

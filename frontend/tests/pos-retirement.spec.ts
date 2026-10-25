@@ -37,6 +37,7 @@ test("redirects the retired Table Service URL to the main POS", async ({ page })
   await expect(page).toHaveURL(/\/staff\/pos$/);
   await expect(page.getByRole("heading", { name: "Point of Sale" })).toBeVisible();
   await expect(page.getByRole("link", { name: "Table Service" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Open table session tools" })).toHaveCount(0);
 });
 
 test("keeps the legacy kitchen route and links back to the main POS", async ({ page }) => {
@@ -46,6 +47,7 @@ test("keeps the legacy kitchen route and links back to the main POS", async ({ p
 
   await expect(page.getByRole("heading", { name: "Kitchen tickets" })).toBeVisible();
   await expect(page.getByText("No open kitchen tickets.")).toBeVisible();
+  await expect(page.getByText("Dine-in operations")).toHaveCount(0);
   await expect(page.getByRole("link", { name: "Main POS" })).toHaveAttribute("href", "/staff/pos");
   await expect(page.getByRole("link", { name: "Table Service" })).toHaveCount(0);
 });

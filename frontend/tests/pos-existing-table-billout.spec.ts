@@ -146,6 +146,8 @@ test("existing table order can be committed, previewed with Senior/PWD discount,
   await orderBuilder.getByRole("button", { name: "Print order" }).click();
   const slip = await slipPopup;
   await expect(slip.locator("body")).toContainText("DO-001");
+  await expect(slip.locator("body")).toContainText("Table 4");
+  await expect(slip.locator("body")).toContainText("Sushi Set");
   await expect(orderBuilder.getByRole("button", { name: "Bill out" })).toBeVisible();
   expect(confirmationCount).toBe(1);
 
@@ -251,6 +253,7 @@ test("Unlimited cart mode does not start a timer until staff starts the existing
   await page.getByRole("button", { name: "Start Unlimited Session" }).click();
   expect(startRequestBody).toEqual({ paxCount: 3 });
   await expect(page.getByText("Time Remaining")).toBeVisible();
+  await expect(page.getByText("Time Remaining")).toHaveCount(1);
   await expect(page.getByText("Timer starts after first round")).toHaveCount(0);
   await page.getByRole("button", { name: "Extend Session" }).click();
   await expect.poll(() => extensionRequests).toBe(1);

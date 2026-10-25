@@ -138,7 +138,6 @@ export default function PosPage() {
   const [billOutPaymentMethod, setBillOutPaymentMethod] = useState<"cash" | "gcash" | "bank_transfer">("cash");
   const [billOutCashReceived, setBillOutCashReceived] = useState("");
   const [extendingUnlimited, setExtendingUnlimited] = useState(false);
-  const [showLastTableSessionTools, setShowLastTableSessionTools] = useState(false);
   const role = getStoredRole();
   const allowed = role === "admin" || role === "cashier";
   const carts = usePosCart((state) => state.carts);
@@ -828,26 +827,6 @@ export default function PosPage() {
               : items.length === 0 || checkoutMutation.isPending}
           onAction={handlePrimaryAction}
         />
-
-        {tableSessionToolsId ? (
-          <section className="grid gap-3">
-            <Button
-              className="justify-self-start"
-              variant="outline"
-              onClick={() => setShowLastTableSessionTools((isOpen) => !isOpen)}
-            >
-              {showLastTableSessionTools ? "Close" : "Open"} table session tools
-            </Button>
-            {showLastTableSessionTools && (
-              <DiningService
-                key={`last-committed-session-${tableSessionToolsId}`}
-                mode="service"
-                embedded
-                initialSessionId={tableSessionToolsId}
-              />
-            )}
-          </section>
-        ) : null}
 
       </div>
 

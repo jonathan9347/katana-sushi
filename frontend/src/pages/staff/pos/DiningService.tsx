@@ -764,7 +764,7 @@ export default function DiningService({
       <main className="min-h-screen bg-slate-100 px-4 py-5 lg:pr-6">
         <div className="mx-auto max-w-7xl space-y-5">
           <header>
-            <p className="text-sm font-bold uppercase text-red-700">Dine-in operations</p>
+            <p className="text-sm font-bold uppercase text-red-700">Kitchen</p>
             <h1 className="text-3xl font-black text-slate-950">Kitchen tickets</h1>
           </header>
           <SectionNav orientation="horizontal" tabs={posTabs} />
