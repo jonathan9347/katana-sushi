@@ -136,18 +136,20 @@ test("existing table order can be committed, previewed with Senior/PWD discount,
 
   await page.goto("/staff/pos");
   await page.getByRole("button", { name: "Existing Table" }).click();
-  await page.getByRole("button", { name: "Proceed" }).click();
   await page.getByRole("button", { name: "Select Table 4, Occupied" }).click();
+  const orderBuilder = page.getByRole("region", { name: "POS order builder" });
+  await expect(orderBuilder.getByRole("button", { name: "Checkout" })).toHaveCount(0);
+  await expect(orderBuilder.getByText(/checkout/i)).toHaveCount(0);
   await page.getByRole("button", { name: /Sushi Set Sushi/ }).click();
 
   const slipPopup = page.waitForEvent("popup");
-  await page.getByRole("button", { name: "Confirm & Print" }).click();
+  await orderBuilder.getByRole("button", { name: "Print order" }).click();
   const slip = await slipPopup;
   await expect(slip.locator("body")).toContainText("DO-001");
-  await expect(page.getByRole("button", { name: "Bill out table" })).toBeVisible();
+  await expect(orderBuilder.getByRole("button", { name: "Bill out" })).toBeVisible();
   expect(confirmationCount).toBe(1);
 
-  await page.getByRole("button", { name: "Bill out table" }).click();
+  await orderBuilder.getByRole("button", { name: "Bill out" }).click();
   const billOut = page.getByRole("dialog", { name: "Bill out Table 4" });
   await billOut.getByLabel("Bill-out guest count").fill("10");
   await billOut.getByLabel("Senior/PWD guest count").fill("3");
@@ -166,7 +168,7 @@ test("existing table order can be committed, previewed with Senior/PWD discount,
     paymentMethod: "cash",
     cashReceived: 940
   });
-  await expect(page.getByRole("button", { name: "Bill out table" })).toHaveCount(0);
+  await expect(orderBuilder.getByRole("button", { name: "Bill out" })).toHaveCount(0);
 });
 
 test("Unlimited cart mode does not start a timer until staff starts the existing table session", async ({ page }) => {
@@ -239,7 +241,6 @@ test("Unlimited cart mode does not start a timer until staff starts the existing
 
   await page.goto("/staff/pos");
   await page.getByRole("button", { name: "Existing Table" }).click();
-  await page.getByRole("button", { name: "Proceed" }).click();
   await page.getByRole("button", { name: "Select Table 4, Occupied" }).click();
   await page.getByRole("button", { name: "Unlimited", exact: true }).click();
   await page.getByLabel("Unlimited headcount").fill("3");
@@ -337,7 +338,6 @@ test("one table cart keeps regular a-la-carte and Unlimited items together with 
 
   await page.goto("/staff/pos");
   await page.getByRole("button", { name: "Existing Table" }).click();
-  await page.getByRole("button", { name: "Proceed" }).click();
   await page.getByRole("button", { name: "Select Table 4, Occupied" }).click();
   const builder = page.getByRole("region", { name: "POS order builder" });
   await builder.getByRole("button", { name: /A la carte Maki/ }).click();
@@ -353,7 +353,7 @@ test("one table cart keeps regular a-la-carte and Unlimited items together with 
   await expect(builder).toContainText("PHP 4,750.00");
 
   const slipPromise = page.waitForEvent("popup");
-  await page.getByRole("button", { name: "Confirm & Print" }).click();
+  await page.getByRole("button", { name: "Print order" }).click();
   const slip = await slipPromise;
   await expect(slip.locator("body")).toContainText("DO-MIXED-001");
   expect(confirmationBodies).toHaveLength(1);

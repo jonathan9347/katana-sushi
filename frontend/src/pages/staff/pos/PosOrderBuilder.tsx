@@ -121,6 +121,7 @@ export default function PosOrderBuilder({
   );
   const isPickup = customerType === "pickup_customer";
   const isDineIn = cartKey !== "takeout";
+  const isSelectingExistingTable = customerType === "existing_table" && !selectionSummary;
   const itemSubtotal = items.reduce((sum, item) => sum + getCartPrice(item, cartKey) * item.quantity, 0);
   const hasUnlimitedItems = items.some((item) => item.diningOrderType === "unlimited");
   const packagePaxCount = activeUnlimitedPaxCount ?? headcount;
@@ -132,7 +133,10 @@ export default function PosOrderBuilder({
   const total = subtotal + (hasUnlimitedItems ? unlimitedPackageEstimate ?? 0 : 0);
 
   return (
-    <section className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(18rem,0.34fr)]" aria-label="POS order builder">
+    <section
+      className={`grid gap-4 ${isSelectingExistingTable ? "xl:grid-cols-1" : "xl:grid-cols-[minmax(0,1fr)_minmax(18rem,0.34fr)]"}`}
+      aria-label="POS order builder"
+    >
       <div className="min-w-0 space-y-4">
         <section aria-label="Customer type" className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
           <div className="flex flex-wrap gap-2">
@@ -206,7 +210,7 @@ export default function PosOrderBuilder({
         </Card>}
       </div>
 
-      <aside className="min-w-0">
+      {!isSelectingExistingTable && <aside className="min-w-0">
         <Card className="h-full">
           <CardHeader>
             <CardTitle>{isPickup ? "Pickup order" : "Order"}</CardTitle>
@@ -354,7 +358,7 @@ export default function PosOrderBuilder({
             </div>
           </CardContent>
         </Card>
-      </aside>
+      </aside>}
     </section>
   );
 }

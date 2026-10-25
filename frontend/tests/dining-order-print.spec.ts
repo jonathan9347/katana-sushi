@@ -115,7 +115,7 @@ async function openDiningService(
           extensions: [...activeUnlimitedSession.extensions, { minutes: 30, created_at: extendedAt.toISOString() }]
         };
       }
-      await route.fulfill({ json: { session: activeUnlimitedSession } });
+      await route.fulfill({ json: { extension: { minutes: 30 }, session: activeUnlimitedSession } });
       return;
     }
     if (url.pathname === "/api/pos/dining/upcoming-reservations") {
@@ -184,7 +184,6 @@ async function openDiningService(
   });
   await page.goto(path);
   await page.getByRole("button", { name: "Existing Table" }).click();
-  await page.getByRole("button", { name: "Proceed" }).click();
   await page.getByRole("button", { name: "Select Table 4, Occupied" }).click();
   await page.getByRole("button", { name: "Open table session tools" }).click();
   await expect(page.getByRole("heading", { name: "Dine-in order", exact: true })).toBeVisible();
@@ -255,7 +254,6 @@ test("reload fetches the tab's saved order ID and reprints without committing ag
 
   await page.reload();
   await page.getByRole("button", { name: "Existing Table" }).click();
-  await page.getByRole("button", { name: "Proceed" }).click();
   await page.getByRole("button", { name: "Select Table 4, Occupied" }).click();
   await page.getByRole("button", { name: "Open table session tools" }).click();
   await expect(page.getByText(`Saved order ${orderResponse.order.order_number} · Table 4`)).toBeVisible();
@@ -465,7 +463,6 @@ test("preserves the dine-in cart when opening customer selection", async ({ page
   await page.getByRole("dialog", { name: "Take-out" }).getByRole("button", { name: "Walk-in" }).click();
   await expect(page.getByRole("region", { name: "POS order builder" })).toContainText("Cart is empty");
   await page.getByRole("button", { name: "Existing Table" }).click();
-  await page.getByRole("button", { name: "Proceed" }).click();
   await page.getByRole("button", { name: "Select Table 4, Occupied" }).click();
   await expect(page.getByRole("region", { name: "POS order builder" }).getByText("2 × California Roll")).toBeVisible();
 });

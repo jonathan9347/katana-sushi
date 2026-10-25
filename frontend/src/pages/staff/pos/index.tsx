@@ -545,7 +545,7 @@ export default function PosPage() {
     setSelectedReservation(null);
     setSelectedPickupOrder(null);
     setSelectedDiningSessionId("");
-    setSelectionView("menu");
+    setSelectionView("table-board");
   }
 
   function selectTable(selection: { tableId: string; tableNumber: number; sessionId: string | null }) {
@@ -608,7 +608,15 @@ export default function PosPage() {
       mode="board"
       boardPurpose={tableBoardPurpose}
       embedded
-      onBackToBoard={() => setSelectionView("menu")}
+      onBackToBoard={() => {
+        if (tableBoardPurpose === "existing_table") {
+          setCustomerType("new_customer");
+          setCustomerService("takeout");
+          setSelectionView("menu");
+          return;
+        }
+        setSelectionView("menu");
+      }}
       onTableSelected={selectTable}
     />
   ) : selectionView === "reservation-list" ? (
@@ -758,7 +766,7 @@ export default function PosPage() {
                   setBillOutOpen(true);
                 }}
               >
-                Bill out table
+                Bill out
               </Button>
               {(carts.dine_in_ala_carte.length > 0 || carts.dine_in_unlimited.length > 0) && (
                 <p className="text-xs text-slate-600">Commit or clear the dine-in cart before billing out.</p>
@@ -800,6 +808,8 @@ export default function PosPage() {
           onReprintLastOrder={handleReprintLastOrder}
           actionLabel={isPickupCustomer
             ? "Checkout"
+            : customerType === "existing_table"
+              ? "Print order"
             : isDineIn
               ? (selectedTable || selectedReservation) ? "Confirm & Print" : "Proceed"
               : "Checkout"}

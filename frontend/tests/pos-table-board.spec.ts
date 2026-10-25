@@ -163,24 +163,28 @@ test("walk-in board is a pure status grid and stages free-table choice without s
 test("existing-table board only selects occupied tables with a live session", async ({ page }) => {
   await openPosWithTableMocks(page);
   await page.getByRole("button", { name: "Existing Table" }).click();
-  await page.getByRole("button", { name: /California Roll/ }).click();
-  await page.getByRole("button", { name: "Proceed" }).click();
 
   const tableBoard = page.getByRole("region", { name: "Table board" });
+  const orderBuilder = page.getByRole("region", { name: "POS order builder" });
+  await expect(tableBoard).toBeVisible();
+  await expect(orderBuilder.getByRole("button", { name: /California Roll/ })).toHaveCount(0);
+  await expect(orderBuilder.getByRole("button", { name: "Proceed" })).toHaveCount(0);
+  await expect(orderBuilder.getByRole("button", { name: "Checkout" })).toHaveCount(0);
   await expect(tableBoard.getByRole("button", { name: "Select Table 11, Occupied" })).toBeVisible();
   await expect(tableBoard.getByRole("article", { name: "Table 12, Reserved" })).toBeVisible();
   await tableBoard.getByRole("button", { name: "Select Table 11, Occupied" }).click();
-  await expect(page.getByRole("region", { name: "POS order builder" })).toBeVisible();
+  await expect(orderBuilder.getByRole("button", { name: /California Roll/ })).toBeVisible();
+  await expect(orderBuilder.getByRole("button", { name: "Print order" })).toBeVisible();
+  await expect(orderBuilder.getByRole("button", { name: "Bill out" })).toBeVisible();
+  await expect(orderBuilder.getByRole("button", { name: "Checkout" })).toHaveCount(0);
   await page.getByRole("button", { name: "Open table session tools" }).click();
   await expect(page.getByRole("heading", { name: "Table 11" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Confirm & Print" })).toBeVisible();
 });
 
 test("opens Manage tables from the main POS and preserves table creation and link controls", async ({ page }) => {
   let createTableCalled = false;
   await openPosWithTableMocks(page, "admin", () => { createTableCalled = true; });
   await page.getByRole("button", { name: "Existing Table" }).click();
-  await page.getByRole("button", { name: "Proceed" }).click();
   await page.getByRole("button", { name: "Manage Tables" }).click();
 
   const dialog = page.getByRole("dialog", { name: "Manage tables" });
