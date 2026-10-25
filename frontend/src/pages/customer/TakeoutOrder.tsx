@@ -2,7 +2,6 @@ import { FormEvent, useEffect, useMemo, useState } from "react";
 import { ChevronDown, Search, ShoppingCart } from "lucide-react";
 import { Link } from "react-router-dom";
 import BackToHome from "../../components/layout/BackToHome";
-import { Dialog } from "../../components/ui/dialog";
 import { api, resolveImageUrl } from "../../lib/api";
 import { formatManilaDateTime } from "../../lib/dateTime";
 import "./ReservationForm.css";
@@ -89,7 +88,6 @@ export default function TakeoutOrder() {
   const [customerName, setCustomerName] = useState("");
   const [customerPhone, setCustomerPhone] = useState("");
   const [menuSearch, setMenuSearch] = useState("");
-  const [detailsOpen, setDetailsOpen] = useState(false);
   const [mobileCartOpen, setMobileCartOpen] = useState(false);
   const [order, setOrder] = useState<TakeoutOrderSummary | null>(null);
   const [message, setMessage] = useState("");
@@ -168,15 +166,6 @@ export default function TakeoutOrder() {
       const next = Math.max(0, Math.min(100, (current[productId] ?? 0) + amount));
       return { ...current, [productId]: next };
     });
-  }
-
-  function openCheckoutDetails() {
-    if (cart.length === 0) {
-      setMessage("Add at least one available menu item before continuing.");
-      return;
-    }
-    setMessage("");
-    setDetailsOpen(true);
   }
 
   async function submitOrder(event: FormEvent<HTMLFormElement>) {
@@ -384,8 +373,42 @@ export default function TakeoutOrder() {
               </div>
             </div>
 
-            <aside className="reservation-checkout-aside rounded-2xl border border-katana-border bg-[var(--customer-surface)] p-3 text-[var(--customer-text)] shadow-xl">
-              <h2 className="reservation-panel-title">Your pickup order</h2>
+            <form
+              id="takeout-checkout-form"
+              className="reservation-checkout-aside rounded-2xl border border-katana-border bg-[var(--customer-surface)] p-3 text-[var(--customer-text)] shadow-xl"
+              onSubmit={submitOrder}
+            >
+              <section id="takeout-contact-details" className="reservation-panel-section" aria-label="Contact details">
+                <h2 className="customer-label mb-2">Contact details</h2>
+                <div className="grid gap-3">
+                  <label className="grid gap-1 text-sm font-semibold text-[var(--customer-text)]">
+                    Name *
+                    <input
+                      className="customer-input"
+                      autoComplete="name"
+                      maxLength={120}
+                      value={customerName}
+                      onChange={(event) => setCustomerName(event.target.value)}
+                      required
+                    />
+                  </label>
+                  <label className="grid gap-1 text-sm font-semibold text-[var(--customer-text)]">
+                    Phone number *
+                    <input
+                      className="customer-input"
+                      type="tel"
+                      inputMode="numeric"
+                      autoComplete="tel"
+                      pattern="[0-9]{1,11}"
+                      maxLength={11}
+                      value={customerPhone}
+                      onChange={(event) => setCustomerPhone(event.target.value.replace(/\D/g, "").slice(0, 11))}
+                      required
+                    />
+                  </label>
+                </div>
+              </section>
+              <h2 className="reservation-panel-title mt-4">Your pickup order</h2>
               <div className="reservation-panel-sections">
                 <section className="reservation-panel-section" aria-label="Pickup order items">
                   <div className="reservation-order-items">
@@ -402,19 +425,22 @@ export default function TakeoutOrder() {
                     <div className="reservation-order-total"><span>Total</span><strong>{formatMoney(total)}</strong></div>
                   </div>
                 </section>
-                <section className="reservation-panel-section" aria-label="Pickup payment">
-                  <h3 className="customer-label mb-2">Payment</h3>
-                  <p className="text-sm">Pay in cash when you arrive at the counter.</p>
+                <section className="reservation-panel-section rounded-xl border border-katana-border bg-katana-surface/60 p-3" aria-label="How pickup works">
+                  <h3 className="customer-label mb-2">How pickup works</h3>
+                  <ol className="grid gap-2 text-sm text-[var(--customer-muted)]">
+                    <li><span className="mr-2 font-bold text-katana-red">1.</span>Submit your pickup order.</li>
+                    <li><span className="mr-2 font-bold text-katana-red">2.</span>Wait for staff approval and status updates.</li>
+                    <li><span className="mr-2 font-bold text-katana-red">3.</span>Pay cash when you collect it.</li>
+                  </ol>
                 </section>
               </div>
               <div className="reservation-checkout-submit">
-                <button type="button" className="customer-btn-primary w-full" disabled={submitting || cart.length === 0} onClick={openCheckoutDetails}>
-                  Confirm pickup order
+                <button type="submit" className="customer-btn-primary w-full" disabled={submitting || cart.length === 0}>
+                  {submitting ? "Submitting..." : "Confirm pickup order"}
                 </button>
-                <p>Enter your name and phone number to finish checkout.</p>
               </div>
               {message && <p className="reservation-checkout-alert mt-3" role="alert">{message}</p>}
-            </aside>
+            </form>
           </section>
 
           <div className="reservation-mobile-cart">
@@ -443,8 +469,16 @@ export default function TakeoutOrder() {
                   ))}
                 </div>
               )}
-              <button type="button" className="customer-btn-primary mt-3 w-full" disabled={cart.length === 0} onClick={() => { setMobileCartOpen(false); openCheckoutDetails(); }}>
-                Confirm pickup order
+              <button
+                type="button"
+                className="customer-btn-primary mt-3 w-full"
+                disabled={cart.length === 0}
+                onClick={() => {
+                  setMobileCartOpen(false);
+                  document.getElementById("takeout-contact-details")?.scrollIntoView({ behavior: "smooth", block: "start" });
+                }}
+              >
+                Continue to checkout
               </button>
             </section>
             <button type="button" className="reservation-mobile-cart-toggle" onClick={() => setMobileCartOpen((open) => !open)} aria-expanded={mobileCartOpen} aria-controls="takeout-mobile-cart">
@@ -453,31 +487,6 @@ export default function TakeoutOrder() {
             </button>
           </div>
 
-          <Dialog open={detailsOpen} title="Your details" onClose={() => !submitting && setDetailsOpen(false)} panelClassName="reservation-details-dialog-panel max-w-xl">
-            <form className="reservation-details-dialog-form grid gap-4" onSubmit={submitOrder}>
-              <p className="reservation-details-dialog-booking text-sm">Pickup · {cartItemCount} item{cartItemCount === 1 ? "" : "s"} · {formatMoney(total)}</p>
-              <label className="grid gap-1 text-sm font-semibold text-[var(--customer-text)]">
-                Your name *
-                <input className="customer-input" autoComplete="name" maxLength={120} value={customerName} onChange={(event) => setCustomerName(event.target.value)} required />
-              </label>
-              <label className="grid gap-1 text-sm font-semibold text-[var(--customer-text)]">
-                Phone number *
-                <input className="customer-input" type="tel" inputMode="numeric" autoComplete="tel" pattern="[0-9]{1,11}" maxLength={11} value={customerPhone} onChange={(event) => setCustomerPhone(event.target.value.replace(/\D/g, "").slice(0, 11))} required />
-              </label>
-              <div className="reservation-details-dialog-summary rounded-lg p-3 text-sm">
-                <p className="font-bold">Pickup order</p>
-                <p className="mt-1">Total: {formatMoney(total)}</p>
-                <p className="mt-1">Pay in cash at the counter when you arrive.</p>
-              </div>
-              {message && <p className="reservation-checkout-alert" role="alert">{message}</p>}
-              <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
-                <button type="button" className="customer-btn-secondary" onClick={() => setDetailsOpen(false)} disabled={submitting}>Back</button>
-                <button type="submit" className="customer-btn-primary" disabled={submitting}>
-                  {submitting ? "Submitting..." : "Confirm pickup order"}
-                </button>
-              </div>
-            </form>
-          </Dialog>
         </>
       )}
     </main>

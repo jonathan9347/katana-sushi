@@ -39,13 +39,16 @@ test("customer pickup checkout is cash-at-counter only", async ({ page }) => {
 
   await page.goto("/takeout");
   await page.getByRole("button", { name: "Add to cart" }).click();
-  await expect(page.getByText("Pay in cash when you arrive at the counter.")).toBeVisible();
+  await expect(page.getByText("Pay cash when you collect it.")).toBeVisible();
   await expect(page.getByText("Pay in full now")).toHaveCount(0);
-  await page.getByRole("button", { name: "Confirm pickup order" }).first().click();
-  const details = page.getByRole("dialog", { name: "Your details" });
-  await details.getByLabel("Your name *").fill("Pickup Guest");
-  await details.getByLabel("Phone number *").fill("09123456789");
-  await details.getByRole("button", { name: "Confirm pickup order" }).click();
+  const contactDetails = page.getByRole("region", { name: "Contact details" });
+  await expect(contactDetails).toBeVisible();
+  await expect(page.getByRole("region", { name: "How pickup works" })).toContainText("Wait for staff approval and status updates.");
+  await contactDetails.getByLabel("Name *").fill("Pickup Guest");
+  await contactDetails.getByLabel("Phone number *").fill("09123456789");
+  await expect(page.getByLabel(/email/i)).toHaveCount(0);
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  await page.getByRole("button", { name: "Confirm pickup order" }).click();
 
   await expect(page.getByText("KTO-CASH-001")).toBeVisible();
   await expect(page.getByText(/Pay in cash at the counter/)).toBeVisible();
