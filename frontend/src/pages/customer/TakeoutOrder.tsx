@@ -425,14 +425,6 @@ export default function TakeoutOrder() {
                     <div className="reservation-order-total"><span>Total</span><strong>{formatMoney(total)}</strong></div>
                   </div>
                 </section>
-                <section className="reservation-panel-section rounded-xl border border-katana-border bg-katana-surface/60 p-3" aria-label="How pickup works">
-                  <h3 className="customer-label mb-2">How pickup works</h3>
-                  <ol className="grid gap-2 text-sm text-[var(--customer-muted)]">
-                    <li><span className="mr-2 font-bold text-katana-red">1.</span>Submit your pickup order.</li>
-                    <li><span className="mr-2 font-bold text-katana-red">2.</span>Wait for staff approval and status updates.</li>
-                    <li><span className="mr-2 font-bold text-katana-red">3.</span>Pay cash when you collect it.</li>
-                  </ol>
-                </section>
               </div>
               <div className="reservation-checkout-submit">
                 <button type="submit" className="customer-btn-primary w-full" disabled={submitting || cart.length === 0}>

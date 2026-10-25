@@ -39,11 +39,9 @@ test("customer pickup checkout is cash-at-counter only", async ({ page }) => {
 
   await page.goto("/takeout");
   await page.getByRole("button", { name: "Add to cart" }).click();
-  await expect(page.getByText("Pay cash when you collect it.")).toBeVisible();
   await expect(page.getByText("Pay in full now")).toHaveCount(0);
   const contactDetails = page.getByRole("region", { name: "Contact details" });
   await expect(contactDetails).toBeVisible();
-  await expect(page.getByRole("region", { name: "How pickup works" })).toContainText("Wait for staff approval and status updates.");
   await contactDetails.getByLabel("Name *").fill("Pickup Guest");
   await contactDetails.getByLabel("Phone number *").fill("09123456789");
   await expect(page.getByLabel(/email/i)).toHaveCount(0);
