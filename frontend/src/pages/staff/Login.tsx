@@ -83,10 +83,10 @@ export default function Login() {
   return (
     <main className="flex min-h-screen items-center justify-center bg-[radial-gradient(circle_at_top_left,_#fff7ed,_#f8fafc_55%,_#f1f5f9_100%)] px-6 py-10 text-slate-900">
       <div className="w-full max-w-xl">
-        <div className="overflow-hidden rounded-[32px] border border-slate-200 bg-white shadow-[0_30px_80px_-30px_rgba(15,23,42,0.35)]">
+        <div data-testid="staff-login-card" className="overflow-hidden rounded-none border border-slate-200 bg-white shadow-[0_30px_80px_-30px_rgba(15,23,42,0.35)]">
           <div className="bg-[linear-gradient(135deg,_#fff7ed_0%,_#fff_55%,_#fef2f2_100%)] px-8 py-8 sm:px-10 sm:py-10">
             <div className="flex items-center gap-3">
-              <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-red-600 text-2xl text-white">🍣</div>
+              <img src="/images/katana-logo.jpg" alt="Katana Sushi logo" className="h-16 w-16 object-contain" />
               <div>
                 <p className="text-[11px] font-semibold uppercase tracking-[0.35em] text-red-600">Katana Sushi</p>
                 <p className="text-sm font-medium text-slate-600">Staff portal</p>
