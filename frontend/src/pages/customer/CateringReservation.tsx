@@ -67,8 +67,8 @@ function earliestEventDate() {
 }
 
 function getStationType(item: CateringPackage) {
-  const stationType = item.stationType?.trim().toLowerCase();
-  const packageIdentity = `${item.id} ${item.name}`.toLowerCase();
+  const stationType = item.stationType?.trim().toLowerCase().replace(/[\s-]+/g, "_");
+  const packageIdentity = `${item.id} ${item.name} ${item.description ?? ""}`.toLowerCase();
 
   if (stationType && stationType !== "sashimi_bar" && stationType !== "sashimi") {
     return stationType;
@@ -84,7 +84,7 @@ function getStationType(item: CateringPackage) {
   }
 
   if (
-    (stationType === "sashimi_bar" || stationType === "sashimi" || item.id.includes("sashimi")) &&
+    (stationType === "sashimi_bar" || stationType === "sashimi" || item.id.toLowerCase().includes("sashimi")) &&
     isPerUnitPackage(item)
   ) {
     const hasTuna = /\btuna\b/.test(packageIdentity);

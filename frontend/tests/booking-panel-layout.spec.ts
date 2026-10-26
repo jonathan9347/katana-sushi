@@ -399,7 +399,7 @@ test("Catering booking keeps Sashimi Bar and shows Tuna and Salmon as separate a
   const packagesWithSashimiBar = [
     ...cateringPackages.map((item) => (
       item.id === "pkg_sashimi_tuna_test" || item.id === "pkg_sashimi_salmon_test"
-        ? { ...item, stationType: "sashimi_bar" }
+        ? { ...item, stationType: "Sashimi Bar" }
         : item
     )),
     {
