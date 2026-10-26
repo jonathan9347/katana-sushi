@@ -1073,6 +1073,10 @@
   gap: 0.75rem;
 }
 
+.customer-pickup-cart-header {
+  flex: 0 0 auto;
+}
+
 .customer-pickup-cart-header h2 {
   font-size: 1rem;
   font-weight: 800;
@@ -1095,8 +1099,15 @@
   flex-direction: column;
   gap: 1rem;
   overflow-y: auto;
+  padding-bottom: 0.5rem;
   overscroll-behavior: contain;
   scrollbar-width: thin;
+  scrollbar-color: rgb(179 41 53 / 38%) transparent;
+}
+
+.customer-pickup-cart-scroll::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background-color: rgb(179 41 53 / 38%);
 }
 
 .customer-pickup-items {
@@ -1520,12 +1531,14 @@
 @media (min-width: 1024px) {
   .customer-pickup-cart {
     position: sticky;
-    margin-top: 4.5rem;
-    top: 5.25rem;
-    height: calc(100dvh - 5.5rem);
-    max-height: calc(100dvh - 5.5rem);
+    top: 16px;
+    height: calc(100vh - 32px);
+    height: calc(100dvh - 32px);
+    max-height: calc(100vh - 32px);
+    max-height: calc(100dvh - 32px);
     min-height: 0;
     align-self: start;
+    box-sizing: border-box;
     overflow: hidden;
   }
 }

@@ -228,7 +228,7 @@ export default function TakeoutOrder() {
   }
 
   return (
-    <main className="customer-pickup-page w-full px-4 pt-3 pb-4 md:px-6 md:pb-6 lg:px-3 lg:pb-3">
+    <main className="customer-pickup-page w-full px-4 pt-3 pb-4 md:px-6 md:pb-6 lg:px-3 lg:pt-4 lg:pb-3">
       <h1 className="sr-only">Order for pickup</h1>
       <section className="customer-reservation-form grid w-full items-start gap-6 lg:grid-cols-[minmax(0,1fr)_400px] lg:gap-3">
             <div className="min-w-0 lg:col-start-1 lg:row-start-1">
@@ -336,62 +336,64 @@ export default function TakeoutOrder() {
             </div>
 
             <aside
-              className="customer-pickup-cart rounded-2xl border border-katana-border bg-[var(--customer-surface)] p-4 text-[var(--customer-text)] shadow-xl"
+              className="customer-pickup-cart rounded-2xl border border-katana-border bg-[var(--customer-surface)] p-4 text-[var(--customer-text)] shadow-xl lg:col-start-2 lg:row-start-1"
               aria-label="Your pickup order"
             >
               <div className="customer-pickup-cart-header">
                 <h2>Your pickup order</h2>
                 <span>{cartItemCount} {cartItemCount === 1 ? "item" : "items"}</span>
               </div>
-              {cart.length === 0 ? (
-                <div className="customer-pickup-cart-scroll">
-                  <section className="customer-pickup-empty-state">
-                    <span className="customer-pickup-empty-icon"><ShoppingBag aria-hidden="true" /></span>
-                    <h3>Nothing here yet</h3>
-                    <p>Add rolls, nigiri or bowls from the menu to start your pickup order.</p>
-                  </section>
-                  <PickupLocation
-                    openingHours={reservationRules
-                      ? `${formatTime12(reservationRules.settings.OPENING_TIME)} – ${formatTime12(reservationRules.settings.CLOSING_TIME)}`
-                      : null}
-                    hoursError={reservationHoursError}
-                  />
-                  <PickupGoodToKnow empty />
-                </div>
-              ) : (
-                <div className="customer-pickup-cart-scroll">
-                  <div className="customer-pickup-items" aria-label="Pickup order items">
-                    {cart.map(({ product, quantity }) => (
-                      <article key={product.id} className="customer-pickup-item">
-                        <div className="customer-pickup-item-main">
-                          <p>{product.name}</p>
-                          <small>{formatMoney(product.price)} each</small>
-                        </div>
-                        <div className="customer-pickup-item-quantity" aria-label={`Quantity of ${product.name}`}>
-                          <button type="button" aria-label={`Remove one ${product.name}`} onClick={() => adjustQuantity(product.id, -1)}>−</button>
-                          <span>{quantity}</span>
-                          <button type="button" aria-label={`Add one ${product.name}`} disabled={quantity >= 100} onClick={() => adjustQuantity(product.id, 1)}>+</button>
-                        </div>
-                        <strong className="customer-pickup-item-total">{formatMoney(product.price * quantity)}</strong>
-                      </article>
-                    ))}
-                  </div>
-                  <div className="customer-pickup-info-grid">
-                    <div><span>Prep time</span><strong>{PICKUP_PREP_TIME}</strong></div>
-                    <div><span>Pick up at</span><strong>Katana counter</strong></div>
-                  </div>
-                  <PickupLocation
-                    openingHours={reservationRules
-                      ? `${formatTime12(reservationRules.settings.OPENING_TIME)} – ${formatTime12(reservationRules.settings.CLOSING_TIME)}`
-                      : null}
-                    hoursError={reservationHoursError}
-                  />
-                  <PickupGoodToKnow />
-                  <p className="customer-pickup-note">
-                    No payment is needed now. Please wait for staff approval before preparation begins.
-                  </p>
-                </div>
-              )}
+              <div className="customer-pickup-cart-scroll">
+                {cart.length === 0 ? (
+                  <>
+                    <section className="customer-pickup-empty-state">
+                      <span className="customer-pickup-empty-icon"><ShoppingBag aria-hidden="true" /></span>
+                      <h3>Nothing here yet</h3>
+                      <p>Add rolls, nigiri or bowls from the menu to start your pickup order.</p>
+                    </section>
+                    <PickupLocation
+                      openingHours={reservationRules
+                        ? `${formatTime12(reservationRules.settings.OPENING_TIME)} – ${formatTime12(reservationRules.settings.CLOSING_TIME)}`
+                        : null}
+                      hoursError={reservationHoursError}
+                    />
+                    <PickupGoodToKnow empty />
+                  </>
+                ) : (
+                  <>
+                    <div className="customer-pickup-items" aria-label="Pickup order items">
+                      {cart.map(({ product, quantity }) => (
+                        <article key={product.id} className="customer-pickup-item">
+                          <div className="customer-pickup-item-main">
+                            <p>{product.name}</p>
+                            <small>{formatMoney(product.price)} each</small>
+                          </div>
+                          <div className="customer-pickup-item-quantity" aria-label={`Quantity of ${product.name}`}>
+                            <button type="button" aria-label={`Remove one ${product.name}`} onClick={() => adjustQuantity(product.id, -1)}>−</button>
+                            <span>{quantity}</span>
+                            <button type="button" aria-label={`Add one ${product.name}`} disabled={quantity >= 100} onClick={() => adjustQuantity(product.id, 1)}>+</button>
+                          </div>
+                          <strong className="customer-pickup-item-total">{formatMoney(product.price * quantity)}</strong>
+                        </article>
+                      ))}
+                    </div>
+                    <div className="customer-pickup-info-grid">
+                      <div><span>Prep time</span><strong>{PICKUP_PREP_TIME}</strong></div>
+                      <div><span>Pick up at</span><strong>Katana counter</strong></div>
+                    </div>
+                    <PickupLocation
+                      openingHours={reservationRules
+                        ? `${formatTime12(reservationRules.settings.OPENING_TIME)} – ${formatTime12(reservationRules.settings.CLOSING_TIME)}`
+                        : null}
+                      hoursError={reservationHoursError}
+                    />
+                    <PickupGoodToKnow />
+                    <p className="customer-pickup-note">
+                      No payment is needed now. Please wait for staff approval before preparation begins.
+                    </p>
+                  </>
+                )}
+              </div>
               <div className="customer-pickup-cart-footer">
                 <div className="customer-pickup-subtotal"><span>Subtotal</span><strong>{formatMoney(total)}</strong></div>
                 <div className="customer-pickup-total"><span>Total to pay at counter</span><strong>{formatMoney(total)}</strong></div>

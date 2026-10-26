@@ -196,6 +196,7 @@ test("empty pickup cart keeps confirmation disabled and shows location details",
 
 for (const viewport of [
   { width: 1366, height: 768 },
+  { width: 1920, height: 910 },
   { width: 1920, height: 1080 }
 ]) {
   test(`pickup cart fills the viewport at ${viewport.width}x${viewport.height}`, async ({ page }) => {
@@ -204,20 +205,66 @@ for (const viewport of [
     await page.goto("/takeout", { waitUntil: "domcontentloaded" });
     const cartPanel = page.getByRole("complementary", { name: "Your pickup order" });
     await expect(cartPanel).toBeVisible();
-    await page.getByRole("button", { name: "Add to cart" }).first().click();
-
-    const panelBox = await cartPanel.boundingBox();
+    const homeButton = page.getByRole("link", { name: "Back to home" });
     const confirmButton = cartPanel.getByRole("button", { name: "Confirm pickup order" });
-    const buttonBox = await confirmButton.boundingBox();
-    expect(panelBox).not.toBeNull();
-    expect(buttonBox).not.toBeNull();
-    expect(Math.abs(panelBox!.y + panelBox!.height - viewport.height)).toBeLessThanOrEqual(5);
-    expect(buttonBox!.y).toBeGreaterThanOrEqual(panelBox!.y);
-    expect(buttonBox!.y + buttonBox!.height).toBeLessThanOrEqual(panelBox!.y + panelBox!.height);
-    expect(await page.evaluate(() => window.scrollY)).toBe(0);
-    await expect(confirmButton).toBeInViewport();
+
+    async function expectPanelGeometry() {
+      const panelBox = await cartPanel.boundingBox();
+      const homeBox = await homeButton.boundingBox();
+      const buttonBox = await confirmButton.boundingBox();
+      expect(panelBox).not.toBeNull();
+      expect(homeBox).not.toBeNull();
+      expect(buttonBox).not.toBeNull();
+      expect(Math.abs(panelBox!.y - homeBox!.y)).toBeLessThanOrEqual(2);
+      expect(Math.abs(viewport.height - panelBox!.y - panelBox!.height - 16)).toBeLessThanOrEqual(2);
+      expect(buttonBox!.y).toBeGreaterThanOrEqual(panelBox!.y);
+      expect(buttonBox!.y + buttonBox!.height).toBeLessThanOrEqual(panelBox!.y + panelBox!.height);
+      expect(await page.evaluate(() => window.scrollY)).toBe(0);
+      await expect(confirmButton).toBeInViewport();
+    }
+
+    await expectPanelGeometry();
+    await page.getByRole("button", { name: "Add to cart" }).first().click();
+    await expectPanelGeometry();
   });
 }
+
+test("pickup cart scroll reveals location and good-to-know content at 1920x910", async ({ page }) => {
+  await page.setViewportSize({ width: 1920, height: 910 });
+  const expandedCatalog = Array.from({ length: 6 }, (_, index) => ({
+    ...products[0],
+    id: `roll-${index + 1}`,
+    name: `California Roll ${index + 1}`
+  }));
+  await mockPickupApi(page, expandedCatalog);
+  await page.goto("/takeout", { waitUntil: "domcontentloaded" });
+  const menu = page.getByRole("region", { name: "Choose pickup menu items" });
+  for (let index = 0; index < expandedCatalog.length; index += 1) {
+    await menu.getByRole("button", { name: "Add to cart", exact: true }).first().click();
+  }
+  await page.evaluate(() => window.scrollTo(0, 0));
+
+  const cartPanel = page.getByRole("complementary", { name: "Your pickup order" });
+  const scrollArea = cartPanel.locator(".customer-pickup-cart-scroll");
+  const scrollMetrics = await scrollArea.evaluate((element) => ({
+    clientHeight: element.clientHeight,
+    scrollHeight: element.scrollHeight
+  }));
+  expect(scrollMetrics.scrollHeight).toBeGreaterThan(scrollMetrics.clientHeight);
+
+  const callRow = cartPanel.getByText("Call the restaurant");
+  await scrollArea.evaluate((element) => {
+    const target = element.querySelector(".customer-pickup-location-row:last-child");
+    if (target) element.scrollTop += target.getBoundingClientRect().top - element.getBoundingClientRect().top;
+  });
+  await expect(callRow).toBeInViewport();
+  const goodToKnow = cartPanel.getByRole("region", { name: "Good to know" });
+  await scrollArea.evaluate((element) => {
+    element.scrollTop = element.scrollHeight;
+  });
+  await expect(goodToKnow).toBeInViewport();
+  expect(await page.evaluate(() => window.scrollY)).toBe(0);
+});
 
 test("pickup contact popup fits mobile width", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
