@@ -1,5 +1,5 @@
 import { FormEvent, useEffect, useState } from "react";
-import { Link, useSearchParams } from "react-router-dom";
+import { Link, useLocation, useSearchParams } from "react-router-dom";
 import { CalendarPlus, Check, CheckCircle2, Clock3, Search, XCircle } from "lucide-react";
 import BackToHome from "../../components/layout/BackToHome";
 import { api } from "../../lib/api";
@@ -41,9 +41,18 @@ type StatusResult = {
 };
 
 export default function ReservationStatus() {
+  const location = useLocation();
   const [searchParams] = useSearchParams();
   const [bookingId, setBookingId] = useState(searchParams.get("bookingId") ?? "");
-  const [phone, setPhone] = useState("");
+  const [phone, setPhone] = useState(() => {
+    const state: unknown = location.state;
+    return typeof state === "object"
+      && state !== null
+      && "pickupPhone" in state
+      && typeof state.pickupPhone === "string"
+      ? state.pickupPhone
+      : "";
+  });
   const [result, setResult] = useState<StatusResult | null>(null);
   const [message, setMessage] = useState("");
   const paymentMethod = "cash" as const;

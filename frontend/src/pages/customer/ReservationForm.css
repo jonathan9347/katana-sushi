@@ -1045,3 +1045,438 @@
     grid-template-columns: repeat(4, minmax(0, 1fr));
   }
 }
+
+.customer-pickup-page {
+  min-height: calc(100dvh - 5rem);
+  background-color: #fff5f5;
+}
+
+.customer-pickup-page .customer-reservation-form {
+  align-items: stretch;
+}
+
+.customer-pickup-cart {
+  display: flex;
+  min-width: 0;
+  min-height: 32rem;
+  flex-direction: column;
+  gap: 1rem;
+  border-color: #f2d9db;
+  background: #fff;
+  color: #241c1d;
+}
+
+.customer-pickup-cart-header,
+.customer-pickup-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.customer-pickup-cart-header h2 {
+  font-size: 1rem;
+  font-weight: 800;
+}
+
+.customer-pickup-cart-header > span,
+.customer-pickup-info-grid span,
+.customer-pickup-steps > p {
+  color: #a14b53;
+  font-size: 0.625rem;
+  font-weight: 800;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+}
+
+.customer-pickup-cart-scroll {
+  display: flex;
+  min-height: 0;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 1rem;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+}
+
+.customer-pickup-items {
+  display: grid;
+  gap: 0.15rem;
+}
+
+.customer-pickup-item {
+  min-width: 0;
+  border-bottom: 1px dashed #f0dadd;
+  padding: 0.55rem 0;
+}
+
+.customer-pickup-item-main {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.customer-pickup-item-main p {
+  overflow-wrap: anywhere;
+  font-size: 0.78rem;
+  font-weight: 750;
+}
+
+.customer-pickup-item-main small {
+  color: #9b7a7e;
+  font-size: 0.65rem;
+}
+
+.customer-pickup-item-quantity {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.75rem;
+  font-weight: 700;
+}
+
+.customer-pickup-item-quantity button {
+  display: grid;
+  width: 1.65rem;
+  height: 1.65rem;
+  place-items: center;
+  border: 1px solid #f0dadd;
+  border-radius: 50%;
+  background: #fff8f8;
+  color: #b32935;
+  font-weight: 800;
+}
+
+.customer-pickup-item-quantity button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.customer-pickup-item-total {
+  min-width: 4.1rem;
+  flex: 0 0 auto;
+  text-align: right;
+  font-size: 0.72rem;
+}
+
+.customer-pickup-info-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.5rem;
+}
+
+.customer-pickup-info-grid > div {
+  display: grid;
+  gap: 0.2rem;
+  border-radius: 0.75rem;
+  background: #fff2f3;
+  padding: 0.7rem;
+}
+
+.customer-pickup-info-grid span {
+  font-size: 0.55rem;
+}
+
+.customer-pickup-info-grid strong {
+  font-size: 0.72rem;
+}
+
+.customer-pickup-steps > p {
+  margin-bottom: 0.5rem;
+}
+
+.customer-pickup-steps ol {
+  display: grid;
+  gap: 0.55rem;
+}
+
+.customer-pickup-steps li {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.6rem;
+}
+
+.customer-pickup-steps li > span {
+  display: grid;
+  width: 1.25rem;
+  height: 1.25rem;
+  flex: 0 0 1.25rem;
+  place-items: center;
+  border-radius: 50%;
+  background: #fce6e8;
+  color: #ad2632;
+  font-size: 0.65rem;
+  font-weight: 800;
+}
+
+.customer-pickup-steps li div {
+  display: grid;
+  gap: 0.08rem;
+}
+
+.customer-pickup-steps li strong {
+  font-size: 0.7rem;
+  line-height: 1.3;
+}
+
+.customer-pickup-steps li small {
+  color: #8f7376;
+  font-size: 0.64rem;
+  line-height: 1.35;
+}
+
+.customer-pickup-note {
+  border: 1px solid #f5dfd1;
+  border-radius: 0.7rem;
+  background: #fff7f1;
+  padding: 0.7rem;
+  color: #6c4843;
+  font-size: 0.65rem;
+  line-height: 1.45;
+}
+
+.customer-pickup-empty-state {
+  display: grid;
+  justify-items: center;
+  gap: 0.45rem;
+  border: 1px dashed #edcfd2;
+  border-radius: 0.9rem;
+  background: #fff9f9;
+  padding: 1.25rem 0.9rem;
+  text-align: center;
+}
+
+.customer-pickup-empty-icon {
+  display: grid;
+  width: 2.75rem;
+  height: 2.75rem;
+  place-items: center;
+  border-radius: 50%;
+  background: #fde8ea;
+  color: #b32935;
+}
+
+.customer-pickup-empty-icon svg {
+  width: 1.2rem;
+  height: 1.2rem;
+}
+
+.customer-pickup-empty-state h3 {
+  font-size: 0.8rem;
+  font-weight: 800;
+}
+
+.customer-pickup-empty-state p {
+  max-width: 18rem;
+  color: #8f7376;
+  font-size: 0.65rem;
+  line-height: 1.4;
+}
+
+.customer-pickup-cart-footer {
+  display: grid;
+  gap: 0.55rem;
+  border-top: 1px solid #f0dadd;
+  padding-top: 0.85rem;
+}
+
+.customer-pickup-subtotal,
+.customer-pickup-total {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
+  font-size: 0.7rem;
+}
+
+.customer-pickup-subtotal {
+  color: #8f7376;
+}
+
+.customer-pickup-total {
+  align-items: center;
+  font-size: 0.9rem;
+  font-weight: 800;
+}
+
+.customer-pickup-cart-footer .customer-btn-primary,
+.customer-pickup-contact-form .customer-btn-primary {
+  min-height: 2.8rem;
+  border-radius: 999px;
+  background: #b32935;
+  color: #fff;
+  font-size: 0.7rem;
+  font-weight: 800;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.customer-pickup-cart-footer .customer-btn-primary:disabled,
+.customer-pickup-contact-form .customer-btn-primary:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.customer-pickup-cart-footer > p {
+  color: #9b7a7e;
+  font-size: 0.6rem;
+  text-align: center;
+}
+
+.customer-pickup-dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow-y: auto;
+  background: rgb(32 23 24 / 48%);
+  padding: 1rem;
+}
+
+.customer-pickup-dialog {
+  width: min(100%, 26rem);
+  border: 1px solid #f0dadd;
+  border-radius: 1.15rem;
+  background: #fff;
+  padding: 1.35rem;
+  color: #241c1d;
+  box-shadow: 0 24px 80px rgb(47 22 24 / 28%);
+}
+
+.customer-pickup-dialog-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 1.2rem;
+}
+
+.customer-pickup-dialog-header > div > p,
+.customer-pickup-contact-form label > span {
+  color: #a14b53;
+  font-size: 0.57rem;
+  font-weight: 800;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+}
+
+.customer-pickup-dialog-header h2 {
+  margin-top: 0.2rem;
+  font-size: 1.2rem;
+  font-weight: 800;
+}
+
+.customer-pickup-dialog-header > div > span {
+  display: block;
+  margin-top: 0.25rem;
+  color: #8f7376;
+  font-size: 0.72rem;
+}
+
+.customer-pickup-dialog-header > button {
+  display: grid;
+  width: 2rem;
+  height: 2rem;
+  flex: 0 0 2rem;
+  place-items: center;
+  border: 1px solid #f0dadd;
+  border-radius: 50%;
+  color: #8f7376;
+}
+
+.customer-pickup-dialog-header > button svg {
+  width: 0.9rem;
+  height: 0.9rem;
+}
+
+.customer-pickup-contact-form {
+  display: grid;
+  gap: 0.9rem;
+}
+
+.customer-pickup-contact-form label {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.customer-pickup-contact-form input {
+  width: 100%;
+  min-height: 2.7rem;
+  border: 1px solid #f0dadd;
+  border-radius: 0.65rem;
+  background: #fff;
+  padding: 0.65rem 0.75rem;
+  color: #241c1d;
+  font-size: 0.8rem;
+}
+
+.customer-pickup-contact-form input:focus {
+  border-color: #b32935;
+  outline: 2px solid rgb(179 41 53 / 15%);
+}
+
+.customer-pickup-contact-form input[aria-invalid="true"] {
+  border-color: #b32935;
+}
+
+.customer-pickup-contact-form label > small {
+  color: #b32935;
+  font-size: 0.68rem;
+}
+
+.customer-pickup-dialog-summary {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
+  border-radius: 0.65rem;
+  background: #fff2f3;
+  padding: 0.7rem;
+  color: #704b50;
+  font-size: 0.68rem;
+}
+
+.customer-pickup-dialog-summary strong {
+  flex: 0 0 auto;
+  color: #241c1d;
+}
+
+.customer-pickup-back-link {
+  justify-self: center;
+  padding: 0.15rem 0.5rem;
+  color: #9d4b53;
+  font-size: 0.6rem;
+  font-weight: 800;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+}
+
+@media (min-width: 1024px) {
+  .customer-pickup-cart {
+    position: sticky;
+    top: 0.75rem;
+    height: min(48rem, calc(100dvh - 6.5rem));
+    max-height: calc(100dvh - 6.5rem);
+    min-height: 0;
+    align-self: start;
+    overflow: hidden;
+  }
+}
+
+@media (max-height: 700px) and (min-width: 1024px) {
+  .customer-pickup-cart {
+    height: calc(100dvh - 6.5rem);
+  }
+}
+
+@media (max-width: 639px) {
+  .customer-pickup-dialog-backdrop {
+    padding: 0.65rem;
+  }
+
+  .customer-pickup-dialog {
+    width: 100%;
+    padding: 1.1rem;
+  }
+}

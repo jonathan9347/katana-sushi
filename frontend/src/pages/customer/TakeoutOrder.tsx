@@ -1,10 +1,11 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
-import { ChevronDown, Search, ShoppingCart } from "lucide-react";
-import { Link } from "react-router-dom";
+import { Search, ShoppingBag, X } from "lucide-react";
+import { useNavigate } from "react-router-dom";
 import BackToHome from "../../components/layout/BackToHome";
 import { api, resolveImageUrl } from "../../lib/api";
-import { formatManilaDateTime } from "../../lib/dateTime";
 import "./ReservationForm.css";
+
+const PICKUP_PREP_TIME = "About 25 min";
 
 type TakeoutProduct = {
   id: string;
@@ -34,13 +35,6 @@ type CheckoutResponse = {
 };
 
 type CartLine = { product: TakeoutProduct; quantity: number };
-
-function takeoutStatusLabel(status: string) {
-  if (status === "pending_approval") return "Awaiting staff approval";
-  if (status === "declined") return "Declined";
-  if (status === "completed" || status === "released") return "Completed";
-  return status.replace(/_/g, " ");
-}
 
 function categorySectionId(category: string) {
   return `takeout-menu-${category.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "") || "other"}`;
@@ -83,13 +77,15 @@ function getCheckoutKey(signature: string) {
 }
 
 export default function TakeoutOrder() {
+  const navigate = useNavigate();
   const [products, setProducts] = useState<TakeoutProduct[]>([]);
   const [quantities, setQuantities] = useState<Record<string, number>>({});
   const [customerName, setCustomerName] = useState("");
   const [customerPhone, setCustomerPhone] = useState("");
   const [menuSearch, setMenuSearch] = useState("");
-  const [mobileCartOpen, setMobileCartOpen] = useState(false);
-  const [order, setOrder] = useState<TakeoutOrderSummary | null>(null);
+  const [contactDialogOpen, setContactDialogOpen] = useState(false);
+  const [contactErrors, setContactErrors] = useState<{ name?: string; phone?: string }>({});
+  const [checkoutError, setCheckoutError] = useState("");
   const [message, setMessage] = useState("");
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
@@ -112,25 +108,13 @@ export default function TakeoutOrder() {
   }, []);
 
   useEffect(() => {
-    if (!order || !customerPhone || ["released", "completed", "declined", "cancelled", "expired"].includes(order.status)) return;
-    let active = true;
-    const poll = async () => {
-      try {
-        const response = await api.get<{ order: TakeoutOrderSummary }>(
-          `/api/takeout/orders/${encodeURIComponent(order.order_number)}`,
-          { params: { phone: customerPhone } }
-        );
-        if (active) setOrder(response.data.order);
-      } catch (error) {
-        if (active) setMessage(`Status refresh failed: ${getErrorMessage(error)}`);
-      }
+    if (!contactDialogOpen) return;
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setContactDialogOpen(false);
     };
-    const timer = window.setInterval(() => void poll(), 5000);
-    return () => {
-      active = false;
-      window.clearInterval(timer);
-    };
-  }, [order?.order_number, order?.status, customerPhone]);
+    document.addEventListener("keydown", closeOnEscape);
+    return () => document.removeEventListener("keydown", closeOnEscape);
+  }, [contactDialogOpen]);
 
   const cart = useMemo(
     () => products
@@ -168,17 +152,33 @@ export default function TakeoutOrder() {
     });
   }
 
+  function openContactDialog() {
+    if (cart.length === 0 || submitting) return;
+    setContactErrors({});
+    setCheckoutError("");
+    setContactDialogOpen(true);
+  }
+
   async function submitOrder(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    setMessage("");
+    setContactErrors({});
+    setCheckoutError("");
     if (cart.length === 0) {
-      setMessage("Add at least one available item to your cart.");
+      setContactDialogOpen(false);
+      return;
+    }
+    const name = customerName.trim();
+    const errors: { name?: string; phone?: string } = {};
+    if (!name) errors.name = "Enter your name.";
+    if (!/^09\d{9}$/.test(customerPhone)) errors.phone = "Enter a valid 11-digit mobile number starting with 09.";
+    if (Object.keys(errors).length > 0) {
+      setContactErrors(errors);
       return;
     }
     setSubmitting(true);
     const items = cart.map(({ product, quantity }) => ({ product_id: product.id, quantity }));
     const signature = JSON.stringify({
-      customer_name: customerName.trim(),
+      customer_name: name,
       customer_phone: customerPhone,
       payment_plan: "pay_at_pickup",
       items
@@ -186,89 +186,28 @@ export default function TakeoutOrder() {
 
     try {
       const response = await api.post<CheckoutResponse>("/api/takeout/orders", {
-        customer_name: customerName.trim(),
+        customer_name: name,
         customer_phone: customerPhone,
         payment_plan: "pay_at_pickup",
         idempotency_key: getCheckoutKey(signature),
         items
       });
-      const createdOrder = response.data.order;
-      setOrder(createdOrder);
       sessionStorage.removeItem("katana:takeout-checkout");
-      setMessage("Your pickup order was received and is awaiting staff approval. Pay in cash at the counter.");
+      setContactDialogOpen(false);
+      navigate(`/reservation/status?bookingId=${encodeURIComponent(response.data.order.order_number)}`, {
+        state: { pickupPhone: customerPhone }
+      });
     } catch (error) {
-      setMessage(getErrorMessage(error));
+      setCheckoutError(getErrorMessage(error));
     } finally {
       setSubmitting(false);
     }
   }
 
-  async function cancelOrder() {
-    if (!order) return;
-    setMessage("");
-    try {
-      await api.post(`/api/takeout/orders/${encodeURIComponent(order.order_number)}/cancel`, {
-        phone: customerPhone
-      });
-      setOrder({ ...order, status: "cancelled" });
-      setMessage("Your pickup order has been cancelled.");
-    } catch (error) {
-      setMessage(getErrorMessage(error));
-    }
-  }
-
   return (
-    <main className="w-full px-4 pt-3 pb-4 md:px-6 md:pb-6 lg:px-3 lg:pb-3">
+    <main className="customer-pickup-page w-full px-4 pt-3 pb-4 md:px-6 md:pb-6 lg:px-3 lg:pb-3">
       <h1 className="sr-only">Order for pickup</h1>
-      {order ? (
-        <section className="customer-reservation-form mx-auto max-w-3xl rounded-2xl border border-katana-border bg-[var(--customer-surface)] p-5 text-[var(--customer-text)] shadow-xl sm:p-7" aria-live="polite">
-          <BackToHome className="mb-5" />
-          <p className="customer-kicker">Pickup order</p>
-          <h2 className="mt-2 font-display text-2xl font-bold">{order.order_number}</h2>
-          {order.status === "ready" && (
-            <p className="mt-4 rounded-xl border border-emerald-400/50 bg-emerald-500/15 px-4 py-3 font-bold text-[var(--customer-text)]" role="status">
-              Your order is ready for pickup.
-              {order.ready_at ? ` Pickup Time: ${formatManilaDateTime(order.ready_at, { hour: "numeric", minute: "2-digit" })}.` : ""}
-            </p>
-          )}
-          <p className="mt-3 text-sm capitalize text-[var(--customer-muted)]">Status: {takeoutStatusLabel(order.status)}</p>
-          {order.status === "pending_approval" && (
-            <p className="mt-4 rounded-xl border border-amber-400/50 bg-amber-500/10 px-4 py-3 font-semibold text-[var(--customer-text)]" role="status">
-              Your order was received and is waiting for staff to approve it.
-            </p>
-          )}
-          <p className="mt-1 text-sm text-[var(--customer-muted)]">Payment: pay in cash at the counter.</p>
-          <div className="reservation-panel-sections mt-5">
-            <section className="reservation-panel-section" aria-label="Pickup order summary">
-              <div className="reservation-order-items">
-                {order.items.map((item, index) => (
-                  <div key={`${item.name}-${index}`} className="reservation-order-item">
-                    <div className="reservation-order-item-info"><p>{item.name} × {item.quantity}</p></div>
-                    <p className="reservation-order-item-price">{formatMoney(item.total_price)}</p>
-                  </div>
-                ))}
-                <div className="reservation-order-totals">
-                  <div className="reservation-order-total"><span>Total</span><strong>{formatMoney(order.total)}</strong></div>
-                </div>
-              </div>
-            </section>
-          </div>
-          {order.payment_plan === "pay_at_pickup" && ["pending_approval", "confirmed", "preparing", "ready"].includes(order.status) && (
-            <button type="button" onClick={() => void cancelOrder()} className="customer-btn-secondary mt-5">
-              Cancel order
-            </button>
-          )}
-          <div className="mt-5 flex flex-wrap gap-3">
-            <Link to={`/reservation/status?bookingId=${encodeURIComponent(order.order_number)}`} className="customer-btn-primary">
-              Check pickup status
-            </Link>
-            <p className="self-center text-xs text-[var(--customer-muted)]">Status refreshes automatically while this page is open.</p>
-          </div>
-          {message && <p className="reservation-checkout-alert mt-4" role="status">{message}</p>}
-        </section>
-      ) : (
-        <>
-          <section className="customer-reservation-form grid w-full items-start gap-6 pb-28 lg:grid-cols-[minmax(0,1fr)_400px] lg:gap-3 lg:pb-0">
+      <section className="customer-reservation-form grid w-full items-start gap-6 lg:grid-cols-[minmax(0,1fr)_400px] lg:gap-3">
             <div className="min-w-0 lg:col-start-1 lg:row-start-1">
               <BackToHome className="mb-3" />
               <div className="space-y-4">
@@ -373,114 +312,166 @@ export default function TakeoutOrder() {
               </div>
             </div>
 
-            <form
-              id="takeout-checkout-form"
-              className="reservation-checkout-aside rounded-2xl border border-katana-border bg-[var(--customer-surface)] p-3 text-[var(--customer-text)] shadow-xl"
-              onSubmit={submitOrder}
+            <aside
+              className="customer-pickup-cart rounded-2xl border border-katana-border bg-[var(--customer-surface)] p-4 text-[var(--customer-text)] shadow-xl"
+              aria-label="Your pickup order"
             >
-              <section id="takeout-contact-details" className="reservation-panel-section" aria-label="Contact details">
-                <h2 className="customer-label mb-2">Contact details</h2>
-                <div className="grid gap-3">
-                  <label className="grid gap-1 text-sm font-semibold text-[var(--customer-text)]">
-                    Name *
-                    <input
-                      className="customer-input"
-                      autoComplete="name"
-                      maxLength={120}
-                      value={customerName}
-                      onChange={(event) => setCustomerName(event.target.value)}
-                      required
-                    />
-                  </label>
-                  <label className="grid gap-1 text-sm font-semibold text-[var(--customer-text)]">
-                    Phone number *
-                    <input
-                      className="customer-input"
-                      type="tel"
-                      inputMode="numeric"
-                      autoComplete="tel"
-                      pattern="[0-9]{1,11}"
-                      maxLength={11}
-                      value={customerPhone}
-                      onChange={(event) => setCustomerPhone(event.target.value.replace(/\D/g, "").slice(0, 11))}
-                      required
-                    />
-                  </label>
+              <div className="customer-pickup-cart-header">
+                <h2>Your pickup order</h2>
+                <span>{cartItemCount} {cartItemCount === 1 ? "item" : "items"}</span>
+              </div>
+              {cart.length === 0 ? (
+                <div className="customer-pickup-cart-scroll">
+                  <section className="customer-pickup-empty-state">
+                    <span className="customer-pickup-empty-icon"><ShoppingBag aria-hidden="true" /></span>
+                    <h3>Nothing here yet</h3>
+                    <p>Add rolls, nigiri or bowls from the menu to start your pickup order.</p>
+                  </section>
+                  <PickupSteps empty />
                 </div>
-              </section>
-              <h2 className="reservation-panel-title mt-4">Your pickup order</h2>
-              <div className="reservation-panel-sections">
-                <section className="reservation-panel-section" aria-label="Pickup order items">
-                  <div className="reservation-order-items">
-                    {cart.length === 0 ? (
-                      <p className="reservation-empty-summary">Your order is empty. Add an available menu item to continue.</p>
-                    ) : cart.map(({ product, quantity }) => (
-                      <div key={product.id} className="reservation-order-item">
-                        <div className="reservation-order-item-info"><p>{product.name} × {quantity}</p></div>
-                        <p className="reservation-order-item-price">{formatMoney(product.price * quantity)}</p>
-                      </div>
-                    ))}
-                  </div>
-                  <div className="reservation-order-totals">
-                    <div className="reservation-order-total"><span>Total</span><strong>{formatMoney(total)}</strong></div>
-                  </div>
-                </section>
-              </div>
-              <div className="reservation-checkout-submit">
-                <button type="submit" className="customer-btn-primary w-full" disabled={submitting || cart.length === 0}>
-                  {submitting ? "Submitting..." : "Confirm pickup order"}
-                </button>
-              </div>
-              {message && <p className="reservation-checkout-alert mt-3" role="alert">{message}</p>}
-            </form>
-          </section>
-
-          <div className="reservation-mobile-cart">
-            {mobileCartOpen && (
-              <button type="button" className="reservation-mobile-cart-backdrop" aria-label="Close cart" onClick={() => setMobileCartOpen(false)} />
-            )}
-            <section id="takeout-mobile-cart" className="reservation-mobile-cart-sheet" aria-label="Pickup cart" hidden={!mobileCartOpen}>
-              <div className="reservation-mobile-cart-heading">
-                <div><h2>Your pickup order</h2><p>{cartItemCount} selected item{cartItemCount === 1 ? "" : "s"}</p></div>
-                <div className="reservation-mobile-cart-total"><strong>{formatMoney(total)}</strong><button type="button" onClick={() => setMobileCartOpen(false)}>Close</button></div>
-              </div>
-              {cart.length === 0 ? <p className="reservation-mobile-cart-empty">Add an available menu item to continue.</p> : (
-                <div className="reservation-mobile-cart-items">
-                  {cart.map(({ product, quantity }) => (
-                    <article key={product.id} className="reservation-mobile-cart-item">
-                      <div className="reservation-mobile-cart-item-main">
-                        <div className="reservation-mobile-cart-item-copy"><p>{product.name}</p><span>{formatMoney(product.price * quantity)}</span></div>
-                        <div className="reservation-mobile-cart-quantity" aria-label={`Quantity of ${product.name}`}>
+              ) : (
+                <div className="customer-pickup-cart-scroll">
+                  <div className="customer-pickup-items" aria-label="Pickup order items">
+                    {cart.map(({ product, quantity }) => (
+                      <article key={product.id} className="customer-pickup-item">
+                        <div className="customer-pickup-item-main">
+                          <p>{product.name}</p>
+                          <small>{formatMoney(product.price)} each</small>
+                        </div>
+                        <div className="customer-pickup-item-quantity" aria-label={`Quantity of ${product.name}`}>
                           <button type="button" aria-label={`Remove one ${product.name}`} onClick={() => adjustQuantity(product.id, -1)}>−</button>
-                          <span aria-live="polite">{quantity}</span>
+                          <span>{quantity}</span>
                           <button type="button" aria-label={`Add one ${product.name}`} disabled={quantity >= 100} onClick={() => adjustQuantity(product.id, 1)}>+</button>
                         </div>
-                      </div>
-                      <button type="button" className="reservation-mobile-cart-remove" onClick={() => adjustQuantity(product.id, -quantity)}>Remove</button>
-                    </article>
-                  ))}
+                        <strong className="customer-pickup-item-total">{formatMoney(product.price * quantity)}</strong>
+                      </article>
+                    ))}
+                  </div>
+                  <div className="customer-pickup-info-grid">
+                    <div><span>Prep time</span><strong>{PICKUP_PREP_TIME}</strong></div>
+                    <div><span>Pick up at</span><strong>Katana counter</strong></div>
+                  </div>
+                  <PickupSteps />
+                  <p className="customer-pickup-note">
+                    No payment needed now. Orders are held for pickup once approved.
+                  </p>
                 </div>
               )}
-              <button
-                type="button"
-                className="customer-btn-primary mt-3 w-full"
-                disabled={cart.length === 0}
-                onClick={() => {
-                  setMobileCartOpen(false);
-                  document.getElementById("takeout-contact-details")?.scrollIntoView({ behavior: "smooth", block: "start" });
-                }}
-              >
-                Continue to checkout
-              </button>
-            </section>
-            <button type="button" className="reservation-mobile-cart-toggle" onClick={() => setMobileCartOpen((open) => !open)} aria-expanded={mobileCartOpen} aria-controls="takeout-mobile-cart">
-              <span className="reservation-mobile-cart-toggle-copy"><ShoppingCart aria-hidden="true" /><span><strong>Your Cart</strong><small>{cartItemCount} item{cartItemCount === 1 ? "" : "s"}</small></span></span>
-              <span className="reservation-mobile-cart-toggle-total"><strong>{formatMoney(total)}</strong><ChevronDown className={mobileCartOpen ? "is-open" : ""} aria-hidden="true" /></span>
+              <div className="customer-pickup-cart-footer">
+                <div className="customer-pickup-subtotal"><span>Subtotal</span><strong>{formatMoney(total)}</strong></div>
+                <div className="customer-pickup-total"><span>Total to pay at counter</span><strong>{formatMoney(total)}</strong></div>
+                <button
+                  type="button"
+                  className="customer-btn-primary w-full"
+                  disabled={submitting || cart.length === 0}
+                  onClick={openContactDialog}
+                >
+                  Confirm pickup order
+                </button>
+                <p>You will be asked for your contact details next.</p>
+                {message && <p className="reservation-checkout-alert" role="alert">{message}</p>}
+              </div>
+            </aside>
+          </section>
+      {contactDialogOpen && <div
+        className="customer-pickup-dialog-backdrop"
+        onMouseDown={(event) => {
+          if (event.target === event.currentTarget) setContactDialogOpen(false);
+        }}
+      >
+        <section
+          className="customer-pickup-dialog"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="pickup-contact-title"
+          aria-describedby="pickup-contact-description"
+        >
+          <header className="customer-pickup-dialog-header">
+            <div>
+              <p>Almost done</p>
+              <h2 id="pickup-contact-title">Contact details</h2>
+              <span id="pickup-contact-description">So we can call you when your order is ready.</span>
+            </div>
+            <button type="button" aria-label="Close dialog" onClick={() => setContactDialogOpen(false)}>
+              <X aria-hidden="true" />
             </button>
-          </div>
-
-        </>
-      )}
+          </header>
+          <form className="customer-pickup-contact-form" noValidate onSubmit={submitOrder}>
+            <label>
+              <span>Name</span>
+              <input
+                autoFocus
+                autoComplete="name"
+                maxLength={120}
+                value={customerName}
+                aria-invalid={Boolean(contactErrors.name)}
+                aria-describedby={contactErrors.name ? "pickup-name-error" : undefined}
+                onChange={(event) => {
+                  setCustomerName(event.target.value);
+                  setContactErrors((current) => ({ ...current, name: undefined }));
+                }}
+              />
+              {contactErrors.name && <small id="pickup-name-error" role="alert">{contactErrors.name}</small>}
+            </label>
+            <label>
+              <span>Phone number</span>
+              <input
+                type="tel"
+                inputMode="numeric"
+                autoComplete="tel"
+                maxLength={11}
+                placeholder="09XX XXX XXXX"
+                value={customerPhone}
+                aria-invalid={Boolean(contactErrors.phone)}
+                aria-describedby={contactErrors.phone ? "pickup-phone-error" : undefined}
+                onChange={(event) => {
+                  setCustomerPhone(event.target.value.replace(/\D/g, "").slice(0, 11));
+                  setContactErrors((current) => ({ ...current, phone: undefined }));
+                }}
+              />
+              {contactErrors.phone && <small id="pickup-phone-error" role="alert">{contactErrors.phone}</small>}
+            </label>
+            <div className="customer-pickup-dialog-summary">
+              <span>{cartItemCount} {cartItemCount === 1 ? "item" : "items"}, pay at counter</span>
+              <strong>{formatMoney(total)}</strong>
+            </div>
+            {checkoutError && <p className="reservation-checkout-alert" role="alert">{checkoutError}</p>}
+            <button type="submit" className="customer-btn-primary w-full" disabled={submitting || cart.length === 0}>
+              {submitting ? "Sending..." : "Send pickup order"}
+            </button>
+            <button type="button" className="customer-pickup-back-link" onClick={() => setContactDialogOpen(false)}>
+              Back to order
+            </button>
+          </form>
+        </section>
+      </div>}
     </main>
+  );
+}
+
+function PickupSteps({ empty = false }: { empty?: boolean }) {
+  const steps = empty
+    ? [
+        ["Pick your food", "Add items to this order."],
+        ["Confirm and give your contact", "Name and phone number only."],
+        ["Pick up and pay at the counter", "No payment online."]
+      ]
+    : [
+        ["Confirm your order", "Add your name and phone number."],
+        ["We approve and prepare", "Track it on the Status page."],
+        ["Pick up and pay at the counter", "Show your name when you arrive."]
+      ];
+  return (
+    <section className="customer-pickup-steps" aria-label="How pickup works">
+      <p>How pickup works</p>
+      <ol>
+        {steps.map(([title, description], index) => (
+          <li key={title}>
+            <span>{index + 1}</span>
+            <div><strong>{title}</strong><small>{description}</small></div>
+          </li>
+        ))}
+      </ol>
+    </section>
   );
 }
