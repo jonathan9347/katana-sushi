@@ -395,6 +395,28 @@ test("Catering booking prices tuna add-ons from their quantity and keeps Whole T
   await expect(page.getByText("Choose an option", { exact: true })).toHaveCount(0);
 });
 
+test("Catering booking restores Tuna and Salmon add-ons from legacy Sashimi Bar package types", async ({ page }) => {
+  const legacyPackages = cateringPackages.map((item) => (
+    item.id === "pkg_sashimi_tuna_test" || item.id === "pkg_sashimi_salmon_test"
+      ? { ...item, stationType: "sashimi_bar" }
+      : item
+  ));
+  await mockApi(page, legacyPackages);
+  await page.goto("/catering/book");
+
+  const tunaStation = page.locator("label").filter({ hasText: "Tuna Add-on" }).getByRole("checkbox");
+  const salmonStation = page.locator("label").filter({ hasText: "Salmon Add-on" }).getByRole("checkbox");
+  await expect(tunaStation).toBeVisible();
+  await expect(salmonStation).toBeVisible();
+  await expect(tunaStation).toHaveCount(1);
+  await expect(salmonStation).toHaveCount(1);
+
+  await tunaStation.check();
+  await salmonStation.check();
+  await expect(page.getByText("Exact Tuna quantity (kg) *")).toBeVisible();
+  await expect(page.getByText("Exact Salmon quantity (kg) *")).toBeVisible();
+});
+
 test("Whole Tuna is priced from 20 kg and cannot be mixed with station packages", async ({ page }) => {
   await mockApi(page, cateringPackages);
   await page.goto("/catering/book");

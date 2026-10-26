@@ -67,22 +67,35 @@ function earliestEventDate() {
 }
 
 function getStationType(item: CateringPackage) {
-  if (item.stationType) {
-    return item.stationType;
+  const stationType = item.stationType?.trim().toLowerCase();
+  if (stationType && stationType !== "sashimi_bar" && stationType !== "sashimi") {
+    return stationType;
   }
 
-  if (item.id.includes("whole_tuna") || item.id.includes("sashimi_20") || item.id.includes("sashimi_30")) {
+  const packageIdentity = `${item.id} ${item.name} ${item.description ?? ""}`.toLowerCase();
+  if (
+    packageIdentity.includes("whole_tuna") ||
+    packageIdentity.includes("whole tuna") ||
+    item.id.includes("sashimi_20") ||
+    item.id.includes("sashimi_30")
+  ) {
     return "whole_tuna";
   }
-  if (item.id.includes("sashimi")) {
-    return item.id.includes("salmon") ? "salmon_add_on" : "tuna_add_on";
+  if (stationType === "sashimi_bar" || stationType === "sashimi" || item.id.includes("sashimi")) {
+    if (packageIdentity.includes("salmon")) {
+      return "salmon_add_on";
+    }
+    if (packageIdentity.includes("tuna")) {
+      return "tuna_add_on";
+    }
+    return stationType ?? "tuna_add_on";
   }
 
-  if (item.id.includes("tempura")) {
+  if (packageIdentity.includes("tempura")) {
     return "tempura_live";
   }
 
-  return "sushi_station";
+  return stationType ?? "sushi_station";
 }
 
 function isPerUnitPackage(item?: CateringPackage) {
