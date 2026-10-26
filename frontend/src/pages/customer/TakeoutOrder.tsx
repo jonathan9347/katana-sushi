@@ -1,11 +1,17 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
-import { Search, ShoppingBag, X } from "lucide-react";
+import { Check, MapPin, Phone, Search, ShoppingBag, X } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import BackToHome from "../../components/layout/BackToHome";
 import { api, resolveImageUrl } from "../../lib/api";
+import { formatTime12 } from "../../lib/dateTime";
+import { fetchReservationRules, type ReservationRulesResponse } from "../../lib/reservationRules";
 import "./ReservationForm.css";
 
 const PICKUP_PREP_TIME = "About 25 min";
+const PICKUP_INFO = {
+  streetAddress: "[Add restaurant street address]",
+  phoneNumber: "[Add restaurant phone number]"
+};
 
 type TakeoutProduct = {
   id: string;
@@ -89,6 +95,8 @@ export default function TakeoutOrder() {
   const [message, setMessage] = useState("");
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
+  const [reservationRules, setReservationRules] = useState<ReservationRulesResponse | null>(null);
+  const [reservationHoursError, setReservationHoursError] = useState("");
 
   useEffect(() => {
     let active = true;
@@ -101,6 +109,21 @@ export default function TakeoutOrder() {
       })
       .finally(() => {
         if (active) setLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+    fetchReservationRules()
+      .then((rules) => {
+        if (active) setReservationRules(rules);
+      })
+      .catch((error: unknown) => {
+        if (!active) return;
+        setReservationHoursError(getErrorMessage(error));
       });
     return () => {
       active = false;
@@ -327,7 +350,13 @@ export default function TakeoutOrder() {
                     <h3>Nothing here yet</h3>
                     <p>Add rolls, nigiri or bowls from the menu to start your pickup order.</p>
                   </section>
-                  <PickupSteps empty />
+                  <PickupLocation
+                    openingHours={reservationRules
+                      ? `${formatTime12(reservationRules.settings.OPENING_TIME)} – ${formatTime12(reservationRules.settings.CLOSING_TIME)}`
+                      : null}
+                    hoursError={reservationHoursError}
+                  />
+                  <PickupGoodToKnow empty />
                 </div>
               ) : (
                 <div className="customer-pickup-cart-scroll">
@@ -351,9 +380,15 @@ export default function TakeoutOrder() {
                     <div><span>Prep time</span><strong>{PICKUP_PREP_TIME}</strong></div>
                     <div><span>Pick up at</span><strong>Katana counter</strong></div>
                   </div>
-                  <PickupSteps />
+                  <PickupLocation
+                    openingHours={reservationRules
+                      ? `${formatTime12(reservationRules.settings.OPENING_TIME)} – ${formatTime12(reservationRules.settings.CLOSING_TIME)}`
+                      : null}
+                    hoursError={reservationHoursError}
+                  />
+                  <PickupGoodToKnow />
                   <p className="customer-pickup-note">
-                    No payment needed now. Orders are held for pickup once approved.
+                    No payment is needed now. Please wait for staff approval before preparation begins.
                   </p>
                 </div>
               )}
@@ -449,29 +484,55 @@ export default function TakeoutOrder() {
   );
 }
 
-function PickupSteps({ empty = false }: { empty?: boolean }) {
-  const steps = empty
-    ? [
-        ["Pick your food", "Add items to this order."],
-        ["Confirm and give your contact", "Name and phone number only."],
-        ["Pick up and pay at the counter", "No payment online."]
-      ]
-    : [
-        ["Confirm your order", "Add your name and phone number."],
-        ["We approve and prepare", "Track it on the Status page."],
-        ["Pick up and pay at the counter", "Show your name when you arrive."]
-      ];
+function PickupLocation({
+  openingHours,
+  hoursError
+}: {
+  openingHours: string | null;
+  hoursError: string;
+}) {
   return (
-    <section className="customer-pickup-steps" aria-label="How pickup works">
-      <p>How pickup works</p>
-      <ol>
-        {steps.map(([title, description], index) => (
-          <li key={title}>
-            <span>{index + 1}</span>
-            <div><strong>{title}</strong><small>{description}</small></div>
+    <section className="customer-pickup-location" aria-label="Pickup location">
+      <p className="customer-pickup-section-label">Pickup location</p>
+      <div className="customer-pickup-location-address">
+        <span><MapPin aria-hidden="true" /></span>
+        <div><strong>Katana Sushi, front counter</strong><small>{PICKUP_INFO.streetAddress}</small></div>
+      </div>
+      <div className="customer-pickup-location-row">
+        <span>Open today</span>
+        {openingHours
+          ? <strong>{openingHours}</strong>
+          : hoursError
+            ? <strong role="alert">Hours unavailable</strong>
+            : <strong>Loading hours...</strong>}
+      </div>
+      {hoursError && <p className="customer-pickup-hours-error" role="alert">Could not load opening hours: {hoursError}</p>}
+      <div className="customer-pickup-location-row">
+        <span><Phone aria-hidden="true" />Call the restaurant</span>
+        <strong>{PICKUP_INFO.phoneNumber}</strong>
+      </div>
+    </section>
+  );
+}
+
+function PickupGoodToKnow({ empty = false }: { empty?: boolean }) {
+  const notes = [
+    empty ? "Pay at the counter. No payment online." : "Show your name at the counter when you arrive.",
+    "Track approval and ready time on the Status page.",
+    "Need to change something? Contact the restaurant as soon as possible; pickup orders cannot be edited online.",
+    "Ingredients are reserved once staff approves your order."
+  ];
+  return (
+    <section className="customer-pickup-good-to-know" aria-label="Good to know">
+      <p className="customer-pickup-section-label">Good to know</p>
+      <ul>
+        {notes.map((note) => (
+          <li key={note}>
+            <Check aria-hidden="true" />
+            <span>{note}</span>
           </li>
         ))}
-      </ol>
+      </ul>
     </section>
   );
 }
