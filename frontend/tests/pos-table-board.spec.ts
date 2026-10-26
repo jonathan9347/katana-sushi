@@ -8,7 +8,16 @@ const tables = [
     status: "occupied",
     linked_to_table_id: null,
     unavailable_reason: null,
-    active_session: { id: "session-1", guests: [{ id: "guest-1" }] }
+    active_session: {
+      id: "session-1",
+      display_order_id: "01",
+      guests: [{ id: "guest-1" }],
+      orders: [{
+        order_type: "unlimited",
+        items: [{ unit_price: 0 }, { unit_price: 100 }]
+      }],
+      unlimited_sessions: [{ status: "active" }]
+    }
   },
   {
     id: "table-2",
@@ -98,15 +107,26 @@ async function openPosWithTableMocks(
       return;
     }
     if (url.pathname === "/api/pos/dining/upcoming-reservations") {
-      await route.fulfill({ json: { reservations: [{
-        id: "reservation-1",
-        time: "07:30 PM",
-        customer_name: "Ava Guest",
-        party_size: 3,
-        table_numbers: [12],
-        temporary_table_numbers: [],
-        state: "late"
-      }] } });
+      await route.fulfill({ json: { reservations: [
+        {
+          id: "reservation-1",
+          time: "07:30 PM",
+          customer_name: "Ava Guest",
+          party_size: 3,
+          table_numbers: [12],
+          temporary_table_numbers: [],
+          state: "late"
+        },
+        {
+          id: "reservation-2",
+          time: "07:00 PM",
+          customer_name: "Milo Booked",
+          party_size: 2,
+          table_numbers: [11],
+          temporary_table_numbers: [],
+          state: "arrived"
+        }
+      ] } });
       return;
     }
     if (url.pathname === "/api/pos/dining/sessions" && route.request().method() === "POST") {
@@ -148,6 +168,9 @@ test("walk-in board is a pure status grid and stages free-table choice without s
   await expect(tableBoard).toBeVisible();
   await expect(tableBoard.getByRole("button", { name: "Select Table 14, Free" })).toBeVisible();
   await expect(tableBoard.getByRole("article", { name: "Table 11, Occupied" })).toBeVisible();
+  await expect(tableBoard.getByRole("article", { name: "Table 11, Occupied" })).toContainText("Order ID 01");
+  await expect(tableBoard.getByRole("article", { name: "Table 11, Occupied" })).toContainText("Booked · Milo Booked");
+  await expect(tableBoard.getByRole("article", { name: "Table 11, Occupied" })).toContainText("Mix");
   await expect(tableBoard.getByRole("article", { name: "Table 12, Reserved" })).toBeVisible();
   await expect(tableBoard.getByRole("article", { name: "Table 13, Unavailable" })).toBeVisible();
   await expect(tableBoard.getByText("Upcoming reservations")).toHaveCount(0);

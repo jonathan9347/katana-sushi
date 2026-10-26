@@ -1,6 +1,6 @@
-import { FormEvent, useMemo, useRef, useState } from "react";
+import { FormEvent, ReactNode, useEffect, useId, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
-import { Banknote, CheckCircle2, Landmark, Send, ShieldCheck, Smartphone } from "lucide-react";
+import { Banknote, Check, CheckCircle2, Landmark, Send, ShieldCheck, Smartphone, X } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { Dialog } from "../../components/ui/dialog";
 import BackToHome from "../../components/layout/BackToHome";
@@ -52,6 +52,99 @@ type SuccessState = {
   paymentPlan: "downpayment" | "full_payment";
 };
 
+type CateringModalProps = {
+  title: string;
+  onClose: () => void;
+  children: ReactNode;
+};
+
+function CateringModal({ title, onClose, children }: CateringModalProps) {
+  const titleId = useId();
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const onCloseRef = useRef(onClose);
+
+  useEffect(() => {
+    onCloseRef.current = onClose;
+  }, [onClose]);
+
+  useEffect(() => {
+    const dialog = dialogRef.current;
+    if (!dialog) return;
+
+    const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+
+    const getFocusableElements = () => Array.from(
+      dialog.querySelectorAll<HTMLElement>(
+        'button:not([disabled]), input:not([disabled]), [href], select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+      )
+    );
+
+    getFocusableElements()[0]?.focus();
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        onCloseRef.current();
+        return;
+      }
+      if (event.key !== "Tab") return;
+
+      const focusableElements = getFocusableElements();
+      const first = focusableElements[0];
+      const last = focusableElements[focusableElements.length - 1];
+      if (!first || !last) {
+        event.preventDefault();
+      } else if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("keydown", handleKeyDown);
+      document.body.style.overflow = previousOverflow;
+      previousFocus?.focus();
+    };
+  }, []);
+
+  return (
+    <div
+      className="fixed inset-0 z-[70] flex items-center justify-center bg-black/60 px-4 py-6"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) onClose();
+      }}
+    >
+      <div
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+        className="flex max-h-[90dvh] w-full max-w-2xl flex-col overflow-hidden rounded-2xl border border-[var(--customer-border)] bg-[var(--customer-surface)] text-[var(--customer-text)] shadow-2xl"
+      >
+        <header className="flex shrink-0 items-center justify-between border-b border-[var(--customer-border)] px-5 py-4">
+          <h2 id={titleId} className="text-lg font-bold">{title}</h2>
+          <button
+            type="button"
+            aria-label="Close dialog"
+            onClick={onClose}
+            className="rounded-lg p-2 text-[var(--customer-muted)] transition hover:bg-[var(--customer-surface-2)] hover:text-[var(--customer-text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-katana-red"
+          >
+            <X className="h-5 w-5" />
+          </button>
+        </header>
+        {children}
+      </div>
+    </div>
+  );
+}
+
+const EMPTY_CATERING_PACKAGES: CateringPackage[] = [];
+
 function money(value: number) {
   return new Intl.NumberFormat("en-PH", { style: "currency", currency: "PHP", minimumFractionDigits: 2 }).format(value);
 }
@@ -70,7 +163,26 @@ function getStationType(item: CateringPackage) {
   const stationType = item.stationType?.trim().toLowerCase().replace(/[\s-]+/g, "_");
   const packageIdentity = `${item.id} ${item.name} ${item.description ?? ""}`.toLowerCase();
 
-  if (stationType && stationType !== "sashimi_bar" && stationType !== "sashimi") {
+  if (stationType === "sashimi_bar" || stationType === "sashimi") {
+    const minimum = item.items?.minimum ?? item.items?.minKg;
+    const maximum = item.items?.maximum ?? item.items?.maxKg;
+    const isWholeTuna = packageIdentity.includes("whole tuna") ||
+      item.id.toLowerCase().includes("whole_tuna") ||
+      (minimum === 20 && maximum === 40);
+    if (isWholeTuna) {
+      return "whole_tuna";
+    }
+    if (isPerUnitPackage(item)) {
+      const hasTuna = /\btuna\b/.test(packageIdentity);
+      const hasSalmon = /\bsalmon\b/.test(packageIdentity);
+      if (hasTuna !== hasSalmon) {
+        return hasTuna ? "tuna_add_on" : "salmon_add_on";
+      }
+    }
+    return "sashimi_bar";
+  }
+
+  if (stationType) {
     return stationType;
   }
 
@@ -83,10 +195,7 @@ function getStationType(item: CateringPackage) {
     return "whole_tuna";
   }
 
-  if (
-    (stationType === "sashimi_bar" || stationType === "sashimi" || item.id.toLowerCase().includes("sashimi")) &&
-    isPerUnitPackage(item)
-  ) {
+  if (item.id.toLowerCase().includes("sashimi") && isPerUnitPackage(item)) {
     const hasTuna = /\btuna\b/.test(packageIdentity);
     const hasSalmon = /\bsalmon\b/.test(packageIdentity);
     if (hasTuna !== hasSalmon) {
@@ -114,12 +223,32 @@ function isPerUnitPackage(item?: CateringPackage) {
 function getStationName(id: string) {
   const names: Record<string, string> = {
     sushi_station: "Sushi Station",
-    whole_tuna: "Whole Tuna (standalone)",
-    tuna_add_on: "Tuna Add-on",
-    salmon_add_on: "Salmon Add-on",
-    tempura_live: "Tempura (50 pax)"
+    sashimi_bar: "Sashimi Bar",
+    whole_tuna: "Sashimi Bar",
+    tuna_add_on: "Tuna by kilo",
+    salmon_add_on: "Salmon by kilo",
+    tempura_live: "Tempura Live"
   };
   return names[id] ?? id.split(/[_\s-]+/).map((part) => `${part.charAt(0).toUpperCase()}${part.slice(1)}`).join(" ");
+}
+
+function getMinimumQuantity(item: CateringPackage) {
+  return ["tuna_add_on", "salmon_add_on"].includes(getStationType(item))
+    ? 2
+    : item.items?.minimum ?? item.items?.minKg ?? 1;
+}
+
+function getPackageDescription(item: CateringPackage) {
+  const stationType = getStationType(item);
+  if (stationType === "tuna_add_on" || stationType === "salmon_add_on") {
+    const maximum = item.items?.maximum ?? item.items?.maxKg ?? 40;
+    const rate = item.items?.pricePerUnit ?? item.items?.pricePerKg ?? 0;
+    return `${item.name} add-on, 1-${maximum} kg at ${money(rate)}/kg.`;
+  }
+  if (stationType === "whole_tuna") {
+    return "Whole tuna sold by weight, 20-40 kg at PHP 1,200/kg. Booked as a standalone item.";
+  }
+  return item.description ?? item.name;
 }
 
 function getPackagePrice(item?: CateringPackage, quantity?: number) {
@@ -141,7 +270,8 @@ function getPackagePrice(item?: CateringPackage, quantity?: number) {
 
 function getPackagePriceLabel(item: CateringPackage) {
   if (item.items?.pricingModel === "per_unit" || item.items?.pricingType === "range") {
-    return `${money(item.items.pricePerUnit ?? item.items.pricePerKg ?? 0)}/${item.items.unit ?? "kg"}`;
+    const rate = item.items.pricePerUnit ?? item.items.pricePerKg ?? 0;
+    return `From ${money(rate * getMinimumQuantity(item))} · ${money(rate)}/${item.items.unit ?? "kg"}`;
   }
 
   if (item.items?.pricingModel === "fixed") {
@@ -163,7 +293,7 @@ function getStationPriceLabel(options: CateringPackage[], selectedPackage?: Cate
   if (perUnitOptions.length > 0) {
     const startingPrices = perUnitOptions.map((item) => {
       const rate = item.items?.pricePerUnit ?? item.items?.pricePerKg ?? 0;
-      const minimum = item.items?.minimum ?? item.items?.minKg ?? 0;
+      const minimum = getMinimumQuantity(item);
       return rate * minimum;
     });
     return `From ${money(Math.min(...startingPrices))}`;
@@ -244,7 +374,7 @@ export default function CateringReservation() {
   const [notice, setNotice] = useState("");
   const [isProcessingPayment, setIsProcessingPayment] = useState(false);
   const [detailsOpen, setDetailsOpen] = useState(false);
-  const [mobileSummaryOpen, setMobileSummaryOpen] = useState(false);
+  const [cateringModal, setCateringModal] = useState<"inclusions" | "addons" | null>(null);
   const [success, setSuccess] = useState<SuccessState | null>(null);
   const paymentInFlightRef = useRef(false);
 
@@ -261,24 +391,31 @@ export default function CateringReservation() {
   });
 
   const systemSettings = systemSettingsData ?? defaultSystemSettings;
-  const packages = packagesQuery.data ?? [];
-  const stations = useMemo(() => {
+  const packages = packagesQuery.data ?? EMPTY_CATERING_PACKAGES;
+  const catalogStations = useMemo(() => {
     const stationTypes = Array.from(new Set(packages.map(getStationType)));
     return stationTypes.map((id) => ({
       id,
       name: getStationName(id)
     }));
   }, [packages]);
+  const stations = useMemo(() => catalogStations.filter((station) =>
+    !["tuna_add_on", "salmon_add_on", "sashimi_bar"].includes(station.id)
+  ), [catalogStations]);
+  const addOnStations = useMemo(() => catalogStations.filter((station) =>
+    ["tuna_add_on", "salmon_add_on"].includes(station.id)
+  ), [catalogStations]);
+  const allStations = useMemo(() => [...stations, ...addOnStations], [stations, addOnStations]);
   const packagesByStation = useMemo(() => {
     const map: { [k: string]: CateringPackage[] } = {};
-    stations.forEach((s) => {
+    allStations.forEach((s) => {
       map[s.id] = packages.filter((item) => getStationType(item) === s.id);
     });
     return map;
-  }, [packages, stations]);
+  }, [packages, allStations]);
 
   const selectedPackageByStation: { [k: string]: CateringPackage | undefined } = {};
-  stations.forEach((s) => {
+  allStations.forEach((s) => {
     const pkgId = form.package_by_station[s.id];
     selectedPackageByStation[s.id] = (packagesByStation[s.id] ?? []).find((p) => p.id === pkgId);
   });
@@ -289,6 +426,10 @@ export default function CateringReservation() {
   const selectedBasePackages = selectedPackages.filter((item) =>
     ["sushi_station", "tempura_live"].includes(getStationType(item))
   );
+  const selectedStationCount = selectedPackages.filter((item) =>
+    !["tuna_add_on", "salmon_add_on"].includes(getStationType(item))
+  ).length;
+  const hasEligibleAddonStation = selectedBasePackages.length > 0;
   const headcountNumber = selectedBasePackages.length > 0
     ? Math.max(
       systemSettings.minimum_catering_pax,
@@ -303,7 +444,7 @@ export default function CateringReservation() {
     )
     : null;
   const subtotal = useMemo(() => {
-    return stations.reduce((sum, s) => {
+    return allStations.reduce((sum, s) => {
       if (!form.station_types.includes(s.id)) return sum;
       const pkg = selectedPackageByStation[s.id];
       const quantity = pkg && isPerUnitPackage(pkg)
@@ -319,6 +460,13 @@ export default function CateringReservation() {
   const isDownpayment = form.payment_plan === "downpayment";
   const subtotalTotal = Number(subtotal.toFixed(2));
   const totalPriceTotal = subtotalTotal;
+  const addonSubtotalTotal = Number(selectedPackages
+    .filter((item) => ["tuna_add_on", "salmon_add_on"].includes(getStationType(item)))
+    .reduce((sum, item) => {
+      const quantity = Number(form.package_quantities[item.id]) || 0;
+      return sum + getPackagePrice(item, quantity);
+    }, 0).toFixed(2));
+  const packageSubtotalTotal = Number((totalPriceTotal - addonSubtotalTotal).toFixed(2));
   const paymentAmountTotal = isZeroQuoteOnlyReservation
     ? 0
     : isFullPayment
@@ -331,6 +479,40 @@ export default function CateringReservation() {
   function setField(field: keyof typeof form, value: any) {
     setForm((current) => ({ ...current, [field]: value }));
   }
+
+  function toggleAddon(stationId: string, selected: boolean) {
+    const packageOption = packagesByStation[stationId]?.[0];
+    if (!packageOption) return;
+
+    setForm((current) => {
+      const stationTypes = selected
+        ? Array.from(new Set([...current.station_types, stationId]))
+        : current.station_types.filter((id) => id !== stationId);
+      const packageByStation = { ...current.package_by_station };
+      const packageQuantities = { ...current.package_quantities };
+
+      if (selected) {
+        packageByStation[stationId] = packageOption.id;
+        if (!packageQuantities[packageOption.id] || Number(packageQuantities[packageOption.id]) < getMinimumQuantity(packageOption)) {
+          packageQuantities[packageOption.id] = String(getMinimumQuantity(packageOption));
+        }
+      } else {
+        delete packageByStation[stationId];
+      }
+
+      return {
+        ...current,
+        station_types: stationTypes,
+        package_by_station: packageByStation,
+        package_quantities: packageQuantities
+      };
+    });
+  }
+
+  const addonSelectionSummary = selectedPackages
+    .filter((item) => ["tuna_add_on", "salmon_add_on"].includes(getStationType(item)))
+    .map((item) => `${getStationType(item) === "tuna_add_on" ? "tuna" : "salmon"} ${form.package_quantities[item.id] ?? getMinimumQuantity(item)} kg`)
+    .join(", ");
 
   function getBookingDetailsError() {
     if (form.event_date < earliestEventDate()) {
@@ -374,7 +556,7 @@ export default function CateringReservation() {
     for (const item of selectedPackages) {
       if (!item || !isPerUnitPackage(item)) continue;
       const quantity = Number(form.package_quantities[item.id]);
-      const minimum = item.items?.minimum ?? item.items?.minKg;
+      const minimum = getMinimumQuantity(item);
       const maximum = item.items?.maximum ?? item.items?.maxKg;
       const step = item.items?.step ?? item.items?.stepKg ?? 1;
       if (
@@ -524,287 +706,248 @@ export default function CateringReservation() {
       <section className="w-full">
         <div className="w-full">
           <form className="w-full">
-            <div className="grid w-full items-start gap-6 lg:grid-cols-[minmax(0,1fr)_400px] lg:gap-3">
+            <div className="grid w-full items-start gap-6 min-[900px]:grid-cols-[minmax(0,1fr)_400px] min-[900px]:gap-3">
             <div>
             <BackToHome className="mb-3" />
             <div className="space-y-6">
-            <p className="text-sm text-neutral-300">Choose one or more stations. One option per station.</p>
+            <p className="text-sm text-neutral-300">Pick a package size under each station, then add Tuna or Salmon by the kilo if you like.</p>
 
-            <section className="space-y-3">
-              <h3 className="text-xs font-bold uppercase tracking-[0.18em] text-katana-muted">Choose your stations</h3>
-              <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-1 md:gap-4 md:mt-4">
-                {packagesQuery.isPending && <p className="text-sm text-neutral-300" role="status">Loading catering stations...</p>}
-                {packagesQuery.isError && (
-                  <div className="text-sm text-katana-red" role="alert">
-                    <p>Catering stations could not be loaded.</p>
-                    <button type="button" className="mt-1 underline" onClick={() => void packagesQuery.refetch()}>Retry</button>
-                  </div>
-                )}
-                {packagesQuery.isSuccess && stations.length === 0 && (
-                  <p className="text-sm text-neutral-300" role="status">No catering stations are currently available.</p>
-                )}
-                {packagesQuery.isSuccess && stations.map((station) => {
-                  const isSelected = form.station_types.includes(station.id);
-                  const selectedPkg = selectedPackageByStation[station.id];
-                  const options = packagesByStation[station.id] ?? [];
-                  const optionCards = options.map((item) => {
-                    const images = getPackageImages(item);
-                    const optionSelected = selectedPkg?.id === item.id;
-                    const isQuantityPackage = isPerUnitPackage(item);
-                    const quantityValue = form.package_quantities[item.id] ?? "";
-                    const quantity = Number(quantityValue);
-                    const hasQuantity = quantityValue !== "" && Number.isFinite(quantity);
-                    const minQuantity = item.items?.minimum ?? item.items?.minKg ?? 1;
-                    const quantityStep = item.items?.step ?? item.items?.stepKg ?? 1;
-                    const maxQuantity = item.items?.maximum ?? item.items?.maxKg;
+            <section className="space-y-6" aria-label="Catering stations and add-ons">
+              {packagesQuery.isPending && <p className="text-sm text-neutral-300" role="status">Loading catering stations...</p>}
+              {packagesQuery.isError && (
+                <div className="text-sm text-katana-red" role="alert">
+                  <p>Catering stations could not be loaded.</p>
+                  <button type="button" className="mt-1 underline" onClick={() => void packagesQuery.refetch()}>Retry</button>
+                </div>
+              )}
+              {packagesQuery.isSuccess && (
+                <div className="space-y-8">
+                  {stations.map((station) => {
+                    const options = packagesByStation[station.id] ?? [];
+                    const selectedPackage = selectedPackageByStation[station.id];
+                    const inclusions = options.find((option) => option.items?.inclusions?.length)?.items?.inclusions ?? [];
+                    const subtitle = station.id === "sushi_station"
+                      ? `${options.length} package options`
+                      : station.id === "whole_tuna"
+                        ? "Whole Tuna option only"
+                        : `Fixed package${options[0]?.items?.fixedPax ? ` · ${options[0].items.fixedPax} pax` : ""}`;
 
                     return (
-                      <div
-                        key={item.id}
-                        className={`group overflow-hidden rounded-2xl border text-left transition ${
-                          optionSelected ? "border-katana-red bg-katana-red/10 shadow-sm" : "border-katana-border bg-katana-surface hover:border-katana-red/50"
-                        }`}
-                      >
-                        <button
-                          type="button"
-                          aria-pressed={optionSelected}
-                          onClick={() => {
-                            setForm((current) => ({
-                              ...current,
-                              package_by_station: { ...current.package_by_station, [station.id]: item.id },
-                              package_quantities: isQuantityPackage
-                                ? {
-                                  ...current.package_quantities,
-                                  [item.id]: current.package_by_station[station.id] !== item.id || !current.package_quantities[item.id]
-                                    ? String(minQuantity)
-                                    : current.package_quantities[item.id]
-                                }
-                                : current.package_quantities
-                            }));
-                          }}
-                          className="block w-full text-left"
-                        >
-                          <div className="grid grid-cols-3 gap-1">
-                            {[0, 1, 2].map((index) => {
-                              const imageSrc = images[index];
+                      <section key={station.id} aria-label={station.name}>
+                        <div className="flex items-center justify-between gap-3 border-b-2 border-katana-red pb-2">
+                          <div>
+                            <h2 className="text-xl font-bold text-[var(--customer-text)]">{station.name}</h2>
+                            <p className="mt-1 text-sm text-[var(--customer-muted)]">{subtitle}</p>
+                          </div>
+                          {station.id === "sushi_station" && inclusions.length > 0 && (
+                            <button
+                              type="button"
+                              onClick={() => setCateringModal("inclusions")}
+                              className="shrink-0 rounded-full border border-katana-red px-4 py-2 text-sm font-semibold text-katana-red transition hover:bg-katana-red hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-katana-red"
+                            >
+                              View inclusions
+                            </button>
+                          )}
+                        </div>
+                        {options.length === 0 ? (
+                          <p className="mt-3 text-sm text-[var(--customer-muted)]">No package options are currently available.</p>
+                        ) : (
+                          <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
+                            {options.map((item) => {
+                              const images = getPackageImages(item);
+                              const optionSelected = selectedPackage?.id === item.id;
+                              const isQuantityPackage = isPerUnitPackage(item);
+                              const quantityValue = form.package_quantities[item.id] ?? "";
+                              const quantity = Number(quantityValue);
+                              const hasQuantity = quantityValue !== "" && Number.isFinite(quantity);
+                              const minimum = getMinimumQuantity(item);
+                              const maximum = item.items?.maximum ?? item.items?.maxKg;
+                              const step = item.items?.step ?? item.items?.stepKg ?? 1;
+                              const title = station.id === "sushi_station"
+                                ? `${item.minPax}–${item.maxPax} pax`
+                                : station.id === "whole_tuna"
+                                  ? "Whole Tuna"
+                                  : item.description ?? item.name;
+                              const paxLabel = station.id === "whole_tuna"
+                                ? `${minimum}-${maximum ?? 40} kg`
+                                : item.items?.fixedPax
+                                  ? `Fixed ${item.items.fixedPax} pax`
+                                  : `${item.minPax}–${item.maxPax} pax`;
+
                               return (
-                                <div key={index} className="relative aspect-[4/3] overflow-hidden bg-katana-elevated">
-                                  {imageSrc ? (
-                                    <img
-                                      src={imageSrc}
-                                      alt={`${item.description ?? item.name} photo ${index + 1}`}
-                                      className="h-full w-full object-cover transition duration-300 group-hover:scale-105"
-                                      loading="lazy"
-                                      decoding="async"
-                                    />
-                                  ) : (
-                                    <div className="flex h-full w-full items-center justify-center text-[9px] font-bold uppercase tracking-wide text-katana-muted">
-                                      Photo {index + 1}
+                                <div
+                                  key={item.id}
+                                  className={`relative overflow-hidden rounded-2xl border bg-[var(--customer-surface)] transition ${
+                                    optionSelected ? "border-katana-red ring-1 ring-katana-red" : "border-[var(--customer-border)] hover:border-katana-red/60"
+                                  }`}
+                                >
+                                  <button
+                                    type="button"
+                                    aria-pressed={optionSelected}
+                                    aria-label={`${title}, ${paxLabel}, ${getPackagePriceLabel(item)}`}
+                                    onClick={() => setForm((current) => {
+                                      const currentlySelected = current.package_by_station[station.id] === item.id &&
+                                        current.station_types.includes(station.id);
+                                      const stationTypes = currentlySelected
+                                        ? current.station_types.filter((id) => id !== station.id)
+                                        : Array.from(new Set([...current.station_types, station.id]));
+                                      const packageByStation = { ...current.package_by_station };
+                                      if (currentlySelected) {
+                                        delete packageByStation[station.id];
+                                      } else {
+                                        packageByStation[station.id] = item.id;
+                                      }
+                                      const quantities = { ...current.package_quantities };
+                                      if (!currentlySelected && isQuantityPackage && !quantities[item.id]) {
+                                        quantities[item.id] = String(minimum);
+                                      }
+                                      return {
+                                        ...current,
+                                        station_types: stationTypes,
+                                        package_by_station: packageByStation,
+                                        package_quantities: quantities
+                                      };
+                                    })}
+                                    className="group block w-full rounded-2xl text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-katana-red"
+                                  >
+                                    <div className="relative grid h-24 grid-cols-3 place-items-center gap-2 bg-katana-red/10 p-3">
+                                      {images.length > 0 ? images.slice(0, 2).map((image, index) => (
+                                        <img
+                                          key={image}
+                                          src={image}
+                                          alt=""
+                                          className="h-full max-w-full rounded-lg object-cover"
+                                          loading="lazy"
+                                          decoding="async"
+                                        />
+                                      )) : (
+                                        <span className="col-span-3 text-xs font-semibold uppercase tracking-wide text-[var(--customer-muted)]">
+                                          {station.name}
+                                        </span>
+                                      )}
+                                      {optionSelected && (
+                                        <span className="absolute right-3 top-3 inline-flex h-7 w-7 items-center justify-center rounded-full bg-katana-red text-white">
+                                          <Check className="h-4 w-4" aria-hidden="true" />
+                                        </span>
+                                      )}
                                     </div>
-                                  )}
-                                  {optionSelected && index === 2 && (
-                                    <span className="absolute right-2 top-2 inline-flex h-7 w-7 items-center justify-center rounded-full bg-katana-red text-white shadow-lg">
-                                      <CheckCircle2 className="h-4 w-4" />
-                                    </span>
+                                    <div className="grid min-h-28 content-between gap-2 p-4">
+                                      <div>
+                                        <p className="text-base font-bold text-[var(--customer-text)]">{title}</p>
+                                        <p className="mt-1 text-xs uppercase tracking-wide text-[var(--customer-muted)]">{paxLabel}</p>
+                                      </div>
+                                      <p className="text-sm font-bold text-katana-red">{getPackagePriceLabel(item)}</p>
+                                    </div>
+                                  </button>
+                                  {optionSelected && isQuantityPackage && (
+                                    <div className="grid gap-2 border-t border-[var(--customer-border)] p-3">
+                                      <span className="text-xs font-semibold text-[var(--customer-muted)]">Quantity ({item.items?.unit ?? "kg"})</span>
+                                      <div className="flex items-center gap-2">
+                                        <button
+                                          type="button"
+                                          aria-label={`Decrease ${item.name} quantity`}
+                                          disabled={!hasQuantity || quantity <= minimum}
+                                          onClick={() => setForm((current) => ({
+                                            ...current,
+                                            package_quantities: {
+                                              ...current.package_quantities,
+                                              [item.id]: String(Math.max(minimum, quantity - step))
+                                            }
+                                          }))}
+                                          className="h-10 w-10 rounded-lg border border-[var(--customer-border)] text-lg font-bold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-katana-red disabled:opacity-40"
+                                        >−</button>
+                                        <input
+                                          className="customer-input h-10 py-1 text-center"
+                                          type="number"
+                                          min={minimum}
+                                          max={maximum}
+                                          step={step}
+                                          inputMode="numeric"
+                                          aria-label={`${item.name} quantity`}
+                                          value={quantityValue}
+                                          onChange={(event) => {
+                                            const value = event.target.value;
+                                            const parsed = Number(value);
+                                            setForm((current) => ({
+                                              ...current,
+                                              package_quantities: {
+                                                ...current.package_quantities,
+                                                [item.id]: value && Number.isFinite(parsed) && maximum !== undefined
+                                                  ? String(Math.min(parsed, maximum))
+                                                  : value
+                                              }
+                                            }));
+                                          }}
+                                          onBlur={() => {
+                                            if (!quantityValue) return;
+                                            const bounded = Math.max(minimum, Math.min(maximum ?? Number.POSITIVE_INFINITY, Number(quantityValue)));
+                                            setForm((current) => ({
+                                              ...current,
+                                              package_quantities: { ...current.package_quantities, [item.id]: String(bounded) }
+                                            }));
+                                          }}
+                                        />
+                                        <button
+                                          type="button"
+                                          aria-label={`Increase ${item.name} quantity`}
+                                          disabled={hasQuantity && maximum !== undefined && quantity >= maximum}
+                                          onClick={() => setForm((current) => ({
+                                            ...current,
+                                            package_quantities: {
+                                              ...current.package_quantities,
+                                              [item.id]: String(Math.min(maximum ?? Number.POSITIVE_INFINITY, (hasQuantity ? quantity : minimum - step) + step))
+                                            }
+                                          }))}
+                                          className="h-10 w-10 rounded-lg border border-[var(--customer-border)] text-lg font-bold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-katana-red disabled:opacity-40"
+                                        >+</button>
+                                      </div>
+                                    </div>
                                   )}
                                 </div>
                               );
                             })}
                           </div>
-                          <div className="grid min-h-[116px] gap-3 p-4">
-                            <div className="min-w-0">
-                              <p className="break-words text-sm font-bold text-white md:text-base">{item.description ?? item.name}</p>
-                              <p className="mt-1 text-xs uppercase tracking-wide text-katana-muted">
-                                {isQuantityPackage
-                                  ? `${minQuantity}-${maxQuantity ?? "∞"} ${item.items?.unit ?? "kg"}`
-                                  : item.items?.pricingModel === "fixed"
-                                    ? `${item.items.fixedPax ?? item.minPax} pax`
-                                    : `${item.minPax}-${item.maxPax} pax`}
-                              </p>
-                            </div>
-                            <p className="self-end text-sm font-bold text-katana-red">
-                              {getPackagePriceLabel(item)}
-                            </p>
-                          </div>
-                        </button>
-                        {optionSelected && isQuantityPackage && (
-                          <label className="grid gap-2 border-t border-katana-border p-4">
-                            <span className="customer-label">Exact {item.name} quantity ({item.items?.unit ?? "kg"}) *</span>
-                            <div className="flex items-center gap-2">
-                              <button
-                                type="button"
-                                aria-label={`Decrease ${item.name} quantity`}
-                                disabled={!hasQuantity || quantity <= minQuantity}
-                                className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-katana-border bg-katana-surface text-lg font-bold text-white transition hover:border-katana-red disabled:cursor-not-allowed disabled:opacity-40"
-                                onClick={() => setForm((current) => ({
-                                  ...current,
-                                  package_quantities: {
-                                    ...current.package_quantities,
-                                    [item.id]: String(Math.max(minQuantity, quantity - quantityStep))
-                                  }
-                                }))}
-                              >
-                                -
-                              </button>
-                              <input
-                                className="customer-input text-center"
-                                type="number"
-                                min={minQuantity}
-                                max={maxQuantity}
-                                step={quantityStep}
-                                inputMode="numeric"
-                                value={quantityValue}
-                                onChange={(event) => {
-                                  const value = event.target.value;
-                                  const parsedQuantity = Number(value);
-                                  setForm((current) => ({
-                                    ...current,
-                                    package_quantities: {
-                                      ...current.package_quantities,
-                                      [item.id]: value && maxQuantity !== undefined && Number.isFinite(parsedQuantity)
-                                        ? String(Math.min(parsedQuantity, maxQuantity))
-                                        : value
-                                    }
-                                  }));
-                                }}
-                                required
-                              />
-                              <button
-                                type="button"
-                                aria-label={`Increase ${item.name} quantity`}
-                                disabled={hasQuantity && maxQuantity !== undefined && quantity >= maxQuantity}
-                                className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-katana-border bg-katana-surface text-lg font-bold text-white transition hover:border-katana-red disabled:cursor-not-allowed disabled:opacity-40"
-                                onClick={() => {
-                                  const currentQuantity = hasQuantity ? quantity : minQuantity - quantityStep;
-                                  setForm((current) => ({
-                                    ...current,
-                                    package_quantities: {
-                                      ...current.package_quantities,
-                                      [item.id]: String(Math.min(maxQuantity ?? Number.POSITIVE_INFINITY, currentQuantity + quantityStep))
-                                    }
-                                  }));
-                                }}
-                              >
-                                +
-                              </button>
-                            </div>
-                            <span className="text-xs text-katana-muted">
-                              {money(item.items?.pricePerUnit ?? item.items?.pricePerKg ?? 0)} per {item.items?.unit ?? "kg"}
-                            </span>
-                          </label>
                         )}
-                      </div>
+                      </section>
                     );
-                  });
+                  })}
 
-                  return (
-                    <div
-                      key={station.id}
-                      className={`rounded-xl border p-4 transition-colors ${
-                        isSelected ? "border-katana-red bg-katana-red/10 shadow-sm" : "border-katana-border bg-katana-elevated hover:border-katana-red/40"
-                      }`}
+                  <div className="flex flex-wrap items-center justify-between gap-4 rounded-2xl border border-dashed border-katana-red/60 bg-katana-red/5 p-4">
+                    <div>
+                      <h2 className="font-bold text-[var(--customer-text)]">Add-ons</h2>
+                      <p className="mt-1 text-sm text-[var(--customer-muted)]">
+                        {addonSelectionSummary || "Tuna and Salmon by the kilo. Needs a Sushi Station or Tempura Live package."}
+                      </p>
+                      {!hasEligibleAddonStation && (
+                        <p className="mt-1 text-xs text-katana-red">Select Sushi Station or Tempura Live to add Tuna or Salmon.</p>
+                      )}
+                    </div>
+                    <button
+                      type="button"
+                      disabled={!hasEligibleAddonStation || addOnStations.length === 0}
+                      onClick={() => setCateringModal("addons")}
+                      className="customer-btn-primary shrink-0 disabled:cursor-not-allowed disabled:opacity-50"
                     >
-                      <label className="flex cursor-pointer items-start gap-3">
-                        <input
-                          type="checkbox"
-                          checked={isSelected}
-                          className="mt-1 h-5 w-5 shrink-0 accent-katana-red"
-                          onChange={() => {
-                            setForm((current) => {
-                              const nextSelectedStations = isSelected
-                                ? current.station_types.filter((selectedStation) => selectedStation !== station.id)
-                                : [...current.station_types, station.id];
-                              const nextPackages = { ...current.package_by_station };
-                              if (!isSelected && options.length === 1) {
-                                nextPackages[station.id] = options[0].id;
-                              }
-                              const nextQuantities = { ...current.package_quantities };
-                              if (
-                                !isSelected &&
-                                options.length === 1 &&
-                                isPerUnitPackage(options[0]) &&
-                                !nextQuantities[options[0].id]
-                              ) {
-                                nextQuantities[options[0].id] = String(
-                                  options[0].items?.minimum ?? options[0].items?.minKg ?? 1
-                                );
-                              }
-                              return {
-                                ...current,
-                                station_types: nextSelectedStations,
-                                package_by_station: nextPackages,
-                                package_quantities: nextQuantities
-                              };
-                            });
-                          }}
-                        />
-                        <div className="min-w-0 flex-1">
-                          <div className="flex flex-wrap items-start justify-between gap-3">
-                            <div className="min-w-0">
-                              <p className="text-sm font-bold text-white md:text-base">{station.name}</p>
-                              <p className="mt-1 text-xs text-neutral-300 md:text-sm">
-                                {options.length} {options.length === 1 ? "package option" : "package options"} available
-                              </p>
-                            </div>
-                            <div className="shrink-0 text-left sm:text-right">
-                              <p className="text-sm font-semibold text-katana-red">{getStationPriceLabel(options, selectedPkg)}</p>
-                            </div>
-                          </div>
-                        </div>
-                      </label>
-                      {isSelected && options.length === 1 && <div className="mt-3 grid grid-cols-1 gap-3">{optionCards}</div>}
-                      {isSelected && options.length > 1 && (
-                        <details className="mt-3 w-full rounded-lg" open>
-                          <summary className="cursor-pointer text-sm font-semibold text-white">Choose an option</summary>
-                          <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">{optionCards}</div>
-                        </details>
-                      )}
-                      {isSelected && options.length === 0 && (
-                        <p className="mt-3 rounded-2xl border border-katana-border bg-katana-elevated p-4 text-sm text-neutral-300">No options are available for this station.</p>
-                      )}
-
-                          {isSelected && station.id === "sushi_station" && selectedPkg?.items?.inclusions?.length ? (
-                            <details className="mt-3 rounded-xl border border-katana-border bg-katana-elevated text-sm text-neutral-300">
-                              <summary className="cursor-pointer px-4 py-3 font-bold text-white">Sushi station products</summary>
-                              <div className="grid gap-2 border-t border-katana-border px-4 py-3 sm:grid-cols-2">
-                                {selectedPkg.items.inclusions.map((inclusion) => (
-                                  <p key={typeof inclusion === "string" ? inclusion : inclusion.name}>
-                                    {typeof inclusion === "string" ? inclusion : inclusion.name}
-                                  </p>
-                                ))}
-                              </div>
-                            </details>
-                          ) : null}
-                        </div>
-                  );
-                })}
-              </div>
+                      Add-ons
+                    </button>
+                  </div>
+                </div>
+              )}
             </section>
             </div>
             </div>
-            {mobileSummaryOpen && (
-              <button
-                type="button"
-                aria-label="Close catering details"
-                className="fixed inset-0 z-40 bg-black/55 lg:hidden"
-                onClick={() => setMobileSummaryOpen(false)}
-              />
-            )}
             <aside
               id="catering-mobile-details"
-              className={`${mobileSummaryOpen
-                ? "fixed inset-x-0 bottom-0 z-50 flex max-h-[85dvh] flex-col overflow-y-auto overscroll-contain rounded-t-2xl border border-katana-border bg-[var(--customer-surface)] p-4 pb-[max(1rem,env(safe-area-inset-bottom))] shadow-2xl"
-                : "hidden"} catering-booking-panel space-y-3 lg:space-y-0 lg:gap-3 lg:sticky lg:top-3 lg:h-[calc(100dvh-1.5rem)] lg:max-h-[calc(100dvh-1.5rem)] lg:overflow-hidden lg:overscroll-contain lg:rounded-none lg:border-0 lg:bg-transparent lg:p-0 lg:shadow-none lg:flex lg:flex-col`}
+              className="catering-booking-panel flex flex-col overflow-visible rounded-2xl border border-[var(--customer-border)] bg-[var(--customer-surface)] min-[900px]:sticky min-[900px]:top-3 min-[900px]:h-[calc(100dvh-1.5rem)] min-[900px]:overflow-hidden"
             >
-            <div className="flex items-center justify-between gap-2">
-              <h2 className="text-sm font-bold text-[var(--customer-text)]">Event and booking details</h2>
-              <span className="hidden text-right text-xs font-semibold text-neutral-300 sm:block">{form.station_types.length} stations · {money(totalPriceTotal)}</span>
-              <button type="button" className="customer-btn-secondary px-3 py-2 text-xs lg:hidden" onClick={() => setMobileSummaryOpen(false)}>Close</button>
-            </div>
-            <section className="catering-booking-details rounded-xl border border-katana-border bg-katana-elevated p-4">
-              <div className="catering-booking-event-fields space-y-3">
-                <section className="border-b border-katana-border pb-2">
-                  <div className="grid gap-2 sm:grid-cols-2">
+              <header className="shrink-0 bg-katana-red px-5 py-4 text-white">
+                <h2 className="text-lg font-bold">Event and booking details</h2>
+                <p className="mt-1 text-sm font-medium">{selectedStationCount} {selectedStationCount === 1 ? "station" : "stations"} · {money(totalPriceTotal)}</p>
+              </header>
+              <div className="catering-booking-body flex-1 space-y-5 p-4 min-[900px]:min-h-0 min-[900px]:overflow-y-auto min-[900px]:overscroll-contain">
+                <section className="catering-booking-event-fields space-y-3">
+                  <h3 className="text-sm font-bold text-[var(--customer-text)]">Event</h3>
+                  <div className="grid gap-3 sm:grid-cols-2">
                     <label className="block">
                       <span className="customer-label">Event Date *</span>
                       <input className="customer-input py-2.5" type="date" min={earliestEventDate()} value={form.event_date} onChange={(event) => setField("event_date", event.target.value)} required />
@@ -828,209 +971,297 @@ export default function CateringReservation() {
                     {form.event_type === "Others" && (
                       <label className="block sm:col-span-2">
                         <span className="customer-label">Please specify *</span>
-                        <input
-                          className="customer-input py-2.5"
-                          maxLength={60}
-                          value={form.event_type_other}
-                          onChange={(event) => setField("event_type_other", event.target.value)}
-                          required
-                        />
+                        <input className="customer-input py-2.5" maxLength={60} value={form.event_type_other} onChange={(event) => setField("event_type_other", event.target.value)} required />
                       </label>
                     )}
                   </div>
                 </section>
-              </div>
-            </section>
-            <div className="catering-booking-checkout space-y-3 lg:min-h-0 lg:flex lg:flex-col lg:space-y-0 lg:gap-3 lg:shrink lg:border-t lg:border-katana-border lg:bg-[var(--customer-surface)] lg:pt-2">
-              {isZeroQuoteOnlyReservation && (
-                <p className="rounded-lg border border-amber-300/30 bg-amber-300/10 px-3 py-2 text-sm font-semibold text-amber-100">
-                  This option needs a custom quote. Select priced packages here or send a catering inquiry.
-                </p>
-              )}
-              <div className="catering-booking-cart max-h-28 space-y-2 overflow-y-auto overscroll-contain border-b border-katana-border pb-2 text-sm text-neutral-300">
-                {form.station_types.length === 0 && <p className="text-neutral-400">Select a station to begin your order.</p>}
-                {form.station_types.map((id) => {
-                  const option = selectedPackageByStation[id];
-                  const stationName = stations.find((station) => station.id === id)?.name ?? id;
 
-                  if (!option) {
-                    return (
-                      <div key={id} className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-3">
-                        <span className="break-words">{stationName}</span>
-                        <span className="text-right text-neutral-400">Choose an option</span>
+                <section className="space-y-3 border-t border-[var(--customer-border)] pt-4">
+                  <h3 className="text-sm font-bold text-[var(--customer-text)]">Your order</h3>
+                  {selectedPackages.length === 0 ? (
+                    <p className="rounded-xl bg-[var(--customer-surface-2)] p-3 text-sm text-[var(--customer-muted)]">Select a station package to begin your order.</p>
+                  ) : (
+                    <div className="space-y-3">
+                      {selectedPackages.map((item) => {
+                        const type = getStationType(item);
+                        const isAddon = type === "tuna_add_on" || type === "salmon_add_on";
+                        const quantity = Number(form.package_quantities[item.id]) || 0;
+                        const rate = item.items?.pricePerUnit ?? item.items?.pricePerKg ?? 0;
+                        const linePrice = getPackagePrice(item, isPerUnitPackage(item) ? quantity : undefined);
+                        const title = isAddon
+                          ? `${item.name} add-on`
+                          : type === "whole_tuna"
+                            ? "Whole Tuna"
+                            : allStations.find((station) => station.id === type)?.name ?? item.name;
+                        const detail = isAddon
+                          ? `${quantity} kg × ${money(rate)}/kg`
+                          : type === "whole_tuna"
+                            ? `${quantity} kg × ${money(rate)}/kg`
+                            : item.items?.fixedPax
+                              ? `${item.items.fixedPax} pax`
+                              : item.description ?? `${item.minPax}–${item.maxPax} pax`;
+
+                        return (
+                          <div key={item.id} className="flex items-start justify-between gap-3 border-b border-[var(--customer-border)] pb-3 text-sm">
+                            <div className="min-w-0">
+                              <p className="font-semibold text-[var(--customer-text)]">{title}</p>
+                              <p className="mt-0.5 text-xs text-[var(--customer-muted)]">{detail}</p>
+                            </div>
+                            <span className="shrink-0 font-bold text-[var(--customer-text)]">{money(linePrice)}</span>
+                          </div>
+                        );
+                      })}
+                      <div className="flex items-center justify-between gap-3 text-sm">
+                        <span className="text-[var(--customer-muted)]">Headcount</span>
+                        <span className="font-bold">{headcountNumber === null ? "Not applicable" : `${headcountNumber} pax`}</span>
                       </div>
-                    );
-                  }
-
-                  const isQuantityPackage = isPerUnitPackage(option);
-                  const quantityValue = form.package_quantities[option.id] ?? "";
-                  const quantity = isQuantityPackage ? Number(quantityValue) || 0 : undefined;
-                  const needsQuantity = isQuantityPackage && !quantityValue;
-                  const lineTotal = getPackagePrice(option, quantity);
-
-                  return (
-                    <div key={id} className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-3">
-                      <span className="break-words">{option.description ?? option.name}{isQuantityPackage && quantityValue ? ` · ${quantityValue} ${option.items?.unit ?? "kg"}` : ""}</span>
-                      <span className="text-right font-semibold text-white">
-                        {option.items?.pricingType === "quote"
-                          ? "Custom quote"
-                          : needsQuantity
-                            ? "Set quantity"
-                            : money(lineTotal)}
-                      </span>
                     </div>
-                  );
-                })}
-                <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3">
-                  <span>Headcount</span>
-                  <span className="text-right">{headcountNumber === null ? "Not applicable" : `${headcountNumber} pax`}</span>
-                </div>
-              </div>
-              <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-2 border-b border-katana-border pb-2 text-sm text-neutral-300">
-                <span>Total · {
-                  isZeroQuoteOnlyReservation
-                    ? "Custom quote required"
-                    : !form.payment_plan
-                      ? "Choose payment option"
-                      : isFullPayment ? "100% of package total" : "50% of package total"
-                }</span>
-                <span className="text-right font-bold text-white">{money(totalPriceTotal)}</span>
-              </div>
-              <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-2 text-xs text-neutral-300">
-                <span>{isZeroQuoteOnlyReservation ? "Select a priced package" : "Initial payment after submission"}</span>
-                <span className="text-right font-semibold text-white">{money(paymentAmountTotal)}</span>
-              </div>
-              {!isZeroQuoteOnlyReservation && (
-                <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-2 text-xs text-neutral-300">
-                  <span>Package balance due later, before added fees</span>
-                  <span className="text-right">{money(remainingTotal)}</span>
-                </div>
-              )}
-              <section>
-                <h3 className="text-xs font-bold uppercase tracking-wide text-white">Payment option</h3>
-                {isZeroQuoteOnlyReservation ? (
-                  <p className="mt-1 text-xs text-neutral-300">Custom-quote options must be arranged through a catering inquiry.</p>
-                ) : !hasPricedOptions ? (
-                  <p className="mt-1 text-xs text-neutral-300">Select a priced option to see payment choices.</p>
-                ) : (
-                  <div className="catering-booking-payment-options mt-2 space-y-1.5" role="radiogroup" aria-label="Catering payment plan">
-                    <label className="grid cursor-pointer grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2 rounded-lg border border-katana-border bg-katana-surface px-2.5 py-2 text-xs text-white transition hover:border-katana-red/50 has-[:checked]:border-katana-red has-[:checked]:bg-katana-red/10">
-                      <input
-                        type="radio"
-                        name="catering-payment-plan"
-                        value="downpayment"
-                        checked={isDownpayment}
-                        onChange={() => setField("payment_plan", "downpayment")}
-                        className="h-4 w-4 accent-katana-red"
-                      />
-                      <span className="font-semibold">Pay 50% of package total</span>
-                      <span className="text-right font-bold">{money(Number((totalPriceTotal * 0.5).toFixed(2)))}</span>
-                    </label>
-                    <label className="grid cursor-pointer grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2 rounded-lg border border-katana-border bg-katana-surface px-2.5 py-2 text-xs text-white transition hover:border-katana-red/50 has-[:checked]:border-katana-red has-[:checked]:bg-katana-red/10">
-                      <input
-                        type="radio"
-                        name="catering-payment-plan"
-                        value="full_payment"
-                        checked={isFullPayment}
-                        onChange={() => setField("payment_plan", "full_payment")}
-                        className="h-4 w-4 accent-katana-red"
-                      />
-                      <span className="font-semibold">Pay 100% of package total</span>
-                      <span className="text-right font-bold">{money(totalPriceTotal)}</span>
-                    </label>
-                  </div>
+                  )}
+                </section>
+
+                {isZeroQuoteOnlyReservation && (
+                  <p className="rounded-lg border border-amber-300/30 bg-amber-300/10 px-3 py-2 text-sm font-semibold text-amber-100">
+                    This option needs a custom quote. Select priced packages here or send a catering inquiry.
+                  </p>
                 )}
-              </section>
-              {paymentAmountTotal > 0 && (
-                <section>
-                  <h3 className="text-xs font-bold uppercase tracking-wide text-white">Payment method</h3>
-                  <div className="mt-2 grid grid-cols-3 gap-2">
-                    {([
-                      { id: "cash", label: "Cash", icon: <Banknote className="h-4 w-4" />, disabled: false },
-                      { id: "gcash", label: "GCash", icon: <Smartphone className="h-4 w-4" />, disabled: true },
-                      { id: "bank_transfer", label: "BPI", icon: <Landmark className="h-4 w-4" />, disabled: true }
-                    ] as const).map((option) => (
-                      <button
-                        type="button"
-                        key={option.id}
-                        onClick={() => !option.disabled && setField("payment_method", option.id)}
-                        disabled={option.disabled}
-                        className={`flex min-h-[40px] flex-col items-center justify-center gap-0.5 rounded-lg border px-2 py-1 text-xs font-bold ${
-                          form.payment_method === option.id
-                            ? "border-katana-red bg-katana-red text-white"
-                            : option.disabled
-                              ? "cursor-not-allowed border-katana-border bg-katana-surface text-neutral-500 opacity-70"
-                              : "border-katana-border bg-katana-elevated text-neutral-300"
-                        }`}
-                      >
-                        <span className="flex items-center gap-1">{option.icon}{option.label}</span>
-                        {option.disabled && <span className="text-[9px] font-semibold uppercase tracking-wide text-neutral-500">Coming soon</span>}
-                      </button>
-                    ))}
+
+                <section className="border-t border-[var(--customer-border)] pt-4">
+                  <h3 className="text-sm font-bold text-[var(--customer-text)]">Payment option</h3>
+                  {isZeroQuoteOnlyReservation ? (
+                    <p className="mt-2 text-xs text-[var(--customer-muted)]">Custom-quote options must be arranged through a catering inquiry.</p>
+                  ) : !hasPricedOptions ? (
+                    <p className="mt-2 text-xs text-[var(--customer-muted)]">Select a priced option to see payment choices.</p>
+                  ) : (
+                    <div className="mt-2 grid grid-cols-2 gap-2" role="group" aria-label="Catering payment plan">
+                      {([
+                        { value: "downpayment", title: "Pay 50% now", subtitle: "Balance due later", amount: Number((totalPriceTotal * 0.5).toFixed(2)), selected: isDownpayment },
+                        { value: "full_payment", title: "Pay in full", subtitle: "No balance later", amount: totalPriceTotal, selected: isFullPayment }
+                      ] as const).map((option) => (
+                        <button
+                          key={option.value}
+                          type="button"
+                          aria-pressed={option.selected}
+                          onClick={() => setField("payment_plan", option.value)}
+                          className={`rounded-xl border p-3 text-left transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-katana-red ${
+                            option.selected ? "border-katana-red bg-katana-red/10" : "border-[var(--customer-border)] hover:border-katana-red/60"
+                          }`}
+                        >
+                          <span className="block text-sm font-bold">{option.title}</span>
+                          <span className="mt-1 block text-xs text-[var(--customer-muted)]">{option.subtitle}</span>
+                          <span className="mt-2 block text-sm font-bold text-katana-red">{money(option.amount)}</span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </section>
+
+                {paymentAmountTotal > 0 && (
+                  <section className="border-t border-[var(--customer-border)] pt-4">
+                    <h3 className="text-sm font-bold text-[var(--customer-text)]">Payment method</h3>
+                    <div className="mt-2 grid grid-cols-3 gap-2">
+                      {([
+                        { id: "cash", label: "Cash", icon: <Banknote className="h-4 w-4" />, disabled: false },
+                        { id: "gcash", label: "GCash", icon: <Smartphone className="h-4 w-4" />, disabled: true },
+                        { id: "bank_transfer", label: "BPI", icon: <Landmark className="h-4 w-4" />, disabled: true }
+                      ] as const).map((option) => (
+                        <button
+                          type="button"
+                          key={option.id}
+                          aria-pressed={form.payment_method === option.id}
+                          onClick={() => !option.disabled && setField("payment_method", option.id)}
+                          disabled={option.disabled}
+                          className={`flex min-h-[42px] flex-col items-center justify-center gap-0.5 rounded-lg border px-2 py-1 text-xs font-bold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-katana-red ${
+                            form.payment_method === option.id
+                              ? "border-katana-red bg-katana-red text-white"
+                              : option.disabled
+                                ? "cursor-not-allowed border-[var(--customer-border)] bg-[var(--customer-surface-2)] text-[var(--customer-muted)]"
+                                : "border-[var(--customer-border)] text-[var(--customer-muted)]"
+                          }`}
+                        >
+                          <span className="flex items-center gap-1">{option.icon}{option.label}</span>
+                          {option.disabled && <span className="text-[9px] uppercase tracking-wide">Coming soon</span>}
+                        </button>
+                      ))}
+                    </div>
+                  </section>
+                )}
+
+                <section className="space-y-2 border-t border-[var(--customer-border)] pt-4 text-sm">
+                  <h3 className="font-bold text-[var(--customer-text)]">Price breakdown</h3>
+                  <div className="flex justify-between gap-3 text-[var(--customer-muted)]"><span>Package subtotal</span><span>{money(packageSubtotalTotal)}</span></div>
+                  <div className="flex justify-between gap-3 text-[var(--customer-muted)]"><span>Add-ons</span><span>{money(addonSubtotalTotal)}</span></div>
+                  <div className="flex justify-between gap-3 text-[var(--customer-muted)]"><span>Initial payment after submission</span><span>{money(paymentAmountTotal)}</span></div>
+                  {!isZeroQuoteOnlyReservation && (
+                    <div className="flex justify-between gap-3 text-[var(--customer-muted)]"><span>Balance due later before added fees</span><span>{money(remainingTotal)}</span></div>
+                  )}
+                  <div className="flex justify-between gap-3 border-t border-[var(--customer-border)] pt-2 text-base font-bold">
+                    <span>Total</span><span>{money(totalPriceTotal)}</span>
                   </div>
                 </section>
-              )}
-            </div>
-            <div className="catering-booking-actions sticky bottom-0 z-10 space-y-2 bg-[var(--customer-surface)] px-2 pb-2 pt-3 shadow-[0_-8px_16px_rgba(0,0,0,0.12)] lg:static lg:flex lg:flex-col lg:space-y-0 lg:gap-2 lg:shrink-0 lg:bg-transparent lg:px-0 lg:pb-0 lg:pt-0 lg:shadow-none">
-            <label className="catering-booking-ack flex items-start gap-3 rounded-xl border border-katana-border bg-katana-surface p-4 text-sm font-semibold text-white">
-              <input
-                checked={form.acknowledged}
-                className="mt-1 h-4 w-4 accent-katana-red"
-                type="checkbox"
-                onChange={(event) => setField("acknowledged", event.target.checked)}
-              />
-              I understand this reservation is pending staff approval.
-            </label>
-
-            <button
-              type="button"
-              aria-haspopup="dialog"
-              onClick={() => {
-                const bookingDetailsError = getBookingDetailsError();
-                if (bookingDetailsError) {
-                  setNotice(bookingDetailsError);
-                  return;
-                }
-                setNotice("");
-                setMobileSummaryOpen(false);
-                setDetailsOpen(true);
-              }}
-              className="customer-btn-primary flex w-full gap-2 disabled:cursor-not-allowed disabled:opacity-70"
-              disabled={isProcessingPayment}
-            >
-              <Send className="h-4 w-4" /> {
-                isProcessingPayment
-                  ? "Submitting..."
-                  : "Review request"
-              }
-            </button>
-            <p className="text-center text-xs text-katana-muted">
-              {isZeroQuoteOnlyReservation
-                ? "Choose priced packages to continue with an online reservation."
-                : `Submit the request, then pay ${money(paymentAmountTotal)} of the package total. Staff may add a mobilization fee for the remaining balance.`}
-            </p>
-            {notice && <p className="rounded-md bg-red-50 px-3 py-2 text-sm font-medium text-katana-red" role="alert">{notice}</p>}
-            </div>
-            </aside>
-            <div className="fixed inset-x-0 bottom-0 z-30 border-t border-[color:var(--customer-border)] bg-[var(--customer-surface)]/95 px-4 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] shadow-[0_-8px_24px_rgba(0,0,0,0.12)] backdrop-blur lg:hidden">
-              <div className="flex items-center justify-between gap-3">
-                <div className="min-w-0">
-                  <p className="text-[10px] font-bold uppercase tracking-wider text-[var(--customer-muted)]">Estimated total</p>
-                  <p className="truncate text-base font-bold text-[var(--customer-text)]">{money(totalPriceTotal)}</p>
-                </div>
+              </div>
+              <footer className="catering-booking-actions shrink-0 space-y-2 border-t border-[var(--customer-border)] bg-[var(--customer-surface)] p-4">
+                <label className="catering-booking-ack flex items-start gap-3 rounded-xl border border-[var(--customer-border)] bg-[var(--customer-surface-2)] p-3 text-sm font-semibold">
+                  <input checked={form.acknowledged} className="mt-1 h-4 w-4 accent-katana-red" type="checkbox" onChange={(event) => setField("acknowledged", event.target.checked)} />
+                  I understand this reservation is pending staff approval.
+                </label>
                 <button
                   type="button"
-                  className="customer-btn-primary shrink-0 px-4 py-3 text-xs"
-                  onClick={() => setMobileSummaryOpen(true)}
-                  aria-expanded={mobileSummaryOpen}
-                  aria-controls="catering-mobile-details"
+                  aria-haspopup="dialog"
+                  onClick={() => {
+                    const bookingDetailsError = getBookingDetailsError();
+                    if (bookingDetailsError) {
+                      setNotice(bookingDetailsError);
+                      return;
+                    }
+                    setNotice("");
+                    setDetailsOpen(true);
+                  }}
+                  className="customer-btn-primary flex w-full gap-2 disabled:cursor-not-allowed disabled:opacity-50"
+                  disabled={selectedStationCount === 0 || !form.acknowledged || isProcessingPayment}
                 >
-                  Review details
+                  <Send className="h-4 w-4" /> {isProcessingPayment ? "Submitting..." : "Review request"}
                 </button>
-              </div>
-            </div>
+                <p className="text-center text-xs text-[var(--customer-muted)]">
+                  Staff may add a mobilization fee for the remaining balance.
+                </p>
+                {notice && <p className="rounded-md bg-red-50 px-3 py-2 text-sm font-medium text-katana-red" role="alert">{notice}</p>}
+              </footer>
+            </aside>
           </div>
         </form>
+        {cateringModal === "inclusions" && (
+          <CateringModal title="Sushi Station inclusions" onClose={() => setCateringModal(null)}>
+            <div className="min-h-0 overflow-y-auto p-5">
+              {(() => {
+                const inclusions = packagesByStation.sushi_station
+                  ?.find((item) => item.items?.inclusions?.length)
+                  ?.items?.inclusions ?? [];
+                return inclusions.length > 0 ? (
+                  <ul className="grid gap-3 text-sm text-[var(--customer-text)] sm:grid-cols-2">
+                    {inclusions.map((inclusion) => (
+                      <li key={typeof inclusion === "string" ? inclusion : inclusion.name} className="flex items-start gap-2">
+                        <Check className="mt-0.5 h-4 w-4 shrink-0 text-katana-red" aria-hidden="true" />
+                        <span>{typeof inclusion === "string" ? inclusion : inclusion.name}</span>
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p className="text-sm text-[var(--customer-muted)]">Inclusion details are not available for this station.</p>
+                );
+              })()}
+              <div className="mt-6 flex justify-end border-t border-[var(--customer-border)] pt-4">
+                <button type="button" className="customer-btn-primary px-6 py-2.5" onClick={() => setCateringModal(null)}>Close</button>
+              </div>
+            </div>
+          </CateringModal>
+        )}
+        {cateringModal === "addons" && (
+          <CateringModal title="Add-ons" onClose={() => setCateringModal(null)}>
+            <div className="flex min-h-0 flex-1 flex-col">
+              <div className="min-h-0 flex-1 space-y-3 overflow-y-auto p-5">
+                {!hasEligibleAddonStation ? (
+                  <p className="rounded-xl border border-katana-red/40 bg-katana-red/10 p-4 text-sm">
+                    Add-ons require a Sushi Station or Tempura Live package.
+                  </p>
+                ) : addOnStations.length === 0 ? (
+                  <p className="text-sm text-[var(--customer-muted)]">No add-ons are currently available.</p>
+                ) : addOnStations.map((station) => {
+                  const item = packagesByStation[station.id]?.[0];
+                  if (!item) return null;
+                  const selected = form.station_types.includes(station.id);
+                  const minimum = getMinimumQuantity(item);
+                  const maximum = item.items?.maximum ?? item.items?.maxKg ?? 40;
+                  const step = item.items?.step ?? item.items?.stepKg ?? 1;
+                  const quantityValue = form.package_quantities[item.id] ?? String(minimum);
+                  const quantity = Number(quantityValue) || minimum;
+                  const rate = item.items?.pricePerUnit ?? item.items?.pricePerKg ?? 0;
+
+                  return (
+                    <section
+                      key={station.id}
+                      className={`rounded-xl border p-4 transition ${selected ? "border-katana-red bg-katana-red/10" : "border-[var(--customer-border)]"}`}
+                    >
+                      <div className="flex items-start justify-between gap-4">
+                        <label className="flex min-w-0 cursor-pointer items-start gap-3">
+                          <input
+                            type="checkbox"
+                            checked={selected}
+                            onChange={(event) => toggleAddon(station.id, event.target.checked)}
+                            className="mt-1 h-4 w-4 accent-katana-red focus-visible:ring-2 focus-visible:ring-katana-red"
+                          />
+                          <span>
+                            <span className="block font-bold">{station.name === "Tuna by kilo" ? "Tuna" : "Salmon"}</span>
+                            <span className="mt-1 block text-xs text-[var(--customer-muted)]">{minimum}–{maximum} kg</span>
+                          </span>
+                        </label>
+                        <span className="shrink-0 text-sm font-bold text-katana-red">{money(rate)}/kg</span>
+                      </div>
+                      {selected && (
+                        <div className="mt-4 flex flex-wrap items-center gap-2 pl-7">
+                          <button
+                            type="button"
+                            aria-label={`Decrease ${item.name} add-on quantity`}
+                            disabled={quantity <= minimum}
+                            onClick={() => setForm((current) => ({
+                              ...current,
+                              package_quantities: { ...current.package_quantities, [item.id]: String(Math.max(minimum, quantity - step)) }
+                            }))}
+                            className="h-10 w-10 rounded-lg border border-[var(--customer-border)] text-lg font-bold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-katana-red disabled:opacity-40"
+                          >−</button>
+                          <input
+                            type="number"
+                            min={minimum}
+                            max={maximum}
+                            step={step}
+                            inputMode="numeric"
+                            aria-label={`${item.name} add-on quantity`}
+                            value={quantityValue}
+                            onChange={(event) => {
+                              const value = event.target.value;
+                              const parsed = Number(value);
+                              setForm((current) => ({
+                                ...current,
+                                package_quantities: {
+                                  ...current.package_quantities,
+                                  [item.id]: value && Number.isFinite(parsed) ? String(Math.min(parsed, maximum)) : value
+                                }
+                              }));
+                            }}
+                            onBlur={() => {
+                              if (!quantityValue) return;
+                              const bounded = Math.max(minimum, Math.min(maximum, Number(quantityValue)));
+                              setForm((current) => ({
+                                ...current,
+                                package_quantities: { ...current.package_quantities, [item.id]: String(bounded) }
+                              }));
+                            }}
+                            className="customer-input h-10 w-24 py-1 text-center"
+                          />
+                          <button
+                            type="button"
+                            aria-label={`Increase ${item.name} add-on quantity`}
+                            disabled={quantity >= maximum}
+                            onClick={() => setForm((current) => ({
+                              ...current,
+                              package_quantities: { ...current.package_quantities, [item.id]: String(Math.min(maximum, quantity + step)) }
+                            }))}
+                            className="h-10 w-10 rounded-lg border border-[var(--customer-border)] text-lg font-bold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-katana-red disabled:opacity-40"
+                          >+</button>
+                          <span className="ml-1 text-sm text-[var(--customer-muted)]">{quantity} kg · {money(quantity * rate)}</span>
+                        </div>
+                      )}
+                    </section>
+                  );
+                })}
+              </div>
+              <footer className="flex shrink-0 items-center justify-between gap-4 border-t border-[var(--customer-border)] p-5">
+                <span className="font-bold">{money(addonSubtotalTotal)}</span>
+                <button type="button" className="customer-btn-primary px-6 py-2.5" onClick={() => setCateringModal(null)}>Done</button>
+              </footer>
+            </div>
+          </CateringModal>
+        )}
         <Dialog
           open={detailsOpen}
           title="Your contact details"
@@ -1094,7 +1325,7 @@ export default function CateringReservation() {
               />
             </label>
             <div className="rounded-lg border border-[color:var(--customer-border)] bg-[var(--customer-surface-2)] p-3 text-sm text-[var(--customer-muted)]">
-              <p className="font-bold text-[var(--customer-text)]">{form.station_types.map((id) => stations.find((station) => station.id === id)?.name).filter(Boolean).join(", ") || "No station selected"}</p>
+              <p className="font-bold text-[var(--customer-text)]">{form.station_types.map((id) => allStations.find((station) => station.id === id)?.name).filter(Boolean).join(", ") || "No station selected"}</p>
               <p className="mt-1">Total: {money(totalPriceTotal)}</p>
               <p className="mt-1">
                 {isZeroQuoteOnlyReservation

@@ -288,6 +288,22 @@ test("reserved multi-table seating creates links, marks assignments, clears late
   assert.equal(freedPrimary.status, "available");
   assert.equal(freedLinked.status, "available");
   assert.equal(freedLinked.linked_to_table_id, null);
+  const billedReservation = await prisma.reservation.findUniqueOrThrow({
+    where: { id: reservation.id },
+    include: { table_assignments: { orderBy: { table_id: "asc" } } }
+  });
+  assert.equal(billedReservation.status, "completed");
+  assert.deepEqual(
+    billedReservation.table_assignments.map(({ status }) => status),
+    ["completed", "completed"]
+  );
+  const reservationsAfterBillOut = JSON.parse(await (await request(
+    "/api/pos/dining/upcoming-reservations",
+    cashier,
+    undefined,
+    "GET"
+  )).text()) as { reservations: Array<{ id: string }> };
+  assert.equal(reservationsAfterBillOut.reservations.some(({ id }) => id === reservation.id), false);
 });
 
 test("concurrent seating of reservations assigned to one table allows only one reservation to seat", async () => {

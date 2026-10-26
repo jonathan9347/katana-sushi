@@ -44,6 +44,7 @@ test("existing table order can be committed, previewed with Senior/PWD discount,
   let confirmationCount = 0;
   let checkoutBody: Record<string, unknown> | null = null;
 
+  await page.setViewportSize({ width: 1280, height: 800 });
   await signIn(page);
   await page.route("**/api/**", async (route) => {
     const url = new URL(route.request().url());
@@ -122,8 +123,8 @@ test("existing table order can be committed, previewed with Senior/PWD discount,
             tax: 0,
             total: 940,
             payment_method: "cash",
-            cash_received: 940,
-            change_due: 0,
+            cash_received: 1000,
+            change_due: 60,
             created_at: "2026-10-20T12:30:00.000Z",
             items: [{ quantity: 1, unit_price: 1000, total_price: 1000, selling_product: { name: "Sushi Set" } }]
           }
@@ -138,6 +139,11 @@ test("existing table order can be committed, previewed with Senior/PWD discount,
   await page.getByRole("button", { name: "Existing Table" }).click();
   await page.getByRole("button", { name: "Select Table 4, Occupied" }).click();
   const orderBuilder = page.getByRole("region", { name: "POS order builder" });
+  const cartPanel = page.getByTestId("pos-cart-panel");
+  await expect(cartPanel).toHaveCSS("position", "sticky");
+  const cartHeight = await cartPanel.evaluate((element) => element.getBoundingClientRect().height);
+  const viewportHeight = await page.evaluate(() => window.innerHeight);
+  expect(cartHeight).toBe(viewportHeight - 32);
   await expect(orderBuilder.getByRole("button", { name: "Checkout" })).toHaveCount(0);
   await expect(orderBuilder.getByText(/checkout/i)).toHaveCount(0);
   await page.getByRole("button", { name: /Sushi Set Sushi/ }).click();
@@ -153,11 +159,19 @@ test("existing table order can be committed, previewed with Senior/PWD discount,
 
   await orderBuilder.getByRole("button", { name: "Bill out" }).click();
   const billOut = page.getByRole("dialog", { name: "Bill out Table 4" });
+  await expect(billOut.getByLabel("Bill-out guest count")).toHaveCount(0);
+  await expect(billOut.getByLabel("Senior/PWD guest count")).toHaveCount(0);
+  const paymentMethods = billOut.getByRole("group", { name: "Bill-out payment method" });
+  await expect(paymentMethods.getByRole("button", { name: "Cash", exact: true })).toBeVisible();
+  await expect(paymentMethods.getByRole("button", { name: "GCash", exact: true })).toBeVisible();
+  await expect(paymentMethods.getByRole("button", { name: "BPI", exact: true })).toBeVisible();
+  await billOut.getByRole("button", { name: "Apply Discount" }).click();
   await billOut.getByLabel("Bill-out guest count").fill("10");
   await billOut.getByLabel("Senior/PWD guest count").fill("3");
   await expect(billOut).toContainText("Senior/PWD discount (3 guests × 20% of PHP 1,000.00 a-la-carte total)");
   await expect(billOut).toContainText("PHP 940.00");
-  await billOut.getByLabel("Bill-out cash received").fill("940");
+  await billOut.getByLabel("Bill-out cash received").fill("1000");
+  await expect(billOut).toContainText("Change: PHP 60.00");
 
   const receiptPopup = page.waitForEvent("popup");
   await billOut.getByRole("button", { name: "Confirm bill out" }).click();
@@ -168,7 +182,7 @@ test("existing table order can be committed, previewed with Senior/PWD discount,
     guestCount: 10,
     seniorPwdCount: 3,
     paymentMethod: "cash",
-    cashReceived: 940
+    cashReceived: 1000
   });
   await expect(orderBuilder.getByRole("button", { name: "Bill out" })).toHaveCount(0);
 });
@@ -177,10 +191,13 @@ test("Unlimited cart mode does not start a timer until staff starts the existing
   let unlimitedSession: Record<string, unknown> | null = null;
   let startRequestBody: Record<string, unknown> | null = null;
   let extensionRequests = 0;
+  let endRequests = 0;
   page.on("dialog", async (dialog) => {
     if (dialog.type() === "confirm") {
-      expect(dialog.message()).toContain("30 minutes");
-      expect(dialog.message()).toContain("There is no fee");
+      if (dialog.message().startsWith("Extend this Unlimited session")) {
+        expect(dialog.message()).toContain("30 minutes");
+        expect(dialog.message()).toContain("There is no fee");
+      }
     }
     await dialog.accept();
   });
@@ -238,6 +255,12 @@ test("Unlimited cart mode does not start a timer until staff starts the existing
       await route.fulfill({ json: { extension: { minutes: 30 }, session: unlimitedSession } });
       return;
     }
+    if (url.pathname === "/api/pos/dining/unlimited-sessions/unlimited-1/end" && route.request().method() === "POST") {
+      endRequests += 1;
+      if (unlimitedSession) unlimitedSession = { ...unlimitedSession, status: "completed" };
+      await route.fulfill({ json: { session: unlimitedSession } });
+      return;
+    }
     await route.fulfill({ json: {} });
   });
 
@@ -245,6 +268,9 @@ test("Unlimited cart mode does not start a timer until staff starts the existing
   await page.getByRole("button", { name: "Existing Table" }).click();
   await page.getByRole("button", { name: "Select Table 4, Occupied" }).click();
   await page.getByRole("button", { name: "Unlimited", exact: true }).click();
+  const guestCountDialog = page.getByRole("dialog", { name: "Unlimited guest count" });
+  await guestCountDialog.getByLabel("Unlimited guest count").fill("3");
+  await guestCountDialog.getByRole("button", { name: "Continue" }).click();
   await page.getByLabel("Unlimited headcount").fill("3");
   await expect(page.getByText("Unlimited package: 3 × PHP 1,500.00 = PHP 4,500.00")).toBeVisible();
   await expect(page.getByRole("button", { name: "Start Unlimited Session" })).toBeVisible();
@@ -255,9 +281,22 @@ test("Unlimited cart mode does not start a timer until staff starts the existing
   await expect(page.getByText("Time Remaining")).toBeVisible();
   await expect(page.getByText("Time Remaining")).toHaveCount(1);
   await expect(page.getByText("Timer starts after first round")).toHaveCount(0);
+
+  await page.getByRole("button", { name: "New Customer" }).click();
+  await expect(page.getByRole("dialog", { name: "New Customer" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "End Session", exact: true })).toHaveCount(0);
+  await expect(page.getByText("Time Remaining")).toHaveCount(0);
+  await page.getByRole("button", { name: "Close dialog" }).click();
+  await page.getByRole("button", { name: "Existing Table" }).click();
+  await page.getByRole("button", { name: "Select Table 4, Occupied" }).click();
+  await expect(page.getByRole("button", { name: "End Session", exact: true })).toBeVisible();
+
   await page.getByRole("button", { name: "Extend Session" }).click();
   await expect.poll(() => extensionRequests).toBe(1);
   await expect(page.getByText("Adds 30 minutes · no fee")).toBeVisible();
+  await page.getByRole("button", { name: "End Session", exact: true }).click();
+  await expect.poll(() => endRequests).toBe(1);
+  await expect(page.getByRole("button", { name: "End Session", exact: true })).toHaveCount(0);
 });
 
 test("one table cart keeps regular a-la-carte and Unlimited items together with separate pricing", async ({ page }) => {
@@ -346,6 +385,9 @@ test("one table cart keeps regular a-la-carte and Unlimited items together with 
   await builder.getByRole("button", { name: /A la carte Maki/ }).click();
   await expect(builder).toContainText("A la carte · PHP 250.00");
   await page.getByRole("button", { name: "Unlimited", exact: true }).click();
+  const guestCountDialog = page.getByRole("dialog", { name: "Unlimited guest count" });
+  await guestCountDialog.getByLabel("Unlimited guest count").fill("3");
+  await guestCountDialog.getByRole("button", { name: "Continue" }).click();
   await page.getByLabel("Unlimited headcount").fill("3");
   await builder.getByRole("button", { name: /Unlimited Roll/ }).click();
 

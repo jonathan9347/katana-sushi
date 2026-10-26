@@ -94,14 +94,30 @@ const cateringPackages = [
     pricePerPerson: 0,
     minPax: 50,
     maxPax: 60,
-    items: { pricingType: "flat", pricingModel: "tier", flatPrice: 6000, galleryImages: ["/sushi-1.jpg", "/sushi-2.jpg", "/sushi-3.jpg"] },
+    items: {
+      pricingType: "flat",
+      pricingModel: "tier",
+      flatPrice: 6000,
+      inclusions: [
+        "California Maki",
+        "Mango Roll",
+        "Volcano Roll",
+        "Tori Teriyaki Roll",
+        "Salmon Cheese Maki",
+        "Futo California",
+        "Tamago Sushi",
+        "Kani Sushi",
+        "Salmon Nigiri"
+      ],
+      galleryImages: ["/sushi-1.jpg", "/sushi-2.jpg", "/sushi-3.jpg"]
+    },
     imageUrl: "/sushi-1.jpg"
   },
   {
     id: "pkg_sashimi_tuna_test",
     stationType: "tuna_add_on",
     name: "Tuna",
-    description: "Tuna add-on, 2-40 kg at PHP 1,200/kg.",
+    description: "Tuna add-on, 1-40 kg at PHP 1,200/kg.",
     pricePerPerson: 0,
     minPax: 0,
     maxPax: 0,
@@ -111,13 +127,13 @@ const cateringPackages = [
       pricePerKg: 1200,
       pricePerUnit: 1200,
       unit: "kg",
-      minimum: 2,
-      minKg: 2,
+      minimum: 1,
+      minKg: 1,
       step: 1,
       stepKg: 1,
       maximum: 40,
       maxKg: 40,
-      minPrice: 2400,
+      minPrice: 1200,
       galleryImages: ["/tuna-1.jpg", "/tuna-2.jpg", "/tuna-3.jpg"]
     },
     imageUrl: "/tuna-1.jpg"
@@ -152,7 +168,7 @@ const cateringPackages = [
     id: "pkg_sashimi_salmon_test",
     stationType: "salmon_add_on",
     name: "Salmon",
-    description: "Salmon",
+    description: "Salmon add-on, 1-40 kg at PHP 2,400/kg.",
     pricePerPerson: 0,
     minPax: 0,
     maxPax: 0,
@@ -162,13 +178,13 @@ const cateringPackages = [
       pricePerKg: 2400,
       pricePerUnit: 2400,
       unit: "kg",
-      minimum: 2,
-      minKg: 2,
+      minimum: 1,
+      minKg: 1,
       step: 1,
       stepKg: 1,
       maximum: 40,
       maxKg: 40,
-      minPrice: 4800,
+      minPrice: 2400,
       galleryImages: ["/salmon-1.jpg", "/salmon-2.jpg", "/salmon-3.jpg"]
     },
     imageUrl: "/salmon-1.jpg"
@@ -318,31 +334,31 @@ test("table booking route uses the minimal Back control instead of the Home head
   await expect(page.getByTestId("desktop-customer-nav")).toHaveCount(0);
 });
 
-test("Catering event and booking details stay open at the viewport edge", async ({ page }) => {
+test("Catering booking summary stays full-height and keeps actions pinned at desktop widths", async ({ page }) => {
   await mockApi(page);
   await page.setViewportSize(viewportSizes[0]);
   await page.goto("/catering/book");
   const panel = page.locator("#catering-mobile-details");
   const back = page.getByRole("link", { name: "Back to home" });
-  const details = page.locator(".catering-booking-details");
-  const eventFields = panel.locator(".catering-booking-event-fields");
+  const body = panel.locator(".catering-booking-body");
+  const footer = panel.locator(".catering-booking-actions");
   const action = panel.getByRole("button", { name: "Review request" });
 
   await expect(panel).toBeVisible();
   await expect(back).toHaveAttribute("href", "/");
   await expect(page.locator('nav a[href="/"]')).toHaveCount(0);
   await expect(panel.getByRole("heading", { name: "Event and booking details" })).toBeVisible();
-  await expect(panel.getByText("Event details", { exact: true })).toHaveCount(0);
-  await expect(page.locator("details.catering-booking-details")).toHaveCount(0);
+  await expect(panel.getByText("Your order", { exact: true })).toBeVisible();
+  await expect(page.getByText("Select a station package to begin your order.")).toBeVisible();
 
   for (const viewport of viewportSizes) {
     await page.setViewportSize(viewport);
     await expectPanelBounds(page, "#catering-mobile-details", viewport.height);
     await expect(action).toBeInViewport();
-    await expect(details).toBeVisible();
-    await expect(eventFields.getByLabel("Event Date *")).toBeVisible();
-    await expect(eventFields.getByLabel("Event Time *")).toBeVisible();
-    await expect(action).toBeInViewport();
+    await expect(body.getByLabel("Event Date *")).toBeVisible();
+    await expect(body.getByLabel("Event Time *")).toBeVisible();
+    await expect(footer).toBeVisible();
+    await expect.poll(() => footer.evaluate((element) => element.getBoundingClientRect().bottom)).toBeLessThanOrEqual(viewport.height - 11);
   }
 
   await page.locator("main form > div > div").first().evaluate((left) => {
@@ -350,96 +366,146 @@ test("Catering event and booking details stay open at the viewport edge", async 
   });
   await page.evaluate(() => window.scrollTo(0, 200));
   await expect.poll(() => panel.evaluate((element) => Math.round(element.getBoundingClientRect().top))).toBe(12);
+  await page.setViewportSize({ width: 800, height: 900 });
+  await expect.poll(() => panel.evaluate((element) => getComputedStyle(element).position)).toBe("static");
 });
 
-test("Catering booking prices tuna add-ons from their quantity and keeps Whole Tuna standalone", async ({ page }) => {
+test("Catering booking selects package cards and prices add-ons from their quantities", async ({ page }) => {
   await mockApi(page, cateringPackages);
   await page.setViewportSize({ width: 1366, height: 900 });
   await page.goto("/catering/book");
 
-  await expect(page.getByText("From ₱2,400.00", { exact: true })).toBeVisible();
-  await page.getByRole("checkbox").nth(1).check();
-  await page.getByRole("button", { name: /Tuna add-on/ }).click();
+  const sushiStation = page.getByRole("button", { name: /50–60 pax/ });
+  const tempuraStation = page.locator('button[aria-label^="Live tempura station"]');
+  await sushiStation.click();
+  await expect(sushiStation).toHaveAttribute("aria-pressed", "true");
+  await expect(page.locator("#catering-mobile-details")).toContainText("1 station");
+  await sushiStation.click();
+  await expect(sushiStation).toHaveAttribute("aria-pressed", "false");
+  await expect(page.getByRole("button", { name: "Add-ons", exact: true })).toBeDisabled();
+  await sushiStation.click();
+  await page.getByRole("button", { name: "Add-ons", exact: true }).click();
+  const addonsDialog = page.getByRole("dialog", { name: "Add-ons" });
+  await addonsDialog.getByRole("checkbox", { name: "Tuna" }).check();
 
-  const quantity = page.locator('input[type="number"]').first();
+  const quantity = addonsDialog.getByRole("spinbutton", { name: "Tuna add-on quantity" });
   await expect(quantity).toHaveValue("2");
   await expect(quantity).toHaveAttribute("min", "2");
-  await expect(page.locator("#catering-mobile-details")).toContainText("₱2,400.00");
-  await expect(page.getByRole("button", { name: "Decrease Tuna quantity" })).toBeDisabled();
-  await expect(quantity).toHaveValue("2");
-  await page.getByRole("button", { name: "Increase Tuna quantity" }).click();
+  await expect(addonsDialog).toContainText("₱2,400.00");
+  await expect(addonsDialog.getByRole("button", { name: "Decrease Tuna add-on quantity" })).toBeDisabled();
+  await addonsDialog.getByRole("button", { name: "Increase Tuna add-on quantity" }).click();
   await expect(quantity).toHaveValue("3");
-  await expect(page.locator("#catering-mobile-details")).toContainText("₱3,600.00");
+  await addonsDialog.getByRole("button", { name: "Done" }).click();
 
-  await page.getByRole("checkbox").nth(0).check();
-  await page.getByRole("checkbox").nth(4).check();
+  await tempuraStation.click();
   const summary = page.locator("#catering-mobile-details");
   await expect(summary).toContainText("3 kg");
   await expect(summary).toContainText("₱3,600.00");
-  await expect(summary).toContainText("Live tempura station");
+  await expect(summary).toContainText("Tempura Live");
   await expect(summary).toContainText("₱15,600.00");
-  const paymentChoices = summary.getByRole("radiogroup", { name: "Catering payment plan" }).locator("label");
-  await expect(paymentChoices.nth(0)).toContainText("Pay 50% of package total");
-  await expect(paymentChoices.nth(0)).toContainText("₱7,800.00");
-  await expect(paymentChoices.nth(1)).toContainText("Pay 100% of package total");
-  await expect(paymentChoices.nth(1)).toContainText("₱15,600.00");
+  await expect(summary.getByRole("button", { name: /Pay 50% now/ })).toContainText("₱7,800.00");
+  await expect(summary.getByRole("button", { name: /Pay in full/ })).toContainText("₱15,600.00");
 
-  await quantity.fill("41");
-  await expect(quantity).toHaveValue("40");
-  await expect(page.locator("#catering-mobile-details")).toContainText("₱48,000.00");
-  await expect(page.getByRole("button", { name: "Increase Tuna quantity" })).toBeDisabled();
+  await page.getByRole("button", { name: "Add-ons", exact: true }).click();
+  const reopenedAddons = page.getByRole("dialog", { name: "Add-ons" });
+  const reopenedQuantity = reopenedAddons.getByRole("spinbutton", { name: "Tuna add-on quantity" });
+  await reopenedQuantity.fill("41");
+  await reopenedQuantity.blur();
+  await expect(reopenedQuantity).toHaveValue("40");
+  await expect(reopenedAddons).toContainText("₱48,000.00");
+  await expect(reopenedAddons.getByRole("button", { name: "Increase Tuna add-on quantity" })).toBeDisabled();
 
-  await expect(page.getByText("Fixed package - 50 pax - ₱6,000.00", { exact: true }).first()).toBeVisible();
-  await expect(page.locator("#catering-mobile-details")).toContainText("Live tempura station");
-  await page.getByRole("checkbox").nth(1).uncheck();
-  await expect(page.getByText("Choose an option", { exact: true })).toHaveCount(0);
+  await expect(tempuraStation).toBeVisible();
+  await expect(page.locator("#catering-mobile-details")).toContainText("Tempura Live");
+  await reopenedAddons.getByRole("button", { name: "Done" }).click();
+  await page.getByRole("button", { name: "Add-ons", exact: true }).click();
+  await page.getByRole("dialog", { name: "Add-ons" }).getByRole("checkbox", { name: "Tuna" }).uncheck();
+  await page.getByRole("dialog", { name: "Add-ons" }).getByRole("button", { name: "Done" }).click();
+  await expect(page.locator("#catering-mobile-details")).not.toContainText("Tuna add-on");
+});
+
+test("Catering inclusions modal displays the loaded Sushi Station products", async ({ page }) => {
+  await mockApi(page, cateringPackages);
+  await page.goto("/catering/book");
+
+  await page.getByRole("button", { name: "View inclusions" }).click();
+
+  const dialog = page.getByRole("dialog", { name: "Sushi Station inclusions" });
+  const inclusions = dialog.locator("li");
+  await expect(inclusions).toHaveCount(9);
+  await expect(inclusions).toHaveText([
+    "California Maki",
+    "Mango Roll",
+    "Volcano Roll",
+    "Tori Teriyaki Roll",
+    "Salmon Cheese Maki",
+    "Futo California",
+    "Tamago Sushi",
+    "Kani Sushi",
+    "Salmon Nigiri"
+  ]);
+  await expect(dialog).toHaveAttribute("aria-modal", "true");
+  const closeIcon = dialog.getByRole("button", { name: "Close dialog" });
+  const closeButton = dialog.getByRole("button", { name: "Close", exact: true });
+  await closeButton.focus();
+  await page.keyboard.press("Tab");
+  await expect(closeIcon).toBeFocused();
+  await closeIcon.focus();
+  await page.keyboard.press("Shift+Tab");
+  await expect(closeButton).toBeFocused();
+  await page.keyboard.press("Escape");
+  await expect(dialog).toHaveCount(0);
+
+  await page.getByRole("button", { name: "View inclusions" }).click();
+  await page.getByRole("dialog", { name: "Sushi Station inclusions" }).getByRole("button", { name: "Close dialog" }).click();
+  await expect(dialog).toHaveCount(0);
+
+  await page.getByRole("button", { name: "View inclusions" }).click();
+  const dialogOverlay = page.getByRole("dialog", { name: "Sushi Station inclusions" }).locator("xpath=..");
+  await dialogOverlay.click({ position: { x: 8, y: 8 } });
+  await expect(dialog).toHaveCount(0);
 });
 
 test("Catering booking keeps Sashimi Bar and shows Tuna and Salmon as separate add-ons", async ({ page }) => {
   const packagesWithSashimiBar = [
     ...cateringPackages.map((item) => (
-      item.id === "pkg_sashimi_tuna_test" || item.id === "pkg_sashimi_salmon_test"
-        ? { ...item, stationType: "Sashimi Bar" }
+      item.id === "pkg_sashimi_tuna_test" || item.id === "pkg_sashimi_salmon_test" || item.id === "pkg_whole_tuna_test"
+        ? {
+          ...item,
+          stationType: "Sashimi Bar",
+          items: item.id === "pkg_sashimi_tuna_test" || item.id === "pkg_sashimi_salmon_test"
+            ? { ...item.items, minimum: 2, minKg: 2, bookingRole: "add_on" }
+            : item.items
+        }
         : item
-    )),
-    {
-      id: "pkg_sashimi_bar_test",
-      stationType: "sashimi_bar",
-      name: "Sashimi Bar",
-      description: "Sashimi service station",
-      pricePerPerson: 0,
-      minPax: 50,
-      maxPax: 60,
-      items: { pricingType: "flat" as const, pricingModel: "tier" as const, flatPrice: 6000 },
-      imageUrl: null
-    }
+    ))
   ];
   await mockApi(page, packagesWithSashimiBar);
   await page.goto("/catering/book");
 
-  const sashimiStation = page.locator("label").filter({ hasText: "Sashimi Bar" }).getByRole("checkbox");
-  const tunaStation = page.locator("label").filter({ hasText: "Tuna Add-on" }).getByRole("checkbox");
-  const salmonStation = page.locator("label").filter({ hasText: "Salmon Add-on" }).getByRole("checkbox");
-  await expect(sashimiStation).toBeVisible();
-  await expect(tunaStation).toBeVisible();
-  await expect(salmonStation).toBeVisible();
-  await expect(sashimiStation).toHaveCount(1);
-  await expect(tunaStation).toHaveCount(1);
-  await expect(salmonStation).toHaveCount(1);
-
-  await sashimiStation.check();
-  await tunaStation.check();
-  await salmonStation.check();
-  await expect(page.locator("#catering-mobile-details").getByText("Sashimi service station", { exact: true })).toBeVisible();
-  await expect(page.getByText("Exact Tuna quantity (kg) *")).toBeVisible();
-  await expect(page.getByText("Exact Salmon quantity (kg) *")).toBeVisible();
+  const wholeTunaOption = page.getByRole("button", { name: /Whole Tuna, 20-40 kg/ });
+  await expect(wholeTunaOption).toBeVisible();
+  await expect(page.getByText("Sashimi service station", { exact: true })).toHaveCount(0);
+  await expect(wholeTunaOption).toContainText("20-40 kg");
+  await page.getByRole("button", { name: /50–60 pax/ }).click();
+  await page.getByRole("button", { name: "Add-ons", exact: true }).click();
+  const dialog = page.getByRole("dialog", { name: "Add-ons" });
+  await dialog.getByRole("checkbox", { name: "Tuna" }).check();
+  await dialog.getByRole("checkbox", { name: "Salmon" }).check();
+  await expect(dialog.getByRole("spinbutton", { name: "Tuna add-on quantity" })).toHaveAttribute("min", "2");
+  await expect(dialog.getByRole("spinbutton", { name: "Tuna add-on quantity" })).toHaveValue("2");
+  await expect(dialog.getByRole("spinbutton", { name: "Salmon add-on quantity" })).toHaveAttribute("max", "40");
+  await expect(dialog.getByRole("spinbutton", { name: "Salmon add-on quantity" })).toHaveValue("2");
+  await dialog.getByRole("spinbutton", { name: "Salmon add-on quantity" }).fill("1");
+  await dialog.getByRole("spinbutton", { name: "Salmon add-on quantity" }).blur();
+  await expect(dialog.getByRole("spinbutton", { name: "Salmon add-on quantity" })).toHaveValue("2");
 });
 
 test("Whole Tuna is priced from 20 kg and cannot be mixed with station packages", async ({ page }) => {
   await mockApi(page, cateringPackages);
   await page.goto("/catering/book");
 
-  await page.getByRole("checkbox").nth(2).check();
+  await page.getByRole("button", { name: /Whole Tuna, 20-40 kg/ }).click();
   const quantity = page.locator('input[type="number"]').first();
   await expect(quantity).toHaveValue("20");
   await expect(page.locator("#catering-mobile-details")).toContainText("₱24,000.00");
@@ -447,64 +513,52 @@ test("Whole Tuna is priced from 20 kg and cannot be mixed with station packages"
 
   await page.getByLabel("Event Time *").fill("18:00");
   await page.getByLabel("Type of Event *").selectOption("Wedding");
-  await page.getByRole("checkbox").nth(0).check();
+  await page.getByRole("button", { name: /50–60 pax/ }).click();
+  await page.getByRole("checkbox", { name: /understand this reservation is pending staff approval/i }).check();
   await page.locator("#catering-mobile-details").getByRole("button", { name: "Review request" }).click();
   await expect(page.getByRole("alert")).toContainText("Whole Tuna can only be booked by itself.");
 });
 
-test("Catering requires event details, an order, payment choice, and acknowledgement before contact details", async ({ page }) => {
+test("Catering keeps required event, payment, and approval checks before contact details", async ({ page }) => {
   await mockApi(page, cateringPackages);
   await page.setViewportSize({ width: 1366, height: 900 });
   await page.goto("/catering/book");
 
   const panel = page.locator("#catering-mobile-details");
   const confirm = panel.getByRole("button", { name: "Review request" });
-  await confirm.click();
-  await expect(page.getByRole("alert")).toContainText("Choose a future event date and time.");
-  await expect(page.getByRole("dialog")).toHaveCount(0);
+  await expect(confirm).toBeDisabled();
+  await expect(page.getByRole("button", { name: "Add-ons", exact: true })).toBeDisabled();
+  await page.getByRole("button", { name: /50–60 pax/ }).click();
+  await expect(confirm).toBeDisabled();
 
-  await page.getByLabel("Event Date *").fill("2099-01-01");
   await page.getByLabel("Event Time *").fill("18:00");
   await page.getByLabel("Type of Event *").selectOption("Wedding");
+  await page.getByLabel("Event Date *").fill("2099-01-01");
 
-  await confirm.click();
-  await expect(page.getByRole("alert")).toContainText("Choose at least one catering station.");
-  await expect(page.getByRole("dialog")).toHaveCount(0);
-
-  await page.getByRole("checkbox").nth(1).check();
-
-  await confirm.click();
-  await expect(page.getByRole("alert")).toContainText("Tuna and Salmon add-ons must be added to a station package.");
-  await expect(page.getByRole("dialog")).toHaveCount(0);
-
-  await page.getByRole("button", { name: /Tuna add-on/ }).click();
-  await confirm.click();
-  await expect(page.getByRole("alert")).toContainText("Tuna and Salmon add-ons must be added to a station package.");
-  await page.getByRole("checkbox").nth(0).check();
+  await expect(confirm).toBeDisabled();
+  await page.getByRole("checkbox", { name: /understand this reservation is pending staff approval/i }).check();
+  await expect(confirm).toBeEnabled();
   await confirm.click();
   await expect(page.getByRole("alert")).toContainText("Choose a payment option.");
   await expect(page.getByRole("dialog")).toHaveCount(0);
 
-  await panel.getByRole("radio", { name: /Pay 50% of package total/ }).check();
-  await confirm.click();
-  await expect(page.getByRole("alert")).toContainText("Please confirm that you understand staff approval is required.");
-  await expect(page.getByRole("dialog")).toHaveCount(0);
-
-  await page.getByRole("checkbox", { name: /understand this reservation is pending staff approval/i }).check();
+  await panel.getByRole("button", { name: /Pay 50% now/ }).click();
   await confirm.click();
   await expect(page.getByRole("dialog", { name: "Your contact details" })).toBeVisible();
 });
 
-test("Catering right panel keeps event details and actions within the viewport", async ({ page }) => {
+test("Catering summary panel keeps its body scrollable and footer visible", async ({ page }) => {
   await mockApi(page, cateringPackages);
   await page.goto("/catering/book");
 
-  await page.getByRole("checkbox").nth(1).check();
-  await page.getByRole("button", { name: /Tuna add-on/ }).click();
-  await page.getByRole("checkbox").nth(0).check();
-  await page.getByRole("checkbox").nth(4).check();
+  await page.getByRole("button", { name: /50–60 pax/ }).click();
+  await page.locator('button[aria-label^="Live tempura station"]').click();
+  await page.getByRole("button", { name: "Add-ons", exact: true }).click();
+  const addons = page.getByRole("dialog", { name: "Add-ons" });
+  await addons.getByRole("checkbox", { name: "Tuna" }).check();
+  await addons.getByRole("button", { name: "Done" }).click();
   const panel = page.locator("#catering-mobile-details");
-  await panel.getByRole("radio", { name: /Pay 50% of package total/ }).check();
+  await panel.getByRole("button", { name: /Pay 50% now/ }).click();
 
   for (const viewport of viewportSizes) {
     await page.setViewportSize(viewport);
@@ -512,29 +566,17 @@ test("Catering right panel keeps event details and actions within the viewport",
     await expect(panel.getByRole("button", { name: "Review request" })).toBeInViewport();
 
     const fit = await panel.evaluate((element) => {
-      const bookingDetails = element.querySelector(".catering-booking-details");
-      const eventFields = element.querySelector(".catering-booking-event-fields");
-      const checkout = element.querySelector(".catering-booking-checkout");
-      const rect = (node: Element | null) => {
-        if (!node) return null;
-        const bounds = node.getBoundingClientRect();
-        return { top: Math.round(bounds.top), bottom: Math.round(bounds.bottom) };
-      };
+      const body = element.querySelector(".catering-booking-body");
+      const footer = element.querySelector(".catering-booking-actions");
       return {
-        panelFits: element.scrollHeight <= element.clientHeight,
-        bookingDetailsFit: bookingDetails ? bookingDetails.scrollHeight <= bookingDetails.clientHeight : false,
-        eventFieldsFits: eventFields ? eventFields.scrollHeight <= eventFields.clientHeight : false,
-        checkoutFits: checkout ? checkout.scrollHeight <= checkout.clientHeight : false,
-        bookingDetailsBounds: rect(bookingDetails),
-        eventFieldsBounds: rect(eventFields)
+        panelHeight: Math.round(element.getBoundingClientRect().height),
+        bodyScrollable: body ? body.scrollHeight >= body.clientHeight : false,
+        footerInside: Boolean(body && footer && footer.getBoundingClientRect().top >= body.getBoundingClientRect().bottom - 2)
       };
     });
 
-    expect(fit.panelFits, JSON.stringify({ viewport, fit })).toBeTruthy();
-    expect(fit.bookingDetailsFit, JSON.stringify({ viewport, fit })).toBeTruthy();
-    expect(fit.eventFieldsFits, JSON.stringify({ viewport, fit })).toBeTruthy();
-    expect(fit.checkoutFits, JSON.stringify({ viewport, fit })).toBeTruthy();
-    expect(fit.eventFieldsBounds?.bottom).toBeLessThanOrEqual(fit.bookingDetailsBounds?.bottom ?? 0);
+    expect(fit.panelHeight, JSON.stringify({ viewport, fit })).toBe(viewport.height - 24);
+    expect(fit.footerInside, JSON.stringify({ viewport, fit })).toBeTruthy();
   }
 });
 
@@ -544,8 +586,9 @@ test("Catering inquiry shows per-kilogram add-ons and the fixed Tempura package"
 
   await page.getByRole("button", { name: /Tuna Add-on/ }).click();
   const quantity = page.locator('input[type="number"]').first();
-  await expect(quantity).toHaveValue("2");
-  await expect(quantity).toHaveAttribute("min", "2");
+  await expect(quantity).toHaveValue("1");
+  await expect(quantity).toHaveAttribute("min", "1");
+  await quantity.fill("2");
   await expect(page.getByText("Tuna - 2 kg - PHP 2,400")).toBeVisible();
   await quantity.fill("41");
   await expect(quantity).toHaveValue("40");
@@ -645,7 +688,7 @@ test("Reserve hub offers table and catering booking, and Pickup navigation opens
 
   await page.getByRole("link", { name: /Book catering/ }).click();
   await expect(page).toHaveURL(/\/catering\/book$/);
-  await expect(page.getByRole("heading", { name: "Choose your stations" })).toBeVisible();
+  await expect(page.getByText("Pick a package size under each station, then add Tuna or Salmon by the kilo if you like.")).toBeVisible();
 
   await page.goto("/");
   await customerNav.getByRole("link", { name: "Pickup", exact: true }).click();

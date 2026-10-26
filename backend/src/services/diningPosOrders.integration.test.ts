@@ -401,6 +401,44 @@ test("read-only committed-order lookup returns saved snapshots without changing 
   assert.equal(missingResponse.status, 404);
 });
 
+test("POS product availability subtracts active reservations from sellable batch stock", async () => {
+  const fixture = await createFixture({ stock: 20 });
+  assert.ok(fixture.materialId);
+  assert.ok(fixture.sessionId);
+  await prisma.materialBatch.updateMany({
+    where: { raw_material_id: fixture.materialId },
+    data: { remaining_quantity: 8n }
+  });
+  const reservedOrder = await prisma.diningOrder.create({
+    data: {
+      order_number: `POS-AVAIL-${testRunKey}-${fixtureSequence}`,
+      idempotency_key: `pos-availability-${testRunKey}-${fixtureSequence}`,
+      dining_session_id: fixture.sessionId,
+      order_type: "ala_carte",
+      status: "reserved",
+      created_by: cashier.id
+    }
+  });
+  await prisma.dineInIngredientLock.create({
+    data: {
+      order_id: reservedOrder.id,
+      raw_material_id: fixture.materialId,
+      reserved_quantity: 4n,
+      unit: "portion"
+    }
+  });
+
+  const response = await request("/api/products", undefined, "GET");
+  assert.equal(response.status, 200, await response.text());
+  const payload = await response.json() as {
+    products: Array<{ id: string; is_available: boolean; available_stock: number }>;
+  };
+  const product = payload.products.find(({ id }) => id === fixture.productId);
+  assert.ok(product);
+  assert.equal(product.is_available, true);
+  assert.equal(product.available_stock, 2);
+});
+
 test("concurrent duplicate commits and retries replay one order without a second stock deduction", async () => {
   const fixture = await createFixture();
   const body = orderBody(fixture, "step44-idempotent-concurrent-01");
@@ -1023,6 +1061,8 @@ test("atomic reservation confirmation seats every assigned table and retries wit
   const fixture = await createFixture();
   const primaryTable = await createAvailableTable();
   const linkedTable = await createAvailableTable();
+  const manuallySelectedPrimary = await createAvailableTable();
+  const manuallySelectedLinked = await createAvailableTable();
   const date = new Intl.DateTimeFormat("en-CA", {
     timeZone: "Asia/Manila",
     year: "numeric",
@@ -1049,7 +1089,11 @@ test("atomic reservation confirmation seats every assigned table and retries wit
   });
   const body = {
     ...orderBody(fixture, "atomic-reservation-retry-00001"),
-    selection: { type: "reservation" as const, reservationId: reservation.id }
+    selection: {
+      type: "reservation" as const,
+      reservationId: reservation.id,
+      tableIds: [manuallySelectedPrimary.id, manuallySelectedLinked.id]
+    }
   };
 
   const firstResponse = await request("/api/pos/dining/confirm-order", body);
@@ -1063,12 +1107,27 @@ test("atomic reservation confirmation seats every assigned table and retries wit
     include: { table_assignments: { orderBy: { table: { table_number: "asc" } } } }
   });
   assert.equal(seatedReservation.status, "seated");
-  assert.deepEqual(seatedReservation.table_assignments.map(({ status }) => status), ["seated", "seated"]);
-  assert.equal(first.order.table_number_snapshot, primaryTable.table_number);
-  assert.equal((await prisma.table.findUniqueOrThrow({ where: { id: primaryTable.id } })).status, "occupied");
-  const linked = await prisma.table.findUniqueOrThrow({ where: { id: linkedTable.id } });
+  assert.deepEqual(
+    seatedReservation.table_assignments
+      .filter(({ status }) => status === "seated")
+      .map(({ table_id }) => table_id),
+    [manuallySelectedPrimary.id, manuallySelectedLinked.id].sort()
+  );
+  assert.equal(
+    seatedReservation.table_assignments
+      .find(({ table_id }) => table_id === primaryTable.id)?.status,
+    "released"
+  );
+  assert.equal(
+    seatedReservation.table_assignments
+      .find(({ table_id }) => table_id === linkedTable.id)?.status,
+    "released"
+  );
+  assert.equal(first.order.table_number_snapshot, manuallySelectedPrimary.table_number);
+  assert.equal((await prisma.table.findUniqueOrThrow({ where: { id: manuallySelectedPrimary.id } })).status, "occupied");
+  const linked = await prisma.table.findUniqueOrThrow({ where: { id: manuallySelectedLinked.id } });
   assert.equal(linked.status, "unavailable");
-  assert.equal(linked.linked_to_table_id, primaryTable.id);
+  assert.equal(linked.linked_to_table_id, manuallySelectedPrimary.id);
 
   const retryResponse = await request("/api/pos/dining/confirm-order", body);
   const retryText = await retryResponse.text();

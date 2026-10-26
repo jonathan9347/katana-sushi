@@ -25,6 +25,7 @@ import {
   getCateringInitialPayment,
   getCateringQuantityRules,
   getCateringSelectionError,
+  normalizeCateringStationType,
   isCateringQuantityValid
 } from "./services/cateringBooking.service";
 import {
@@ -1454,7 +1455,6 @@ async function createCateringIngredientLocks(
   tx: PrismaTx,
   reservationId: string,
   packageIds: string[],
-  headcount: number,
   packageQuantities: Record<string, number>,
   userId?: string
 ) {
@@ -1469,16 +1469,20 @@ async function createCateringIngredientLocks(
   if (packages.length !== packageIds.length) {
     throw new InventoryError("A selected catering package is no longer available.", "CATERING_PACKAGE_MISSING", 409);
   }
-  const packageProductNames = [...new Set(
-    packages
-      .filter((item) => item.stationType === "sushi_station")
-      .flatMap((item) => getCateringPackageProductNames(item.items))
-  )];
+  const sushiPackages = packages.filter((item) =>
+    normalizeCateringStationType(item.stationType, item.name, getCateringPackageItems(item.items)) === "sushi_station"
+  );
+  const tempuraPackages = packages.filter((item) =>
+    normalizeCateringStationType(item.stationType, item.name, getCateringPackageItems(item.items)) === "tempura_live"
+  );
   const locksByMaterial = new Map<string, { raw_material_id: string; reserved_quantity: number; unit: string }>();
 
   const addMaterialRequirement = async (name: string, quantity: number, unit: string) => {
+    if (!Number.isFinite(quantity) || quantity <= 0) {
+      throw new InventoryError(`Catering stock requirement for ${name} is invalid.`, "CATERING_QUANTITY_INVALID", 409);
+    }
     const material = await tx.rawMaterial.findFirst({
-      where: { name: { equals: name, mode: "insensitive" } }
+      where: { name: { equals: name, mode: "insensitive" }, is_deleted: false }
     });
     if (!material) {
       throw new InventoryError(
@@ -1494,7 +1498,6 @@ async function createCateringIngredientLocks(
         409
       );
     }
-    validateInventoryQuantity(quantity, material.unit);
     const existing = locksByMaterial.get(material.id);
     if (existing) {
       existing.reserved_quantity += quantity;
@@ -1510,7 +1513,12 @@ async function createCateringIngredientLocks(
   for (const item of packages) {
     let requirements;
     try {
-      requirements = getCateringInventoryRequirements(item.stationType, packageQuantities[item.id]);
+      const stationType = normalizeCateringStationType(
+        item.stationType,
+        item.name,
+        getCateringPackageItems(item.items)
+      );
+      requirements = getCateringInventoryRequirements(stationType, packageQuantities[item.id]);
     } catch (error) {
       throw new InventoryError(
         error instanceof Error ? error.message : "Catering stock requirements are invalid.",
@@ -1539,31 +1547,35 @@ async function createCateringIngredientLocks(
       }
     }
   });
-  const productsByNormalizedName = new Map(
-    products.map((product) => [normalizeProductName(product.name), product])
-  );
-  const selectedProducts = packageProductNames.map((name) => {
-      const normalized = normalizeProductName(name);
-      return (
-        productsByNormalizedName.get(normalized) ??
-        products.find((product) => normalizeProductName(product.name).startsWith(normalized))
-      );
-    });
-  const missingProduct = packageProductNames.find((_, index) => !selectedProducts[index]);
-  if (missingProduct) {
-    throw new InventoryError(
-      `Catering menu item "${missingProduct}" is not linked to a selling product and inventory recipe.`,
-      "CATERING_PRODUCT_RECIPE_MISSING",
-      409
-    );
+  const productsByNormalizedName = new Map<string, typeof products>();
+  for (const product of products) {
+    const normalizedName = normalizeProductName(product.name);
+    const matches = productsByNormalizedName.get(normalizedName) ?? [];
+    matches.push(product);
+    productsByNormalizedName.set(normalizedName, matches);
   }
-
-  for (const product of selectedProducts) {
-    if (!product) continue;
-    const recipeIngredients = product.recipes[0]?.recipe_ingredients ?? [];
-    if (recipeIngredients.length === 0) {
+  const findProduct = (name: string) => {
+    const matches = productsByNormalizedName.get(normalizeProductName(name)) ?? [];
+    if (normalizeProductName(name) === "futo california") {
+      return matches.find((product) => product.category.trim().toLowerCase() === "futo maki");
+    }
+    return matches[0];
+  };
+  const addRecipeRequirements = async (productName: string, portions: number) => {
+    const product = findProduct(productName);
+    if (!product) {
       throw new InventoryError(
-        `Catering menu item "${product.name}" has no inventory recipe.`,
+        `Catering menu item "${productName}" is not linked to a selling product and inventory recipe.`,
+        "CATERING_PRODUCT_RECIPE_MISSING",
+        409
+      );
+    }
+    const recipe = product.recipes[0];
+    const recipeIngredients = recipe?.recipe_ingredients ?? [];
+    const recipeYield = recipe ? Number(recipe.total_yield_quantity) : 0;
+    if (recipeIngredients.length === 0 || !Number.isFinite(recipeYield) || recipeYield <= 0) {
+      throw new InventoryError(
+        `Catering menu item "${product.name}" has no usable inventory recipe.`,
         "CATERING_RECIPE_MISSING",
         409
       );
@@ -1578,22 +1590,31 @@ async function createCateringIngredientLocks(
           409
         );
       }
-      if (!Number.isInteger(headcount) || headcount <= 0) {
-        throw new InventoryError("A sushi station must include a valid guest count.", "CATERING_HEADCOUNT_REQUIRED", 409);
-      }
-      const reservedQuantity = Number(ingredient.quantity_per_yield) * headcount;
-      const existing = locksByMaterial.get(material.id);
-
-      if (existing) {
-        existing.reserved_quantity += reservedQuantity;
-      } else {
-        locksByMaterial.set(material.id, {
-          raw_material_id: material.id,
-          reserved_quantity: reservedQuantity,
-          unit: material.unit
-        });
-      }
+      await addMaterialRequirement(
+        material.name,
+        Number(ingredient.quantity_per_yield) * portions / recipeYield,
+        material.unit
+      );
     }
+  };
+
+  for (const item of sushiPackages) {
+    const inclusionNames = getCateringPackageProductNames(item.items);
+    if (inclusionNames.length !== 9 || !Number.isInteger(item.minPax) || item.minPax <= 0) {
+      throw new InventoryError(
+        `Sushi Station package "${item.name}" must define a Base Pax and exactly 9 included items.`,
+        "CATERING_PACKAGE_RECIPE_MISSING",
+        409
+      );
+    }
+    const portionsPerItem = item.minPax / inclusionNames.length;
+    for (const productName of inclusionNames) {
+      await addRecipeRequirements(productName, portionsPerItem);
+    }
+  }
+
+  for (const _item of tempuraPackages) {
+    await addRecipeRequirements("Futo Ebi", 50);
   }
 
   if (locksByMaterial.size === 0) {
@@ -1605,6 +1626,8 @@ async function createCateringIngredientLocks(
   }
 
   for (const lock of locksByMaterial.values()) {
+    lock.reserved_quantity = Math.ceil(Number(lock.reserved_quantity.toFixed(9)));
+    validateInventoryQuantity(lock.reserved_quantity, lock.unit);
     await lockMaterialForUpdate(tx, lock.raw_material_id);
     const material = await tx.rawMaterial.findUnique({ where: { id: lock.raw_material_id } });
 
@@ -2771,7 +2794,7 @@ app.post("/api/catering/reservations", async (req, res, next) => {
       return res.status(404).json({ message: "Selected catering package not found" });
     }
     const selectedStationTypes = selectedPackagesInOrder
-      .map((item) => item.stationType)
+      .map((item) => normalizeCateringStationType(item.stationType, item.name, getCateringPackageItems(item.items)))
       .filter((stationType): stationType is string => typeof stationType === "string");
     const selectionError = getCateringSelectionError(selectedStationTypes);
     if (selectionError) {
@@ -2809,9 +2832,11 @@ app.post("/api/catering/reservations", async (req, res, next) => {
     if (Object.keys(packageQuantities).length !== perUnitPackages.length) {
       return res.status(400).json({ message: "A quantity is only valid for selected per-kilogram catering items." });
     }
-    const selectedSushiPackage = selectedPackagesInOrder.find((item) => item.stationType === "sushi_station");
-    const selectedTempuraPackage = selectedPackagesInOrder.find((item) => item.stationType === "tempura_live");
-    const selectedWholeTunaPackage = selectedPackagesInOrder.find((item) => item.stationType === "whole_tuna");
+    const getBookingStationType = (item: (typeof selectedPackagesInOrder)[number]) =>
+      normalizeCateringStationType(item.stationType, item.name, getCateringPackageItems(item.items));
+    const selectedSushiPackage = selectedPackagesInOrder.find((item) => getBookingStationType(item) === "sushi_station");
+    const selectedTempuraPackage = selectedPackagesInOrder.find((item) => getBookingStationType(item) === "tempura_live");
+    const selectedWholeTunaPackage = selectedPackagesInOrder.find((item) => getBookingStationType(item) === "whole_tuna");
     const tempuraItems = selectedTempuraPackage ? getCateringPackageItems(selectedTempuraPackage.items) : null;
     const baseHeadcounts = [
       ...(selectedSushiPackage ? [selectedSushiPackage.minPax] : []),
@@ -2832,8 +2857,9 @@ app.post("/api/catering/reservations", async (req, res, next) => {
     );
     const packageSnapshots = selectedPackagesInOrder.map((item) => {
       const packageItems = getCateringPackageItems(item.items);
-      const isSushi = item.stationType === "sushi_station";
-      const isTempura = item.stationType === "tempura_live";
+      const stationType = getBookingStationType(item);
+      const isSushi = stationType === "sushi_station";
+      const isTempura = stationType === "tempura_live";
       const isPerUnit = packageQuantities[item.id] !== undefined;
       const quantity = isPerUnit
         ? packageQuantities[item.id]
@@ -2851,7 +2877,7 @@ app.post("/api/catering/reservations", async (req, res, next) => {
 
       return {
         packageId: item.id,
-        stationType: item.stationType,
+        stationType,
         packageName: item.name,
         description: item.description,
         pricingModel: typeof packageItems.pricingModel === "string" ? packageItems.pricingModel : null,
@@ -2958,7 +2984,11 @@ app.post("/api/catering/reservations", async (req, res, next) => {
           venue_type: body.venue_address,
           event_type: body.event_type,
           event_type_other: body.event_type_other || null,
-          package_type: selectedPackage.stationType,
+          package_type: normalizeCateringStationType(
+            selectedPackage.stationType,
+            selectedPackage.name,
+            getCateringPackageItems(selectedPackage.items)
+          ),
           status: "pending",
           message: body.special_requests || null
         }
@@ -3492,7 +3522,6 @@ app.put("/api/staff/catering/reservations/:id/approve", async (req, res, next) =
         tx,
         current.id,
         packageIds,
-        current.headcount ?? 0,
         getCateringReservationPackageQuantities(current.package_snapshot),
         user.sub
       );
@@ -3818,15 +3847,21 @@ app.put("/api/staff/catering/reservations/:id/start-event", async (req, res, nex
           tx,
           current.id,
           packageIds,
-          current.headcount ?? 0,
           getCateringReservationPackageQuantities(current.package_snapshot),
           user.sub
         );
       }
 
+      await releaseCateringLocks(
+        tx,
+        current.id,
+        user.sub,
+        current.reservation_id ?? current.id
+      );
+
       const started = await tx.cateringReservation.update({
         where: { id: current.id },
-        data: { status: "in_progress" }
+        data: { status: "in_progress", ingredients_locked: false }
       });
       await addReservationActivity(tx, {
         cateringReservationId: current.id,
@@ -5300,7 +5335,7 @@ async function releaseCateringLocks(
       actor_id: userId,
       action: "Used",
       releaseReservedQuantity: deduction.quantity,
-      note: "Catering reservation served"
+      note: "Catering event inventory deducted"
     });
   }
 
@@ -5415,7 +5450,7 @@ async function completeCateringReservation(req: Request, res: Response, next: Ne
 
       const completed = await tx.cateringReservation.update({
         where: { id: req.params.id },
-        data: { status: "completed" }
+        data: { status: "completed", ingredients_locked: false }
       });
       await addReservationActivity(tx, {
         cateringReservationId: current.id,
@@ -7272,21 +7307,39 @@ async function getAvailableProductStocks(products: ProductStockSource[]) {
     ...ingredientMaterials.map((material) => material.id),
     ...beverageMaterials.map((material) => material.id)
   ]));
-  const reservedByMaterial = materialIds.length > 0
-    ? await getActiveCateringReservationQuantities(prisma, materialIds)
-    : new Map<string, number>();
+  const [reservedByMaterial, batches] = materialIds.length > 0
+    ? await Promise.all([
+        getActiveCateringReservationQuantities(prisma, materialIds),
+        prisma.materialBatch.findMany({
+          where: { raw_material_id: { in: materialIds }, is_disposed: false },
+          select: { raw_material_id: true, remaining_quantity: true, expiration_date: true }
+        })
+      ])
+    : [new Map<string, number>(), []];
+  const batchStockByMaterial = new Map<string, number>();
+  const now = new Date();
+  for (const batch of batches) {
+    const available = !batch.expiration_date || batch.expiration_date >= now
+      ? Number(batch.remaining_quantity)
+      : 0;
+    batchStockByMaterial.set(
+      batch.raw_material_id,
+      (batchStockByMaterial.get(batch.raw_material_id) ?? 0) + available
+    );
+  }
+  const availableMaterialStock = (material: { id: string; current_stock: unknown }) => {
+    const onHand = batchStockByMaterial.has(material.id)
+      ? batchStockByMaterial.get(material.id)!
+      : Number(material.current_stock);
+    return calculateAvailableQuantity(onHand, reservedByMaterial.get(material.id) ?? 0);
+  };
 
   return new Map(products.map((product) => {
     const ingredients = product.recipes[0]?.recipe_ingredients ?? [];
 
     if (product.category.toLowerCase() === "beverage" && ingredients.length === 0) {
       const material = materialByName.get(getBeverageStockMaterialName(product.name));
-      const available = material
-        ? calculateAvailableQuantity(
-            Number(material.current_stock),
-            reservedByMaterial.get(material.id) ?? 0
-          )
-        : 0;
+      const available = material ? availableMaterialStock(material) : 0;
       return [product, Math.max(available, 0)];
     }
 
@@ -7302,10 +7355,7 @@ async function getAvailableProductStocks(products: ProductStockSource[]) {
       const required = Number(ingredient.quantity_per_yield);
       const existing = requiredByMaterial.get(material.id);
       requiredByMaterial.set(material.id, {
-        currentStock: calculateAvailableQuantity(
-          Number(material.current_stock),
-          reservedByMaterial.get(material.id) ?? 0
-        ),
+        currentStock: availableMaterialStock(material),
         requiredPerProduct: (existing?.requiredPerProduct ?? 0) + required
       });
     }

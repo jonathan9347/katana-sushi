@@ -1,14 +1,13 @@
 import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
-import { Printer } from "lucide-react";
+import { Banknote, Landmark, Printer, Smartphone } from "lucide-react";
 import PaymentModal from "./PaymentModal";
 import { PosCartKey, PosProduct, usePosCart } from "./store";
 import { api } from "../../../lib/api";
 import { defaultSystemSettings, fetchSystemSettings, type SystemSettings } from "../../../lib/systemSettings";
 import { useToast } from "../../../hooks/useToast";
 import { Button } from "../../../components/ui/button";
-import { Select } from "../../../components/ui/select";
 import { Dialog } from "../../../components/ui/dialog";
 import DiningService, {
   LAST_COMMITTED_ORDER_STORAGE_KEY,
@@ -120,9 +119,23 @@ export default function PosPage() {
   const [dineInEntryType, setDineInEntryType] = useState<"walk_in" | "reservation">("walk_in");
   const [selectionView, setSelectionView] = useState<SelectionView>("menu");
   const [dialogStep, setDialogStep] = useState<DialogStep>(null);
-  const [tableBoardPurpose, setTableBoardPurpose] = useState<"walk_in" | "existing_table">("walk_in");
-  const [selectedTable, setSelectedTable] = useState<{ id: string; number: number } | null>(null);
-  const [selectedReservation, setSelectedReservation] = useState<{ id: string; name: string; time: string; tableNumbers: number[] } | null>(null);
+  const [tableBoardPurpose, setTableBoardPurpose] = useState<"walk_in" | "existing_table" | "reservation">("walk_in");
+  const [selectedTable, setSelectedTable] = useState<{
+    id: string;
+    number: number;
+    tableIds: string[];
+    tableNumbers: number[];
+  } | null>(null);
+  const [selectedReservation, setSelectedReservation] = useState<{
+    id: string;
+    name: string;
+    time: string;
+    partySize: number;
+    tableNumbers: number[];
+  } | null>(null);
+  const [reservationTableSelection, setReservationTableSelection] = useState<
+    Array<{ tableId: string; tableNumber: number; capacity: number }>
+  >([]);
   const [selectedDiningSessionId, setSelectedDiningSessionId] = useState("");
   const [customerName, setCustomerName] = useState("");
   const [pickupSearch, setPickupSearch] = useState("");
@@ -137,6 +150,12 @@ export default function PosPage() {
   const [billOutSeniorPwdCount, setBillOutSeniorPwdCount] = useState("0");
   const [billOutPaymentMethod, setBillOutPaymentMethod] = useState<"cash" | "gcash" | "bank_transfer">("cash");
   const [billOutCashReceived, setBillOutCashReceived] = useState("");
+  const [billOutApplyDiscount, setBillOutApplyDiscount] = useState(false);
+  const [unlimitedGuestDialogOpen, setUnlimitedGuestDialogOpen] = useState(false);
+  const [unlimitedGuestCountInput, setUnlimitedGuestCountInput] = useState("");
+  const [unlimitedGuestsConfirmed, setUnlimitedGuestsConfirmed] = useState(false);
+  const [pendingUnlimitedProduct, setPendingUnlimitedProduct] = useState<PosProduct | null>(null);
+  const [unlimitedGuestCountError, setUnlimitedGuestCountError] = useState("");
   const [extendingUnlimited, setExtendingUnlimited] = useState(false);
   const role = getStoredRole();
   const allowed = role === "admin" || role === "cashier";
@@ -219,15 +238,21 @@ export default function PosPage() {
     || (customerType === "new_customer" && customerService === "dine_in");
   const isPickupCustomer = customerType === "pickup_customer";
   const tableSessionToolsId = selectedDiningSessionId || lastCommittedOrderQuery.data?.dining_session_id || "";
-  const activeSession = diningSessionsQuery.data?.find(
-    (session) => session.id === tableSessionToolsId && session.status === "active"
-  ) ?? null;
+  const activeSession = customerType === "existing_table"
+    ? diningSessionsQuery.data?.find(
+        (session) => session.id === tableSessionToolsId && session.status === "active"
+      ) ?? null
+    : null;
   const activeUnlimitedSession = activeSession?.unlimited_sessions.find((session) => session.status === "active") ?? null;
   const cartKey: PosCartKey = isDineIn
     ? "dine_in_ala_carte"
     : "takeout";
   const items = carts[cartKey];
   const hasUnlimitedItems = items.some((item) => item.diningOrderType === "unlimited");
+  const selectedReservationSeats = reservationTableSelection.reduce((total, table) => total + table.capacity, 0);
+  const reservationTablesReady = reservationTableSelection.length > 0
+    && Boolean(selectedReservation)
+    && selectedReservationSeats >= (selectedReservation?.partySize ?? 0);
   const takeoutItems = carts.takeout;
 
   useEffect(() => {
@@ -329,6 +354,23 @@ export default function PosPage() {
     onError: (error) => toast(getApiErrorMessage(error, "Unable to extend the Unlimited session."))
   });
 
+  const endUnlimitedSessionMutation = useMutation({
+    mutationFn: async (unlimitedSessionId: string) => {
+      const response = await api.post(
+        `/api/pos/dining/unlimited-sessions/${unlimitedSessionId}/end`,
+        { leftovers: [] }
+      );
+      return response.data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["pos", "dining", "sessions"] });
+      queryClient.invalidateQueries({ queryKey: ["pos", "dining", "tables"] });
+      queryClient.invalidateQueries({ queryKey: ["pos", "dining", "upcoming-reservations"] });
+      toast("Unlimited session ended.");
+    },
+    onError: (error) => toast(getApiErrorMessage(error, "Unable to end the Unlimited session."))
+  });
+
   const billOutPreviewQuery = useQuery({
     queryKey: ["pos", "dining", "checkout-preview", tableSessionToolsId, billOutGuestCount, billOutSeniorPwdCount],
     queryFn: async () => {
@@ -366,6 +408,7 @@ export default function PosPage() {
       setSelectedDiningSessionId("");
       queryClient.invalidateQueries({ queryKey: ["pos", "dining", "sessions"] });
       queryClient.invalidateQueries({ queryKey: ["pos", "dining", "tables"] });
+      queryClient.invalidateQueries({ queryKey: ["pos", "dining", "upcoming-reservations"] });
       queryClient.invalidateQueries({ queryKey: ["pos", "transactions"] });
       queryClient.invalidateQueries({ queryKey: ["inventory"] });
       toast("Table bill completed and table released.");
@@ -405,7 +448,7 @@ export default function PosPage() {
       selection:
         | { type: "session"; sessionId: string }
         | { type: "table"; tableId: string }
-        | { type: "reservation"; reservationId: string };
+        | { type: "reservation"; reservationId: string; tableIds: string[] };
       printWindow: Window;
     }) => {
       const response = await api.post<{ order: CommittedDiningOrder; replayed: boolean }>(
@@ -434,12 +477,11 @@ export default function PosPage() {
       queryClient.setQueryData(["pos", "dining", "committed-order", order.id], order);
       clearCartFor(cartKey);
       rotateDraftKey(cartKey);
-      setSelectedTable(null);
+      setSelectedDiningSessionId(order.dining_session_id);
       setSelectedReservation(null);
-      setSelectedDiningSessionId("");
       setSelectionView("menu");
-      setCustomerType("new_customer");
-      setCustomerService("takeout");
+      setCustomerType("existing_table");
+      setCustomerService("dine_in");
       queryClient.invalidateQueries({ queryKey: ["pos", "dining", "tables"] });
       queryClient.invalidateQueries({ queryKey: ["pos", "dining", "sessions"] });
       queryClient.invalidateQueries({ queryKey: ["pos", "dining", "upcoming-reservations"] });
@@ -504,7 +546,10 @@ export default function PosPage() {
     setSelectedDiningSessionId("");
     setSelectedTable(null);
     setSelectedReservation(null);
+    setReservationTableSelection([]);
     setSelectedPickupOrder(null);
+    setUnlimitedGuestsConfirmed(false);
+    setPendingUnlimitedProduct(null);
     setDialogStep("service");
   }
 
@@ -520,12 +565,17 @@ export default function PosPage() {
       setCustomerType("new_customer");
       if (entry === "reservation") {
         setDineInEntryType("reservation");
+        setTableBoardPurpose("reservation");
+        setSelectedTable(null);
+        setSelectedReservation(null);
       } else {
         setDineInEntryType("walk_in");
         setTableBoardPurpose("walk_in");
         setSelectedTable(null);
         setSelectedReservation(null);
       }
+      setUnlimitedGuestsConfirmed(false);
+      setPendingUnlimitedProduct(null);
       setSelectionView("menu");
       return;
     }
@@ -544,23 +594,48 @@ export default function PosPage() {
     setSelectedReservation(null);
     setSelectedPickupOrder(null);
     setSelectedDiningSessionId("");
+    setUnlimitedGuestsConfirmed(false);
+    setPendingUnlimitedProduct(null);
     setSelectionView("table-board");
   }
 
   function selectTable(selection: { tableId: string; tableNumber: number; sessionId: string | null }) {
-    setSelectedTable({ id: selection.tableId, number: selection.tableNumber });
+    setSelectedTable({
+      id: selection.tableId,
+      number: selection.tableNumber,
+      tableIds: [selection.tableId],
+      tableNumbers: [selection.tableNumber]
+    });
     setSelectedDiningSessionId(selection.sessionId ?? "");
+    setSelectedReservation(null);
     setSelectionView("menu");
   }
 
-  function selectReservation(reservation: { id: string; customer_name: string; time: string; table_numbers: number[] }) {
+  function selectReservation(reservation: { id: string; customer_name: string; time: string; party_size: number; table_numbers: number[] }) {
     setSelectedReservation({
       id: reservation.id,
       name: reservation.customer_name,
       time: reservation.time,
+      partySize: reservation.party_size,
       tableNumbers: reservation.table_numbers
     });
+    setTableBoardPurpose("reservation");
+    setSelectedTable(null);
+    setReservationTableSelection([]);
     setSelectedDiningSessionId("");
+    setSelectionView("table-board");
+  }
+
+  function selectReservationTables(selection: Array<{ tableId: string; tableNumber: number; capacity: number }>) {
+    if (selection.length === 0) return;
+    setSelectedTable({
+      id: selection[0].tableId,
+      number: selection[0].tableNumber,
+      tableIds: selection.map(({ tableId }) => tableId),
+      tableNumbers: selection.map(({ tableNumber }) => tableNumber)
+    });
+    setSelectedDiningSessionId("");
+    setReservationTableSelection(selection);
     setSelectionView("menu");
   }
 
@@ -570,8 +645,44 @@ export default function PosPage() {
   }
 
   function selectDineOrderType(nextType: "ala_carte" | "unlimited") {
+    if (nextType === "unlimited") {
+      setPendingUnlimitedProduct(null);
+      setUnlimitedGuestCountInput("");
+      setUnlimitedGuestCountError("");
+      setUnlimitedGuestDialogOpen(true);
+      return;
+    }
     setDineOrderType(nextType);
     selectCart("dine_in_ala_carte");
+  }
+
+  function addOrderBuilderItem(product: PosProduct, diningOrderType?: "ala_carte" | "unlimited") {
+    if (diningOrderType === "unlimited" && !unlimitedGuestsConfirmed) {
+      setPendingUnlimitedProduct(product);
+      setUnlimitedGuestCountInput("");
+      setUnlimitedGuestCountError("");
+      setUnlimitedGuestDialogOpen(true);
+      return;
+    }
+    if (diningOrderType) addItemTo(cartKey, product, 1, diningOrderType);
+    else addItem(product);
+  }
+
+  function confirmUnlimitedGuestCount() {
+    const guests = Number(unlimitedGuestCountInput);
+    if (!Number.isInteger(guests) || guests < 1 || guests > 100) {
+      setUnlimitedGuestCountError("Enter a whole number of guests from 1 to 100.");
+      return;
+    }
+    setDineHeadcount(guests);
+    setDineOrderType("unlimited");
+    selectCart("dine_in_ala_carte");
+    setUnlimitedGuestsConfirmed(true);
+    if (pendingUnlimitedProduct) {
+      addItemTo(cartKey, pendingUnlimitedProduct, 1, "unlimited");
+      setPendingUnlimitedProduct(null);
+    }
+    setUnlimitedGuestDialogOpen(false);
   }
 
   function handlePrimaryAction() {
@@ -580,8 +691,16 @@ export default function PosPage() {
       return;
     }
     if (isDineIn) {
-      if (!selectedTable && !selectedReservation) {
-        setSelectionView(dineInEntryType === "reservation" ? "reservation-list" : "table-board");
+      if (!selectedTable) {
+        if (selectedReservation) {
+          if (reservationTablesReady) {
+            selectReservationTables(reservationTableSelection);
+          }
+          return;
+        }
+        setSelectionView(selectedReservation
+          ? "table-board"
+          : dineInEntryType === "reservation" ? "reservation-list" : "table-board");
       } else {
         if (items.length === 0 || dineInConfirmationMutation.isPending) return;
         const printWindow = window.open("", "_blank", "width=420,height=640");
@@ -590,7 +709,11 @@ export default function PosPage() {
           return;
         }
         const selection = selectedReservation
-          ? { type: "reservation" as const, reservationId: selectedReservation.id }
+          ? {
+              type: "reservation" as const,
+              reservationId: selectedReservation.id,
+              tableIds: selectedTable?.tableIds ?? []
+            }
           : selectedDiningSessionId
             ? { type: "session" as const, sessionId: selectedDiningSessionId }
             : { type: "table" as const, tableId: selectedTable!.id };
@@ -603,11 +726,20 @@ export default function PosPage() {
 
   const selectionContent = selectionView === "table-board" ? (
     <DiningService
-      key={`table-board-${tableBoardPurpose}`}
+      key={`table-board-${tableBoardPurpose}-${selectedReservation?.id ?? ""}`}
       mode="board"
       boardPurpose={tableBoardPurpose}
+      selectedReservationId={selectedReservation?.id ?? null}
+      reservationPartySize={selectedReservation?.partySize ?? 0}
       embedded
       onBackToBoard={() => {
+        if (tableBoardPurpose === "reservation") {
+          setSelectedReservation(null);
+          setSelectedTable(null);
+          setReservationTableSelection([]);
+          setSelectionView("reservation-list");
+          return;
+        }
         if (tableBoardPurpose === "existing_table") {
           setCustomerType("new_customer");
           setCustomerService("takeout");
@@ -617,6 +749,7 @@ export default function PosPage() {
         setSelectionView("menu");
       }}
       onTableSelected={selectTable}
+      onReservationTableSelectionChange={setReservationTableSelection}
     />
   ) : selectionView === "reservation-list" ? (
     <DiningService
@@ -693,6 +826,19 @@ export default function PosPage() {
           onNewCustomer={beginNewCustomer}
           onExistingTable={beginExistingTable}
           selectionContent={selectionContent}
+          cartSelectionStatus={selectedReservation && !selectedTable ? (
+            <div className="rounded-md border border-slate-200 bg-slate-50 p-3 text-sm">
+              <p className="font-semibold text-slate-900">{selectedReservation.name}</p>
+              <p className="text-slate-600">
+                Selected seats: {selectedReservationSeats} / {selectedReservation.partySize}
+              </p>
+              {reservationTableSelection.length > 0 && (
+                <p className="text-slate-600">
+                  Selected table{reservationTableSelection.length === 1 ? "" : "s"}: {reservationTableSelection.map(({ tableNumber }) => tableNumber).join(", ")}
+                </p>
+              )}
+            </div>
+          ) : null}
           sessionControls={activeSession ? (
             <section aria-label="Active table session controls" className="grid gap-3 rounded-md border border-slate-200 bg-slate-50 p-3">
               <div>
@@ -730,6 +876,17 @@ export default function PosPage() {
                       ? "Unable to load the configured extension duration."
                       : `Adds ${unlimitedSettingsQuery.data?.extension_minutes ?? "—"} minutes · no fee`}
                   </p>
+                  <Button
+                    variant="outline"
+                    disabled={endUnlimitedSessionMutation.isPending}
+                    onClick={() => {
+                      if (window.confirm("End the Unlimited session now?")) {
+                        endUnlimitedSessionMutation.mutate(activeUnlimitedSession.id);
+                      }
+                    }}
+                  >
+                    {endUnlimitedSessionMutation.isPending ? "Ending session..." : "End Session"}
+                  </Button>
                 </>
               ) : isDineIn && orderType === "unlimited" ? (
                 <Button
@@ -759,9 +916,15 @@ export default function PosPage() {
                   || carts.dine_in_unlimited.length > 0
                 }
                 onClick={() => {
-                  setBillOutGuestCount(String(Math.max(activeSession.guests.length, headcount, 1)));
+                  setBillOutGuestCount(String(Math.max(
+                    activeSession.guests.length,
+                    activeUnlimitedSession?.pax_count ?? 0,
+                    headcount,
+                    1
+                  )));
                   setBillOutSeniorPwdCount("0");
                   setBillOutCashReceived("");
+                  setBillOutApplyDiscount(false);
                   setBillOutOpen(true);
                 }}
               >
@@ -773,9 +936,11 @@ export default function PosPage() {
             </section>
           ) : null}
           selectionSummary={selectedTable
-            ? `Table ${selectedTable.number} selected`
+            ? selectedReservation
+              ? `${selectedReservation.name} · ${selectedReservation.time} · Table${selectedTable.tableNumbers.length === 1 ? "" : "s"} ${selectedTable.tableNumbers.join(", ")} selected`
+              : `Table ${selectedTable.number} selected`
             : selectedReservation
-              ? `${selectedReservation.name} · ${selectedReservation.time} selected`
+              ? `${selectedReservation.name} · ${selectedReservation.time} · ${selectedReservation.partySize} guests · choose table(s)`
               : null}
           customerService={customerService}
           cartKey={cartKey}
@@ -794,10 +959,7 @@ export default function PosPage() {
           activeUnlimitedPaxCount={activeUnlimitedSession?.pax_count ?? null}
           activeUnlimitedPricePerPerson={activeUnlimitedSession?.price_per_pax ?? null}
           onAddItem={(product, itemOrderType) => {
-            if (!isPickupCustomer) {
-              if (itemOrderType) addItemTo(cartKey, product, 1, itemOrderType);
-              else addItem(product);
-            }
+            if (!isPickupCustomer) addOrderBuilderItem(product, itemOrderType);
           }}
           onRemoveItem={(productId) => removeItemFrom(cartKey, productId)}
           onDecrementItem={(productId) => decrementItemFrom(cartKey, productId)}
@@ -810,17 +972,20 @@ export default function PosPage() {
             : customerType === "existing_table"
               ? "Print order"
             : isDineIn
-              ? (selectedTable || selectedReservation) ? "Confirm & Print" : "Proceed"
+              ? selectedTable ? "Confirm & Print" : selectedReservation ? "Select table/s" : "Proceed"
               : "Checkout"}
           actionDisabled={isPickupCustomer
             ? !selectedPickupOrder || pickupCompletionMutation.isPending
             : isDineIn
-              ? Boolean(selectedTable || selectedReservation) && items.length === 0
-                || dineInConfirmationMutation.isPending
-                || (hasUnlimitedItems && (
+              ? Boolean(selectedReservation) && !selectedTable
+                ? !reservationTablesReady
+                : (Boolean(selectedTable) && items.length === 0)
+                  || dineInConfirmationMutation.isPending
+                  || (hasUnlimitedItems && (
                   !Number.isInteger(headcount)
                   || headcount < 1
                   || headcount > 100
+                  || !unlimitedGuestsConfirmed
                   || unlimitedSettingsQuery.isError
                   || !unlimitedSettingsQuery.data
                 ))
@@ -854,6 +1019,60 @@ export default function PosPage() {
           )}
         </div>
       </Dialog>
+      <Dialog
+        open={unlimitedGuestDialogOpen}
+        title="Unlimited guest count"
+        onClose={() => {
+          setUnlimitedGuestDialogOpen(false);
+          setPendingUnlimitedProduct(null);
+          setUnlimitedGuestCountError("");
+        }}
+      >
+        <form
+          className="grid gap-4"
+          onSubmit={(event) => {
+            event.preventDefault();
+            confirmUnlimitedGuestCount();
+          }}
+        >
+          <p className="text-sm text-slate-600">
+            Enter the number of guests for the Unlimited package before adding Unlimited items.
+          </p>
+          <label className="grid gap-1 text-sm font-medium text-slate-700">
+            Number of guests
+            <input
+              autoFocus
+              aria-label="Unlimited guest count"
+              className="h-11 rounded-md border border-slate-300 px-3"
+              type="number"
+              min={1}
+              max={100}
+              step={1}
+              required
+              value={unlimitedGuestCountInput}
+              onChange={(event) => {
+                setUnlimitedGuestCountInput(event.target.value);
+                setUnlimitedGuestCountError("");
+              }}
+            />
+          </label>
+          {unlimitedGuestCountError && <p role="alert" className="text-sm text-red-700">{unlimitedGuestCountError}</p>}
+          <div className="flex justify-end gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => {
+                setUnlimitedGuestDialogOpen(false);
+                setPendingUnlimitedProduct(null);
+                setUnlimitedGuestCountError("");
+              }}
+            >
+              Cancel
+            </Button>
+            <Button type="submit">Continue</Button>
+          </div>
+        </form>
+      </Dialog>
       <PaymentModal
         open={paymentOpen}
         pending={isPickupCustomer ? pickupCompletionMutation.isPending : checkoutMutation.isPending}
@@ -878,55 +1097,78 @@ export default function PosPage() {
         panelClassName="max-w-xl"
       >
         <div className="grid gap-4">
-          <div className="grid gap-3 sm:grid-cols-2">
-            <label className="grid gap-1 text-sm font-medium text-slate-700">
-              Total guests
-              <input
-                aria-label="Bill-out guest count"
-                className="h-10 rounded-md border border-slate-300 px-3"
-                type="number"
-                min={1}
-                max={1000}
-                value={billOutGuestCount}
-                onChange={(event) => setBillOutGuestCount(event.target.value)}
-              />
-            </label>
-            <label className="grid gap-1 text-sm font-medium text-slate-700">
-              Senior/PWD guests
-              <input
-                aria-label="Senior/PWD guest count"
-                className="h-10 rounded-md border border-slate-300 px-3"
-                type="number"
-                min={0}
-                max={1000}
-                value={billOutSeniorPwdCount}
-                onChange={(event) => setBillOutSeniorPwdCount(event.target.value)}
-              />
-            </label>
-          </div>
+          {!billOutApplyDiscount && (
+            <Button variant="outline" onClick={() => setBillOutApplyDiscount(true)}>
+              Apply Discount
+            </Button>
+          )}
+          {billOutApplyDiscount && (
+            <div className="grid gap-3 sm:grid-cols-2">
+              <label className="grid gap-1 text-sm font-medium text-slate-700">
+                Total guests
+                <input
+                  aria-label="Bill-out guest count"
+                  className="h-10 rounded-md border border-slate-300 px-3"
+                  type="number"
+                  min={1}
+                  max={1000}
+                  value={billOutGuestCount}
+                  onChange={(event) => setBillOutGuestCount(event.target.value)}
+                />
+              </label>
+              <label className="grid gap-1 text-sm font-medium text-slate-700">
+                Senior/PWD guests
+                <input
+                  aria-label="Senior/PWD guest count"
+                  className="h-10 rounded-md border border-slate-300 px-3"
+                  type="number"
+                  min={0}
+                  max={1000}
+                  value={billOutSeniorPwdCount}
+                  onChange={(event) => setBillOutSeniorPwdCount(event.target.value)}
+                />
+              </label>
+            </div>
+          )}
           {billOutPreviewQuery.isLoading && <p className="text-sm text-slate-500">Calculating bill...</p>}
           {billOutPreviewQuery.isError && <p role="alert" className="text-sm text-red-700">Unable to calculate the bill. Check the guest counts and retry.</p>}
           {billOutPreviewQuery.data && (
             <div className="grid gap-2 rounded-md bg-slate-50 p-3 text-sm">
               <TotalLine label="Subtotal" value={billOutPreviewQuery.data.subtotal} />
-              <TotalLine
-                label={`Senior/PWD discount (${billOutPreviewQuery.data.discounted_guest_count} guests × ${billOutPreviewQuery.data.discount_rate_snapshot * 100}% of ${money(billOutPreviewQuery.data.discount_base_snapshot)} a-la-carte total)`}
-                value={-billOutPreviewQuery.data.discount_amount}
-              />
+              {billOutApplyDiscount && (
+                <TotalLine
+                  label={`Senior/PWD discount (${billOutPreviewQuery.data.discounted_guest_count} guests × ${billOutPreviewQuery.data.discount_rate_snapshot * 100}% of ${money(billOutPreviewQuery.data.discount_base_snapshot)} a-la-carte total)`}
+                  value={-billOutPreviewQuery.data.discount_amount}
+                />
+              )}
               <TotalLine label="Amount due" value={billOutPreviewQuery.data.total} strong />
             </div>
           )}
-          <label className="grid gap-1 text-sm font-medium text-slate-700">
-            Payment method
-            <Select
-              value={billOutPaymentMethod}
-              onChange={(event) => setBillOutPaymentMethod(event.target.value as typeof billOutPaymentMethod)}
-            >
-              <option value="cash">Cash</option>
-              <option value="gcash">GCash</option>
-              <option value="bank_transfer">Bank transfer</option>
-            </Select>
-          </label>
+          <div className="grid gap-2">
+            <p className="text-sm font-semibold uppercase text-slate-500">Payment method</p>
+            <div aria-label="Bill-out payment method" className="grid grid-cols-3 gap-2" role="group">
+              {([
+                ["cash", "Cash", <Banknote key="cash-icon" className="h-5 w-5" />],
+                ["gcash", "GCash", <Smartphone key="gcash-icon" className="h-5 w-5" />],
+                ["bank_transfer", "BPI", <Landmark key="bpi-icon" className="h-5 w-5" />]
+              ] as const).map(([value, label, icon]) => (
+                <button
+                  key={value}
+                  type="button"
+                  aria-pressed={billOutPaymentMethod === value}
+                  className={`flex min-h-16 items-center justify-center gap-2 rounded-md border p-3 text-sm font-semibold transition ${
+                    billOutPaymentMethod === value
+                      ? "border-red-700 bg-red-50 text-red-800"
+                      : "border-slate-300 bg-white text-slate-900 hover:bg-slate-50"
+                  }`}
+                  onClick={() => setBillOutPaymentMethod(value)}
+                >
+                  {icon}
+                  {label}
+                </button>
+              ))}
+            </div>
+          </div>
           {billOutPaymentMethod === "cash" && (
             <label className="grid gap-1 text-sm font-medium text-slate-700">
               Cash received
@@ -939,6 +1181,14 @@ export default function PosPage() {
                 value={billOutCashReceived}
                 onChange={(event) => setBillOutCashReceived(event.target.value)}
               />
+              {billOutPreviewQuery.data && (
+                <span className="text-sm font-semibold text-slate-700">
+                  Change: {money(Math.max(
+                    Number(billOutCashReceived) - billOutPreviewQuery.data.total,
+                    0
+                  ))}
+                </span>
+              )}
             </label>
           )}
           <Button

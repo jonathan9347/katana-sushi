@@ -14,6 +14,7 @@ type Props = {
   onNewCustomer: () => void;
   onExistingTable: () => void;
   selectionContent?: ReactNode;
+  cartSelectionStatus?: ReactNode;
   sessionControls?: ReactNode;
   selectionSummary?: string | null;
   customerService: ServiceType;
@@ -86,6 +87,7 @@ export default function PosOrderBuilder({
   onNewCustomer,
   onExistingTable,
   selectionContent,
+  cartSelectionStatus,
   sessionControls,
   selectionSummary = null,
   customerService,
@@ -210,12 +212,15 @@ export default function PosOrderBuilder({
         </Card>}
       </div>
 
-      {!isSelectingExistingTable && <aside className="min-w-0">
-        <Card className="h-full">
+      {!isSelectingExistingTable && <aside
+        data-testid="pos-cart-panel"
+        className="min-w-0 lg:sticky lg:top-4 lg:h-[calc(100vh-2rem)] lg:self-start"
+      >
+        <Card className="flex h-full min-h-0 flex-col">
           <CardHeader>
             <CardTitle>{isPickup ? "Pickup order" : "Order"}</CardTitle>
           </CardHeader>
-          <CardContent className="grid h-full content-start gap-4">
+          <CardContent className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto">
             {isDineIn && (
               <>
                 <div aria-label="Order type" className="grid grid-cols-2 gap-2" role="group">
@@ -339,6 +344,7 @@ export default function PosOrderBuilder({
             )}
 
             {sessionControls}
+            {cartSelectionStatus}
 
             <div className="mt-auto grid gap-2 border-t border-slate-200 pt-4 text-sm">
               <div className="flex items-center justify-between text-slate-600"><span>Subtotal</span><span>{money(subtotal)}</span></div>

@@ -156,9 +156,10 @@ async function createSushiPackageFixture(stockQuantity: bigint) {
       remaining_quantity: stockQuantity
     }
   });
-  const product = await prisma.sellingProduct.create({
+  const productNames = Array.from({ length: 9 }, (_, index) => `Catering lifecycle product ${fixtureId} ${index + 1}`);
+  const products = await Promise.all(productNames.map((name) => prisma.sellingProduct.create({
     data: {
-      name: `Catering lifecycle product ${fixtureId}`,
+      name,
       category: "Integration Test",
       price: 50,
       is_available: true,
@@ -178,8 +179,8 @@ async function createSushiPackageFixture(stockQuantity: bigint) {
         }
       }
     }
-  });
-  createdProductIds.push(product.id);
+  })));
+  createdProductIds.push(...products.map((product) => product.id));
   const stationPackage = await prisma.cateringPackage.create({
     data: {
       name: `Catering lifecycle package ${fixtureId}`,
@@ -188,11 +189,11 @@ async function createSushiPackageFixture(stockQuantity: bigint) {
       pricePerPerson: 50,
       minPax: 2,
       maxPax: 20,
-      items: { inclusions: [{ name: product.name }] }
+      items: { inclusions: productNames }
     }
   });
   createdPackageIds.push(stationPackage.id);
-  return { fixtureId, material, product, stationPackage };
+  return { fixtureId, material, product: products[0], stationPackage };
 }
 
 async function createPendingSushiReservation(packageId: string, fixtureId: string) {
@@ -463,18 +464,31 @@ test("cancelling after preparation records remaining locked ingredients as waste
   assert.equal(wastedMovements, 1);
 });
 
-test("completing a fully paid catering event consumes stock exactly once", async () => {
+test("starting a fully paid catering event consumes stock once and completion does not deduct again", async () => {
   const reservation = await createReservation({
-    status: "in_progress",
+    status: "confirmed",
     paidAmount: 100,
     totalPrice: 100
   });
   const { material, batch, lock } = await createMaterialLock(reservation.id);
-  const pathName = `/api/staff/catering/reservations/${reservation.id}/complete`;
+  const startResponse = await request(`/api/staff/catering/reservations/${reservation.id}/start-event`);
+  assert.equal(startResponse.status, 200, await startResponse.clone().text());
 
-  const firstResponse = await request(pathName);
-  assert.equal(firstResponse.status, 200, await firstResponse.clone().text());
-  const retryResponse = await request(pathName);
+  const [startedReservation, startedMaterial, startedBatch, startedLock] = await Promise.all([
+    prisma.cateringReservation.findUniqueOrThrow({ where: { id: reservation.id } }),
+    prisma.rawMaterial.findUniqueOrThrow({ where: { id: material.id } }),
+    prisma.materialBatch.findUniqueOrThrow({ where: { id: batch.id } }),
+    prisma.cateringIngredientLock.findUniqueOrThrow({ where: { id: lock.id } })
+  ]);
+  assert.equal(startedReservation.status, "in_progress");
+  assert.equal(startedReservation.ingredients_locked, false);
+  assert.equal(Number(startedMaterial.current_stock), 16);
+  assert.equal(Number(startedBatch.remaining_quantity), 16);
+  assert.equal(startedLock.is_released, true);
+
+  const completeResponse = await request(`/api/staff/catering/reservations/${reservation.id}/complete`);
+  assert.equal(completeResponse.status, 200, await completeResponse.clone().text());
+  const retryResponse = await request(`/api/staff/catering/reservations/${reservation.id}/start-event`);
   assert.equal(retryResponse.status, 409);
 
   const [updatedReservation, updatedMaterial, updatedBatch, updatedLock, usedMovements, deductions] = await Promise.all([

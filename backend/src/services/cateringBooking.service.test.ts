@@ -6,6 +6,7 @@ import {
   getCateringInitialPayment,
   getCateringQuantityRules,
   getCateringSelectionError,
+  normalizeCateringStationType,
   isCateringQuantityValid
 } from "./cateringBooking.service";
 
@@ -27,6 +28,26 @@ test("enforces whole tuna and add-on quantity limits", () => {
   assert.equal(isCateringQuantityValid(19, rules), false);
   assert.equal(isCateringQuantityValid(41, rules), false);
   assert.equal(isCateringQuantityValid(20.5, rules), false);
+});
+
+test("normalizes legacy add-on catalog quantities to one kilogram minimum", () => {
+  const rules = getCateringQuantityRules({
+    minimum: 2,
+    minKg: 2,
+    maximum: 40,
+    maxKg: 40,
+    step: 1,
+    unit: "kg",
+    bookingRole: "add_on"
+  });
+
+  assert.equal(rules.minimum, 1);
+  assert.equal(isCateringQuantityValid(1, rules), true);
+  assert.equal(isCateringQuantityValid(1.5, rules), true);
+  assert.equal(isCateringQuantityValid(1.0005, rules), false);
+  assert.equal(isCateringQuantityValid(40, rules), true);
+  assert.equal(isCateringQuantityValid(0, rules), false);
+  assert.equal(isCateringQuantityValid(41, rules), false);
 });
 
 test("prices tempura as a fixed 50-pax package", () => {
@@ -51,6 +72,35 @@ test("validates standalone tuna and add-on combinations", () => {
   assert.equal(getCateringSelectionError(["sushi_station", "sushi_station"]), "Select only one option for each catering station.");
 });
 
+test("normalizes legacy Sashimi Bar package records for booking validation", () => {
+  const wholeTuna = normalizeCateringStationType("Sashimi Bar", "Whole Tuna", {
+    minimum: 20,
+    maximum: 40,
+    pricingModel: "per_unit"
+  });
+  const tunaAddon = normalizeCateringStationType("sashimi_bar", "Tuna", {
+    minimum: 2,
+    maximum: 40,
+    pricingModel: "per_unit",
+    bookingRole: "add_on"
+  });
+  const salmonAddon = normalizeCateringStationType("sashimi_bar", "Salmon", {
+    minimum: 2,
+    maximum: 40,
+    pricingType: "range",
+    bookingRole: "add_on"
+  });
+
+  assert.ok(wholeTuna);
+  assert.ok(tunaAddon);
+  assert.ok(salmonAddon);
+  assert.equal(wholeTuna, "whole_tuna");
+  assert.equal(tunaAddon, "tuna_add_on");
+  assert.equal(salmonAddon, "salmon_add_on");
+  assert.equal(getCateringSelectionError([wholeTuna, tunaAddon]), "Whole Tuna can only be booked by itself.");
+  assert.equal(getCateringSelectionError(["sushi_station", tunaAddon, salmonAddon]), null);
+});
+
 test("resolves whole tuna, add-on, and tempura stock requirements", () => {
   assert.deepEqual(getCateringInventoryRequirements("whole_tuna", 20), [
     { materialName: "Tuna sashimi block", quantity: 20000, unit: "g" }
@@ -58,10 +108,8 @@ test("resolves whole tuna, add-on, and tempura stock requirements", () => {
   assert.deepEqual(getCateringInventoryRequirements("salmon_add_on", 3), [
     { materialName: "Salmon sashimi block", quantity: 3000, unit: "g" }
   ]);
-  assert.deepEqual(getCateringInventoryRequirements("tempura_live"), [
-    { materialName: "Shrimp", quantity: 5000, unit: "g" },
-    { materialName: "Tempura flour", quantity: 2000, unit: "g" },
-    { materialName: "Cooking oil", quantity: 3000, unit: "ml" },
-    { materialName: "Dipping sauce", quantity: 1500, unit: "ml" }
+  assert.deepEqual(getCateringInventoryRequirements("tuna_add_on", 1.5), [
+    { materialName: "Tuna sashimi block", quantity: 1500, unit: "g" }
   ]);
+  assert.deepEqual(getCateringInventoryRequirements("tempura_live"), []);
 });

@@ -91,7 +91,13 @@ type DiningTable = {
   status: string;
   linked_to_table_id: string | null;
   unavailable_reason: string | null;
-  active_session: { id: string; guests: Array<{ id: string }> } | null;
+  active_session: {
+    id: string;
+    display_order_id?: string;
+    guests: Array<{ id: string }>;
+    orders?: Array<{ order_type: string; items: Array<{ unit_price: number }> }>;
+    unlimited_sessions?: Array<{ status: string }>;
+  } | null;
 };
 
 type UpcomingReservation = {
@@ -161,11 +167,14 @@ type CheckoutTransaction = {
 
 type Props = {
   mode?: "service" | "kitchen" | "board" | "reservation-picker";
-  boardPurpose?: "walk_in" | "existing_table";
+  boardPurpose?: "walk_in" | "existing_table" | "reservation";
+  selectedReservationId?: string | null;
+  reservationPartySize?: number;
   embedded?: boolean;
   initialSessionId?: string;
   onSessionSelected?: (sessionId: string) => void;
   onTableSelected?: (selection: { tableId: string; tableNumber: number; sessionId: string | null }) => void;
+  onReservationTableSelectionChange?: (selection: Array<{ tableId: string; tableNumber: number; capacity: number }>) => void;
   onReservationSelected?: (reservation: UpcomingReservation) => void;
   onDraftStateChange?: (hasDrafts: boolean) => void;
   onBackToBoard?: () => void;
@@ -195,6 +204,20 @@ function formatTime(value: string) {
 
 function normalizeTableStatus(status: string) {
   return status.trim().toLowerCase();
+}
+
+function getTableOrderTypeLabel(session: DiningTable["active_session"]) {
+  if (!session) return null;
+  const hasUnlimited = Boolean(session.unlimited_sessions?.some((item) => ["active", "completed"].includes(item.status)))
+    || Boolean(session.orders?.some((order) => order.order_type === "unlimited"));
+  const hasAlaCarte = Boolean(session.orders?.some((order) =>
+    order.order_type === "ala_carte"
+    || (order.order_type === "unlimited"
+      && order.items.some((item) => Number(item.unit_price) > 0)
+      && order.items.some((item) => Number(item.unit_price) === 0))
+  ));
+  if (hasUnlimited && hasAlaCarte) return "Mix";
+  return hasUnlimited ? "Unli" : "Ala Carte";
 }
 
 function escapeHtml(value: string) {
@@ -275,6 +298,9 @@ export default function DiningService({
   initialSessionId = "",
   onSessionSelected,
   onTableSelected,
+  onReservationTableSelectionChange,
+  selectedReservationId = null,
+  reservationPartySize = 0,
   onReservationSelected,
   onDraftStateChange,
   onBackToBoard
@@ -321,6 +347,7 @@ export default function DiningService({
   const [tableReasons, setTableReasons] = useState<Record<string, string>>({});
   const [linkTargets, setLinkTargets] = useState<Record<string, string>>({});
   const [temporaryTableReservationId, setTemporaryTableReservationId] = useState<string | null>(null);
+  const [reservationTableSelection, setReservationTableSelection] = useState<string[]>([]);
   const [completedTransaction, setCompletedTransaction] = useState<CheckoutTransaction | null>(null);
   const queryClient = useQueryClient();
   const { toast } = useToast();
@@ -413,6 +440,8 @@ export default function DiningService({
       state === "arrived" || state === "late" ? 0 : 1;
     return priority(left.state) - priority(right.state) || left.time.localeCompare(right.time);
   });
+  const reservationForBoard = orderedReservations.find((item) => item.id === selectedReservationId) ?? null;
+  const boardRequiredPartySize = reservationPartySize || reservationForBoard?.party_size || 0;
   const reservationsByTableNumber = new Map<number, UpcomingReservation>();
   for (const reservation of orderedReservations) {
     for (const tableNumber of [...reservation.table_numbers, ...reservation.temporary_table_numbers]) {
@@ -822,7 +851,9 @@ export default function DiningService({
           <div className="flex flex-wrap items-center gap-3">
             {!boardOnly && <p className="text-sm text-slate-500">New dine-in orders deduct stock at Confirm &amp; Print; legacy kitchen tickets deduct when released.</p>}
             {(boardOnly || reservationOnly) && onBackToBoard && (
-              <ActionButton tone="muted" onClick={onBackToBoard}>Back to POS</ActionButton>
+              <ActionButton tone="muted" onClick={onBackToBoard}>
+                {boardOnly && boardPurpose === "reservation" ? "Back to reservations" : "Back to POS"}
+              </ActionButton>
             )}
             {embedded && !boardOnly && !reservationOnly && onBackToBoard && (
               <ActionButton tone="muted" onClick={onBackToBoard}>Back to table board</ActionButton>
@@ -834,6 +865,14 @@ export default function DiningService({
         {!embedded && <SectionNav orientation="horizontal" tabs={posTabs} />}
         {boardOnly && (
           <section aria-label="Table board" className="space-y-4">
+            {boardPurpose === "reservation" && reservationForBoard && (
+              <div className="rounded-lg border border-amber-300 bg-amber-50 p-4">
+                <p className="font-bold text-amber-950">Assign table(s) for {reservationForBoard.customer_name}</p>
+                <p className="mt-1 text-sm text-amber-900">
+                  {boardRequiredPartySize} guests · {reservationForBoard.time}. Select available table(s) with enough seats; larger tables are okay.
+                </p>
+              </div>
+            )}
             <div className="flex flex-wrap gap-2 text-xs font-semibold" aria-label="Table status legend">
               <span className="rounded bg-emerald-100 px-2 py-1 text-emerald-900">Free</span>
               <span className="rounded bg-red-100 px-2 py-1 text-red-900">Occupied</span>
@@ -856,9 +895,13 @@ export default function DiningService({
                     : table.active_session || status === "occupied"
                       ? "occupied"
                       : held ? "reserved" : "free";
+                  const heldForSelectedReservation = reservation?.id === selectedReservationId;
                   const canSelect = boardPurpose === "walk_in"
                     ? state === "free"
-                    : state === "occupied" && Boolean(table.active_session);
+                    : boardPurpose === "reservation"
+                      ? state === "free" || (state === "reserved" && heldForSelectedReservation)
+                      : state === "occupied" && Boolean(table.active_session);
+                  const reservationTableSelected = reservationTableSelection.includes(table.id);
                   const stateClass = state === "free"
                     ? "border-emerald-300 bg-emerald-50 text-emerald-950"
                     : state === "occupied"
@@ -872,19 +915,49 @@ export default function DiningService({
                       <span className="text-xl font-bold">Table {table.table_number}</span>
                       <span className="text-sm">{table.capacity} seats</span>
                       <span className="mt-2 inline-flex rounded-full bg-white/80 px-3 py-1 text-sm font-bold">{label}</span>
+                      {table.active_session && (
+                        <span className="mt-2 grid gap-1 text-xs">
+                          <span>Order ID {table.active_session.display_order_id ?? "—"}</span>
+                          <span>{reservation?.customer_name ? `Booked · ${reservation.customer_name}` : "Walk-in"} · {getTableOrderTypeLabel(table.active_session)}</span>
+                        </span>
+                      )}
+                      {boardPurpose === "reservation" && heldForSelectedReservation && (
+                        <span className="mt-2 text-xs font-semibold">Currently held for this booking</span>
+                      )}
                     </>
                   );
                   return canSelect ? (
                     <button
                       key={table.id}
                       type="button"
-                      aria-label={`Select Table ${table.table_number}, ${label}`}
-                      className={`grid min-h-36 place-items-center rounded-xl border p-4 shadow-sm transition hover:scale-[1.01] ${stateClass}`}
-                      onClick={() => onTableSelected?.({
-                        tableId: table.id,
-                        tableNumber: table.table_number,
-                        sessionId: table.active_session?.id ?? null
-                      })}
+                      aria-label={`${boardPurpose === "reservation" ? "Choose" : "Select"} Table ${table.table_number}, ${label}`}
+                      aria-pressed={boardPurpose === "reservation" ? reservationTableSelected : undefined}
+                      className={`grid min-h-36 place-items-center rounded-xl border p-4 shadow-sm transition hover:scale-[1.01] ${stateClass} ${reservationTableSelected ? "ring-4 ring-amber-500" : ""}`}
+                      onClick={() => {
+                        if (boardPurpose === "reservation") {
+                          const nextSelection = reservationTableSelection.includes(table.id)
+                            ? reservationTableSelection.filter((id) => id !== table.id)
+                            : [...reservationTableSelection, table.id];
+                          setReservationTableSelection(nextSelection);
+                          onReservationTableSelectionChange?.(
+                            nextSelection
+                              .map((id) => tablesQuery.data?.find((candidate) => candidate.id === id))
+                              .filter((candidate): candidate is DiningTable => Boolean(candidate))
+                              .sort((left, right) => left.table_number - right.table_number)
+                              .map(({ id, table_number, capacity }) => ({
+                                tableId: id,
+                                tableNumber: table_number,
+                                capacity
+                              }))
+                          );
+                          return;
+                        }
+                        onTableSelected?.({
+                          tableId: table.id,
+                          tableNumber: table.table_number,
+                          sessionId: table.active_session?.id ?? null
+                        });
+                      }}
                     >
                       {contents}
                     </button>
@@ -1145,6 +1218,19 @@ export default function DiningService({
                             <p className="mt-1 text-xs">
                               {reservation.customer_name} · {reservation.time} · {reservation.state === "late" ? "Late" : reservation.state === "arrived" ? "Arrived" : "Upcoming"}
                             </p>
+                          )}
+                          {table.active_session && (
+                            <div className="mt-2 flex flex-wrap gap-1.5 text-xs font-semibold">
+                              <span className="rounded bg-slate-800 px-2 py-1 text-white">
+                                Order ID {table.active_session.display_order_id ?? "—"}
+                              </span>
+                              <span className="rounded bg-blue-100 px-2 py-1 text-blue-900">
+                                {reservation?.customer_name ? `Booked · ${reservation.customer_name}` : "Walk-in"}
+                              </span>
+                              <span className="rounded bg-violet-100 px-2 py-1 text-violet-900">
+                                {getTableOrderTypeLabel(table.active_session)}
+                              </span>
+                            </div>
                           )}
                         </div>
                         {activeUnlimitedTableIds.has(table.id) && (

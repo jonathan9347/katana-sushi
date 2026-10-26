@@ -191,7 +191,7 @@ const products: ProductSeed[] = [
   { name: "Bomb Hoso", category: "Fried Roll", price: 260, recipe: defaultRoll("Tuna", "Spicy mayo") },
   { name: "Futo California", category: "Fried Roll", price: 200, recipe: defaultRoll("Crabstick", "Mango") },
   { name: "Futo California", category: "Futo Maki", price: 190, recipe: defaultRoll("Crabstick", "Cucumber") },
-  { name: "Futo Ebi", category: "Futo Maki", price: 210, recipe: defaultRoll("Shrimp", "Cucumber") },
+  { name: "Futo Ebi", category: "Futo Maki", price: 210, recipe: [{ material: "Shrimp", quantity: 30, unit: "g" }] },
   { name: "Futo Salmon", category: "Futo Maki", price: 240, recipe: defaultRoll("Salmon", "Cream cheese") },
   { name: "Futo Crab Mango", category: "Futo Maki", price: 210, recipe: defaultRoll("Crabstick", "Mango") },
   { name: "Futo Dynamite", category: "Futo Maki", price: 210, recipe: defaultRoll("Kani tempura", "Spicy mayo") },

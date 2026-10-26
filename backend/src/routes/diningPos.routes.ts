@@ -98,7 +98,11 @@ const atomicDiningConfirmationSchema = z.object({
   selection: z.discriminatedUnion("type", [
     z.object({ type: z.literal("session"), sessionId: z.string().min(1) }),
     z.object({ type: z.literal("table"), tableId: z.string().min(1) }),
-    z.object({ type: z.literal("reservation"), reservationId: z.string().min(1) })
+    z.object({
+      type: z.literal("reservation"),
+      reservationId: z.string().min(1),
+      tableIds: z.array(z.string().min(1)).min(1).max(20).optional()
+    })
   ]),
   idempotencyKey: z.string().min(16).max(128),
   orderType: z.enum(["ala_carte", "unlimited"]),
@@ -594,10 +598,32 @@ router.get(
         dining_sessions: {
           where: { status: "active" },
           take: 1,
-          include: { guests: { orderBy: { guest_number: "asc" } } }
+          include: {
+            guests: { orderBy: { guest_number: "asc" } },
+            orders: {
+              where: { status: { in: ["committed", "reserved", "prepared", "ready"] } },
+              select: {
+                order_type: true,
+                items: { select: { unit_price: true } }
+              }
+            },
+            unlimited_sessions: {
+              where: { status: { in: ["active", "completed"] } },
+              select: { status: true }
+            }
+          }
         }
       }
     });
+    const activeSessions = tables
+      .flatMap((table) => table.dining_sessions)
+      .sort((left, right) =>
+        left.opened_at.getTime() - right.opened_at.getTime() || left.id.localeCompare(right.id)
+      );
+    const displayOrderIds = new Map(activeSessions.map((session, index) => [
+      session.id,
+      String((index % 99) + 1).padStart(2, "0")
+    ]));
     return res.json({
       tables: tables.map((table) => ({
         id: table.id,
@@ -606,7 +632,12 @@ router.get(
         status: normalizeTableStatus(table.status),
         linked_to_table_id: table.linked_to_table_id,
         unavailable_reason: table.unavailable_reason,
-        active_session: table.dining_sessions[0] ?? null
+        active_session: table.dining_sessions[0]
+          ? {
+              ...table.dining_sessions[0],
+              display_order_id: displayOrderIds.get(table.dining_sessions[0].id)
+            }
+          : null
       }))
     });
   })
@@ -1307,18 +1338,31 @@ router.post(
         throw new InventoryError("This order key is already tied to a different order.", "IDEMPOTENCY_CONFLICT", 409);
       }
 
-      const selectionMatches = body.selection.type === "session"
-        ? existing.dining_session_id === body.selection.sessionId
-        : body.selection.type === "table"
-          ? existing.dining_session.table_id === body.selection.tableId
-          : Boolean(await client.reservationTableAssignment.findFirst({
-            where: {
-              reservation_id: body.selection.reservationId,
-              table_id: existing.dining_session.table_id,
-              status: "seated"
-            },
-            select: { id: true }
-          }));
+      let selectionMatches = false;
+      if (body.selection.type === "session") {
+        selectionMatches = existing.dining_session_id === body.selection.sessionId;
+      } else if (body.selection.type === "table") {
+        selectionMatches = existing.dining_session.table_id === body.selection.tableId;
+      } else if (body.selection.tableIds) {
+        const assignedTables = await client.reservationTableAssignment.findMany({
+          where: { reservation_id: body.selection.reservationId, status: "seated" },
+          select: { table_id: true }
+        });
+        const selectedTableIds = [...body.selection.tableIds].sort();
+        const seatedTableIds = assignedTables.map(({ table_id }) => table_id).sort();
+        selectionMatches = selectedTableIds.length === seatedTableIds.length
+          && selectedTableIds.every((tableId, index) => tableId === seatedTableIds[index])
+          && selectedTableIds.includes(existing.dining_session.table_id);
+      } else {
+        selectionMatches = Boolean(await client.reservationTableAssignment.findFirst({
+          where: {
+            reservation_id: body.selection.reservationId,
+            table_id: existing.dining_session.table_id,
+            status: "seated"
+          },
+          select: { id: true }
+        }));
+      }
       if (!selectionMatches) {
         throw new InventoryError("This order key is already tied to a different table or reservation.", "IDEMPOTENCY_CONFLICT", 409);
       }
@@ -1426,7 +1470,113 @@ router.post(
               409
             );
           }
-          const assignments = reservation.table_assignments;
+          let assignments = reservation.table_assignments;
+          if (body.selection.tableIds) {
+            const selectedTableIds = Array.from(new Set(body.selection.tableIds));
+            if (selectedTableIds.length !== body.selection.tableIds.length) {
+              throw new InventoryError("Select each table only once.", "DUPLICATE_RESERVATION_TABLE", 400);
+            }
+            const selectedTables = await tx.table.findMany({
+              where: { id: { in: selectedTableIds } },
+              orderBy: [{ table_number: "asc" }, { id: "asc" }],
+              include: {
+                dining_sessions: {
+                  where: { status: "active" },
+                  take: 1,
+                  select: { id: true }
+                }
+              }
+            });
+            if (selectedTables.length !== selectedTableIds.length) {
+              throw new InventoryError("One or more selected tables no longer exist.", "TABLE_NOT_FOUND", 404);
+            }
+            if (selectedTables.some((table) =>
+              table.is_archived
+              || normalizeTableStatus(table.status) !== "available"
+              || Boolean(table.linked_to_table_id)
+              || table.dining_sessions.length > 0
+            )) {
+              throw new InventoryError("One or more selected tables are occupied or unavailable.", "RESERVATION_TABLE_UNAVAILABLE", 409);
+            }
+            if (selectedTables.reduce((total, table) => total + table.capacity, 0) < reservation.party_size) {
+              throw new InventoryError("The selected tables do not have enough seats for this reservation.", "RESERVATION_TABLE_CAPACITY", 409);
+            }
+            const today = new Intl.DateTimeFormat("en-CA", {
+              timeZone: "Asia/Manila",
+              year: "numeric",
+              month: "2-digit",
+              day: "2-digit"
+            }).format(new Date());
+            const dayStart = new Date(`${today}T00:00:00+08:00`);
+            const nextDayStart = new Date(dayStart.getTime() + 24 * 60 * 60 * 1000);
+            const conflictingAssignment = await tx.reservationTableAssignment.findFirst({
+              where: {
+                table_id: { in: selectedTableIds },
+                reservation_id: { not: reservation.id },
+                status: "assigned",
+                reservation: {
+                  date: { gte: dayStart, lt: nextDayStart },
+                  status: { in: ["confirmed", "approved"] }
+                }
+              },
+              select: { id: true }
+            });
+            if (conflictingAssignment) {
+              throw new InventoryError("One or more selected tables are held for another reservation.", "TABLE_RESERVED_FOR_ANOTHER_BOOKING", 409);
+            }
+
+            const existingAssignments = await tx.reservationTableAssignment.findMany({
+              where: { reservation_id: reservation.id },
+              select: { table_id: true, status: true }
+            });
+            const selectedIds = new Set(selectedTableIds);
+            await tx.reservationTableAssignment.updateMany({
+              where: {
+                reservation_id: reservation.id,
+                status: "assigned",
+                table_id: { notIn: selectedTableIds }
+              },
+              data: { status: "released" }
+            });
+            await tx.reservationTableAssignment.updateMany({
+              where: {
+                reservation_id: reservation.id,
+                status: "released",
+                table_id: { in: selectedTableIds }
+              },
+              data: { status: "assigned" }
+            });
+            const knownTableIds = new Set(existingAssignments.map(({ table_id }) => table_id));
+            await tx.reservationTableAssignment.createMany({
+              data: selectedTables
+                .filter((table) => !knownTableIds.has(table.id))
+                .map((table) => ({
+                  reservation_id: reservation.id,
+                  table_id: table.id,
+                  seat_count: table.capacity,
+                  status: "assigned"
+                }))
+            });
+            assignments = await tx.reservationTableAssignment.findMany({
+              where: {
+                reservation_id: reservation.id,
+                status: "assigned",
+                table_id: { in: Array.from(selectedIds) }
+              },
+              orderBy: [{ table: { table_number: "asc" } }, { table_id: "asc" }],
+              include: {
+                table: {
+                  include: {
+                    dining_sessions: {
+                      where: { status: "active" },
+                      take: 1,
+                      select: { id: true }
+                    }
+                  }
+                }
+              }
+            });
+          }
           if (assignments.length === 0) {
             throw new InventoryError(
               "This reservation has no active table assignments.",
@@ -2016,6 +2166,41 @@ router.post(
         where: { linked_to_table_id: session.table_id, is_archived: false },
         data: { status: "available", linked_to_table_id: null, unavailable_reason: null }
       });
+      const seatedReservations = await tx.reservationTableAssignment.findMany({
+        where: {
+          table_id: { in: tableIdsSnapshot },
+          status: "seated",
+          reservation: {
+            status: { in: ["seated", "preparing", "in_progress", "pending_final_payment"] }
+          }
+        },
+        select: { reservation_id: true, reservation: { select: { status: true } } }
+      });
+      const completedReservationIds = Array.from(new Set(seatedReservations.map(({ reservation_id }) => reservation_id)));
+      if (completedReservationIds.length > 0) {
+        await tx.reservation.updateMany({
+          where: { id: { in: completedReservationIds } },
+          data: { status: "completed" }
+        });
+        await tx.reservationTableAssignment.updateMany({
+          where: { reservation_id: { in: completedReservationIds }, status: "seated" },
+          data: { status: "completed" }
+        });
+        await tx.reservationActivity.createMany({
+          data: Array.from(new Map(seatedReservations.map((entry) => [
+            entry.reservation_id,
+            entry.reservation.status
+          ])).entries()).map(([reservation_id, from_status]) => ({
+            reservation_id,
+            event_type: "status_changed",
+            from_status,
+            to_status: "completed",
+            actor_type: "staff",
+            actor_id: cashierId,
+            reason: "Table bill completed"
+          }))
+        });
+      }
       for (const unlimited of session.unlimited_sessions.filter((item) => item.status === "completed")) {
         const packageAmount = unlimited.pax_count * Number(unlimited.price_per_pax);
         await tx.unlimitedSession.update({

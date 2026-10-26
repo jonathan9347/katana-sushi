@@ -21,10 +21,16 @@ function asObject(value: unknown): Record<string, unknown> {
 
 export function getCateringQuantityRules(value: unknown): CateringQuantityRules {
   const items = asObject(value);
-  const minimum = items.minimum ?? items.minKg;
+  const minimum = items.bookingRole === "add_on" ? 1 : items.minimum ?? items.minKg;
   const maximum = items.maximum ?? items.maxKg;
-  const step = items.step ?? items.stepKg ?? 1;
   const unit = typeof items.unit === "string" ? items.unit : "kg";
+  const configuredStep = items.step ?? items.stepKg ?? 1;
+  if (typeof configuredStep !== "number" || !Number.isFinite(configuredStep) || configuredStep <= 0) {
+    throw new Error("Catering package has invalid quantity limits.");
+  }
+  const step = items.bookingRole === "add_on" && unit.toLowerCase() === "kg"
+    ? Math.min(configuredStep, 0.001)
+    : configuredStep;
 
   if (typeof minimum !== "number" || !Number.isFinite(minimum) || minimum <= 0) {
     throw new Error("Catering package has invalid quantity limits.");
@@ -123,6 +129,39 @@ export function getCateringSelectionError(stationTypes: string[]): string | null
   return null;
 }
 
+export function normalizeCateringStationType(
+  stationType: string | null,
+  packageName: string,
+  value: unknown
+): string | null {
+  const normalizedType = stationType?.trim().toLowerCase().replace(/[\s-]+/g, "_") ?? null;
+  if (normalizedType !== "sashimi_bar" && normalizedType !== "sashimi") {
+    return normalizedType;
+  }
+
+  const items = asObject(value);
+  const identity = packageName.toLowerCase();
+  const minimum = items.minimum ?? items.minKg;
+  const maximum = items.maximum ?? items.maxKg;
+  if (
+    identity.includes("whole tuna") ||
+    (minimum === 20 && maximum === 40)
+  ) {
+    return "whole_tuna";
+  }
+
+  if (
+    items.bookingRole === "add_on" ||
+    items.pricingModel === "per_unit" ||
+    items.pricingType === "range"
+  ) {
+    if (/\btuna\b/.test(identity)) return "tuna_add_on";
+    if (/\bsalmon\b/.test(identity)) return "salmon_add_on";
+  }
+
+  return normalizedType;
+}
+
 export function getCateringInventoryRequirements(
   stationType: string | null,
   quantityKg?: number
@@ -138,14 +177,6 @@ export function getCateringInventoryRequirements(
       throw new Error("A valid kilogram quantity is required for the salmon add-on.");
     }
     return [{ materialName: "Salmon sashimi block", quantity: quantityKg * 1000, unit: "g" }];
-  }
-  if (stationType === "tempura_live") {
-    return [
-      { materialName: "Shrimp", quantity: 5000, unit: "g" },
-      { materialName: "Tempura flour", quantity: 2000, unit: "g" },
-      { materialName: "Cooking oil", quantity: 3000, unit: "ml" },
-      { materialName: "Dipping sauce", quantity: 1500, unit: "ml" }
-    ];
   }
   return [];
 }

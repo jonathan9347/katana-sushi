@@ -35,15 +35,26 @@ test("uses customer popups and staged table, reservation, and pickup selection v
       return;
     }
     if (url.pathname === "/api/pos/dining/tables") {
-      await route.fulfill({ json: { tables: [{
-        id: "table-12",
-        table_number: 12,
-        capacity: 4,
-        status: "available",
-        linked_to_table_id: null,
-        unavailable_reason: null,
-        active_session: null
-      }] } });
+      await route.fulfill({ json: { tables: [
+        {
+          id: "table-12",
+          table_number: 12,
+          capacity: 4,
+          status: "available",
+          linked_to_table_id: null,
+          unavailable_reason: null,
+          active_session: null
+        },
+        {
+          id: "table-15",
+          table_number: 15,
+          capacity: 4,
+          status: "available",
+          linked_to_table_id: null,
+          unavailable_reason: null,
+          active_session: null
+        }
+      ] } });
       return;
     }
     if (url.pathname === "/api/pos/dining/upcoming-reservations") {
@@ -51,7 +62,7 @@ test("uses customer popups and staged table, reservation, and pickup selection v
         id: "reservation-1",
         time: "07:30 PM",
         customer_name: "Ava Guest",
-        party_size: 3,
+        party_size: 2,
         table_numbers: [15],
         temporary_table_numbers: [],
         state: "late"
@@ -116,7 +127,21 @@ test("uses customer popups and staged table, reservation, and pickup selection v
   await expect(page.getByRole("region", { name: "Today's reservation list" })).toBeVisible();
   await expect(page.getByRole("region", { name: "POS order builder" })).toContainText("2 × Iced Tea");
   await page.getByRole("button", { name: /Ava Guest/ }).click();
-  await expect(page.getByText("Ava Guest · 07:30 PM selected")).toBeVisible();
+  const reservationBoard = page.getByRole("region", { name: "Table board" });
+  await expect(reservationBoard).toBeVisible();
+  await expect(reservationBoard).toContainText("Assign table(s) for Ava Guest");
+  const reservationConfirmButton = page.getByRole("button", { name: "Select table/s", exact: true });
+  await expect(reservationConfirmButton).toBeVisible();
+  await expect(reservationConfirmButton).toBeDisabled();
+  const reservationTable = reservationBoard.getByRole("button", { name: "Choose Table 15, Reserved" });
+  await expect(reservationTable).toHaveAttribute("aria-pressed", "false");
+  await reservationTable.click();
+  await expect(reservationTable).toHaveAttribute("aria-pressed", "true");
+  await expect(reservationBoard.getByRole("button", { name: /Use selected tables|Select table\/s/ })).toHaveCount(0);
+  await expect(reservationConfirmButton).toBeEnabled();
+  await expect(page.getByText("Selected seats: 4 / 2")).toBeVisible();
+  await reservationConfirmButton.click();
+  await expect(page.getByText("Ava Guest · 07:30 PM · Table 15 selected")).toBeVisible();
   await expect(page.getByRole("button", { name: "Confirm & Print" })).toBeVisible();
   expect(reservationSeatCount).toBe(0);
 
