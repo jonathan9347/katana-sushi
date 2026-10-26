@@ -395,24 +395,38 @@ test("Catering booking prices tuna add-ons from their quantity and keeps Whole T
   await expect(page.getByText("Choose an option", { exact: true })).toHaveCount(0);
 });
 
-test("Catering booking restores Tuna and Salmon add-ons from legacy Sashimi Bar package types", async ({ page }) => {
-  const legacyPackages = cateringPackages.map((item) => (
-    item.id === "pkg_sashimi_tuna_test" || item.id === "pkg_sashimi_salmon_test"
-      ? { ...item, stationType: "sashimi_bar" }
-      : item
-  ));
-  await mockApi(page, legacyPackages);
+test("Catering booking keeps Sashimi Bar and shows Tuna and Salmon as separate add-ons", async ({ page }) => {
+  const packagesWithSashimiBar = [
+    ...cateringPackages,
+    {
+      id: "pkg_sashimi_bar_test",
+      stationType: "sashimi_bar",
+      name: "Sashimi Bar",
+      description: "Sashimi service station",
+      pricePerPerson: 0,
+      minPax: 50,
+      maxPax: 60,
+      items: { pricingType: "flat" as const, pricingModel: "tier" as const, flatPrice: 6000 },
+      imageUrl: null
+    }
+  ];
+  await mockApi(page, packagesWithSashimiBar);
   await page.goto("/catering/book");
 
+  const sashimiStation = page.locator("label").filter({ hasText: "Sashimi Bar" }).getByRole("checkbox");
   const tunaStation = page.locator("label").filter({ hasText: "Tuna Add-on" }).getByRole("checkbox");
   const salmonStation = page.locator("label").filter({ hasText: "Salmon Add-on" }).getByRole("checkbox");
+  await expect(sashimiStation).toBeVisible();
   await expect(tunaStation).toBeVisible();
   await expect(salmonStation).toBeVisible();
+  await expect(sashimiStation).toHaveCount(1);
   await expect(tunaStation).toHaveCount(1);
   await expect(salmonStation).toHaveCount(1);
 
+  await sashimiStation.check();
   await tunaStation.check();
   await salmonStation.check();
+  await expect(page.locator("#catering-mobile-details").getByText("Sashimi service station", { exact: true })).toBeVisible();
   await expect(page.getByText("Exact Tuna quantity (kg) *")).toBeVisible();
   await expect(page.getByText("Exact Salmon quantity (kg) *")).toBeVisible();
 });

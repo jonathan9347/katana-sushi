@@ -68,7 +68,7 @@ function earliestEventDate() {
 
 function getStationType(item: CateringPackage) {
   const stationType = item.stationType?.trim().toLowerCase();
-  if (stationType && stationType !== "sashimi_bar" && stationType !== "sashimi") {
+  if (stationType) {
     return stationType;
   }
 
@@ -81,14 +81,14 @@ function getStationType(item: CateringPackage) {
   ) {
     return "whole_tuna";
   }
-  if (stationType === "sashimi_bar" || stationType === "sashimi" || item.id.includes("sashimi")) {
+  if (item.id.includes("sashimi")) {
     if (packageIdentity.includes("salmon")) {
       return "salmon_add_on";
     }
     if (packageIdentity.includes("tuna")) {
       return "tuna_add_on";
     }
-    return stationType ?? "tuna_add_on";
+    return "tuna_add_on";
   }
 
   if (packageIdentity.includes("tempura")) {
