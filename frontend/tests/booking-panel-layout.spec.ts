@@ -397,7 +397,11 @@ test("Catering booking prices tuna add-ons from their quantity and keeps Whole T
 
 test("Catering booking keeps Sashimi Bar and shows Tuna and Salmon as separate add-ons", async ({ page }) => {
   const packagesWithSashimiBar = [
-    ...cateringPackages,
+    ...cateringPackages.map((item) => (
+      item.id === "pkg_sashimi_tuna_test" || item.id === "pkg_sashimi_salmon_test"
+        ? { ...item, stationType: "sashimi_bar" }
+        : item
+    )),
     {
       id: "pkg_sashimi_bar_test",
       stationType: "sashimi_bar",

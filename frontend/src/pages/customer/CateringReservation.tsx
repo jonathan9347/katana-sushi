@@ -68,11 +68,12 @@ function earliestEventDate() {
 
 function getStationType(item: CateringPackage) {
   const stationType = item.stationType?.trim().toLowerCase();
-  if (stationType) {
+  const packageIdentity = `${item.id} ${item.name}`.toLowerCase();
+
+  if (stationType && stationType !== "sashimi_bar" && stationType !== "sashimi") {
     return stationType;
   }
 
-  const packageIdentity = `${item.id} ${item.name} ${item.description ?? ""}`.toLowerCase();
   if (
     packageIdentity.includes("whole_tuna") ||
     packageIdentity.includes("whole tuna") ||
@@ -81,17 +82,20 @@ function getStationType(item: CateringPackage) {
   ) {
     return "whole_tuna";
   }
-  if (item.id.includes("sashimi")) {
-    if (packageIdentity.includes("salmon")) {
-      return "salmon_add_on";
+
+  if (
+    (stationType === "sashimi_bar" || stationType === "sashimi" || item.id.includes("sashimi")) &&
+    isPerUnitPackage(item)
+  ) {
+    const hasTuna = /\btuna\b/.test(packageIdentity);
+    const hasSalmon = /\bsalmon\b/.test(packageIdentity);
+    if (hasTuna !== hasSalmon) {
+      return hasTuna ? "tuna_add_on" : "salmon_add_on";
     }
-    if (packageIdentity.includes("tuna")) {
-      return "tuna_add_on";
-    }
-    return "tuna_add_on";
   }
 
-  if (packageIdentity.includes("tempura")) {
+  const packageDetails = `${packageIdentity} ${item.description ?? ""}`.toLowerCase();
+  if (packageDetails.includes("tempura")) {
     return "tempura_live";
   }
 
