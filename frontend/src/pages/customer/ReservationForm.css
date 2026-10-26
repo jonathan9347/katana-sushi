@@ -1102,11 +1102,20 @@
   padding-bottom: 0.5rem;
   overscroll-behavior: contain;
   scrollbar-width: thin;
-  scrollbar-color: rgb(179 41 53 / 38%) transparent;
+  scrollbar-color: transparent transparent;
 }
 
 .customer-pickup-cart-scroll::-webkit-scrollbar-thumb {
   border-radius: 999px;
+  background-color: transparent;
+  background-image: none;
+}
+
+.customer-pickup-cart-scroll[data-scroll-active="true"] {
+  scrollbar-color: rgb(179 41 53 / 38%) transparent;
+}
+
+.customer-pickup-cart-scroll[data-scroll-active="true"]::-webkit-scrollbar-thumb {
   background-color: rgb(179 41 53 / 38%);
 }
 

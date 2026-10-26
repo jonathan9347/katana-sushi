@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { Check, MapPin, Phone, Search, ShoppingBag, X } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import BackToHome from "../../components/layout/BackToHome";
@@ -97,6 +97,8 @@ export default function TakeoutOrder() {
   const [submitting, setSubmitting] = useState(false);
   const [reservationRules, setReservationRules] = useState<ReservationRulesResponse | null>(null);
   const [reservationHoursError, setReservationHoursError] = useState("");
+  const [pickupScrollActive, setPickupScrollActive] = useState(false);
+  const pickupScrollTimer = useRef<number | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -139,6 +141,12 @@ export default function TakeoutOrder() {
     return () => document.removeEventListener("keydown", closeOnEscape);
   }, [contactDialogOpen]);
 
+  useEffect(() => () => {
+    if (pickupScrollTimer.current !== null) {
+      window.clearTimeout(pickupScrollTimer.current);
+    }
+  }, []);
+
   const cart = useMemo(
     () => products
       .filter((product) => (quantities[product.id] ?? 0) > 0)
@@ -173,6 +181,17 @@ export default function TakeoutOrder() {
       const next = Math.max(0, Math.min(100, (current[productId] ?? 0) + amount));
       return { ...current, [productId]: next };
     });
+  }
+
+  function handlePickupScroll() {
+    setPickupScrollActive(true);
+    if (pickupScrollTimer.current !== null) {
+      window.clearTimeout(pickupScrollTimer.current);
+    }
+    pickupScrollTimer.current = window.setTimeout(() => {
+      setPickupScrollActive(false);
+      pickupScrollTimer.current = null;
+    }, 700);
   }
 
   function openContactDialog() {
@@ -343,7 +362,11 @@ export default function TakeoutOrder() {
                 <h2>Your pickup order</h2>
                 <span>{cartItemCount} {cartItemCount === 1 ? "item" : "items"}</span>
               </div>
-              <div className="customer-pickup-cart-scroll">
+              <div
+                className="customer-pickup-cart-scroll"
+                data-scroll-active={pickupScrollActive}
+                onScroll={handlePickupScroll}
+              >
                 {cart.length === 0 ? (
                   <>
                     <section className="customer-pickup-empty-state">

@@ -246,6 +246,7 @@ test("pickup cart scroll reveals location and good-to-know content at 1920x910",
 
   const cartPanel = page.getByRole("complementary", { name: "Your pickup order" });
   const scrollArea = cartPanel.locator(".customer-pickup-cart-scroll");
+  await expect(scrollArea).toHaveAttribute("data-scroll-active", "false");
   const scrollMetrics = await scrollArea.evaluate((element) => ({
     clientHeight: element.clientHeight,
     scrollHeight: element.scrollHeight
@@ -263,6 +264,8 @@ test("pickup cart scroll reveals location and good-to-know content at 1920x910",
     element.scrollTop = element.scrollHeight;
   });
   await expect(goodToKnow).toBeInViewport();
+  await expect(scrollArea).toHaveAttribute("data-scroll-active", "true");
+  await expect(scrollArea).toHaveAttribute("data-scroll-active", "false", { timeout: 2_000 });
   expect(await page.evaluate(() => window.scrollY)).toBe(0);
 });
 
