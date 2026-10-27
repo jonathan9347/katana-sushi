@@ -297,9 +297,6 @@ export default function MaterialsList({ role, onNavigateStockView, onOpenReserva
       <CardHeader className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
         <div>
           <CardTitle>Raw Materials</CardTitle>
-          <p className="mt-1 text-sm text-slate-600">
-            Reserved shows Pickup and Catering holds only; Available continues to account for all active stock commitments.
-          </p>
         </div>
         <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
           <label className="relative block">

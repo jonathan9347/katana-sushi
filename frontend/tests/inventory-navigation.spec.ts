@@ -283,7 +283,7 @@ test("Stock Reserved column uses the Pickup and Catering quantity", async ({ pag
   });
 
   await page.goto("/staff/inventory");
-  await expect(page.getByText("Reserved shows Pickup and Catering holds only; Available continues to account for all active stock commitments.")).toBeVisible();
+  await expect(page.getByText("Reserved shows Pickup and Catering holds only; Available continues to account for all active stock commitments.")).toHaveCount(0);
   const row = page.getByRole("row").filter({ hasText: "Inventory Fixture Rice" });
   await expect(row.getByRole("cell").nth(3)).toHaveText("5");
   await expect(row.getByRole("cell").nth(4)).toHaveText("10");
