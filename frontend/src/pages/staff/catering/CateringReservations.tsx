@@ -37,6 +37,7 @@ type RawCateringReservation = {
   total_price: number;
   payment_plan?: string;
   downpayment_amount?: number;
+  downpayment_status?: string;
   remaining_balance?: number;
   final_payment_status?: string;
   payment_status?: string;
@@ -72,6 +73,7 @@ type CateringReservation = {
   status: string;
   payment_plan?: string;
   downpayment_amount?: number;
+  downpayment_status?: string;
   remaining_balance?: number;
   payment_status?: string;
   payment_history?: PaymentHistoryItem[];
@@ -155,6 +157,7 @@ export default function CateringReservations() {
       status: reservation.status,
       payment_plan: reservation.payment_plan,
       downpayment_amount: reservation.downpayment_amount,
+      downpayment_status: reservation.downpayment_status,
       remaining_balance: reservation.remaining_balance,
       payment_status: reservation.payment_status ?? reservation.final_payment_status,
       payment_history: reservation.payment_history ?? [],
@@ -503,6 +506,11 @@ export default function CateringReservations() {
                               : ""}
                           </p>
                           <p className="text-sm text-slate-600">Package total: ₱{reservation.package_total?.toFixed(2) ?? reservation.total_price.toFixed(2)}</p>
+                          <p className="text-sm font-semibold text-slate-700">
+                            Initial payment: {reservation.downpayment_status === "paid"
+                              ? `Received ₱${Number(reservation.downpayment_amount ?? 0).toFixed(2)}`
+                              : "Not received"}
+                          </p>
                           {Number(reservation.mobilization_fee ?? 0) > 0 && (
                             <p className="text-sm text-slate-600">Mobilization fee: ₱{reservation.mobilization_fee?.toFixed(2)}</p>
                           )}
@@ -527,9 +535,16 @@ export default function CateringReservations() {
                             </Button>
                           ) : null}
                           {reservation.status === "confirmed" ? (
-                            <Button size="sm" onClick={() => void handleStart(reservation)} disabled={actionLoading[reservation.id]}>
-                              {actionLoading[reservation.id] ? "Processing..." : "Start preparation"}
-                            </Button>
+                            <>
+                              <Button size="sm" onClick={() => void handleStart(reservation)} disabled={actionLoading[reservation.id]}>
+                                {actionLoading[reservation.id] ? "Processing..." : "Start preparation"}
+                              </Button>
+                              {hasOpenPayment(reservation) && (
+                                <Button size="sm" variant="outline" onClick={() => setActiveReservation(reservation)}>
+                                  Record balance
+                                </Button>
+                              )}
+                            </>
                           ) : null}
                           {reservation.status === "in_progress" ? (
                             hasOpenPayment(reservation) ? (

@@ -100,8 +100,9 @@ test("uses customer popups and staged table, reservation, and pickup selection v
   await expect(page.getByRole("link", { name: "Takeout Sale" })).toHaveCount(0);
 
   await page.getByRole("button", { name: "New Customer" }).click();
-  await page.getByRole("dialog", { name: "New Customer" }).getByRole("button", { name: "Dine-in" }).click();
-  await page.getByRole("dialog", { name: "Dine-in" }).getByRole("button", { name: "Walk-in" }).click();
+  await page.getByRole("dialog", { name: "New Customer" }).getByRole("button", { name: /Dine-in/ }).click();
+  await page.getByRole("dialog", { name: "Dine-in" }).getByRole("button", { name: /Walk-in/ }).click();
+  await page.getByRole("dialog", { name: "Ready to order" }).getByRole("button", { name: "Start ordering" }).click();
   await expect(page.getByRole("region", { name: "POS order builder" })).toContainText("Menu");
   await expect(page.getByRole("button", { name: /Iced Tea/ })).toBeVisible();
   await page.getByRole("region", { name: "POS order builder" }).getByRole("button", { name: /Iced Tea Beverage/ }).click();
@@ -119,17 +120,14 @@ test("uses customer popups and staged table, reservation, and pickup selection v
   expect(sessionCreationCount).toBe(0);
 
   await page.getByRole("button", { name: "New Customer" }).click();
-  await page.getByRole("dialog", { name: "New Customer" }).getByRole("button", { name: "Dine-in" }).click();
-  await page.getByRole("dialog", { name: "Dine-in" }).getByRole("button", { name: "Reservation" }).click();
-  await expect(page.getByRole("region", { name: "POS order builder" })).toContainText("Menu");
-  await page.getByRole("region", { name: "POS order builder" }).getByRole("button", { name: /Iced Tea Beverage/ }).click();
-  await page.getByRole("button", { name: "Proceed" }).click();
-  await expect(page.getByRole("region", { name: "Today's reservation list" })).toBeVisible();
-  await expect(page.getByRole("region", { name: "POS order builder" })).toContainText("2 × Iced Tea");
-  await page.getByRole("button", { name: /Ava Guest/ }).click();
+  await page.getByRole("dialog", { name: "New Customer" }).getByRole("button", { name: /Dine-in/ }).click();
+  await page.getByRole("dialog", { name: "Dine-in" }).getByRole("button", { name: /Reservation/ }).click();
+  await page.getByRole("dialog", { name: "Today's reservations" }).getByRole("button", { name: /Ava Guest/ }).click();
+  await page.getByRole("dialog", { name: "Ready to order" }).getByRole("button", { name: "Start ordering" }).click();
   const reservationBoard = page.getByRole("region", { name: "Table board" });
   await expect(reservationBoard).toBeVisible();
   await expect(reservationBoard).toContainText("Assign table(s) for Ava Guest");
+  await expect(page.getByRole("region", { name: "POS order builder" })).toContainText("1 × Iced Tea");
   const reservationConfirmButton = page.getByRole("button", { name: "Select table/s", exact: true });
   await expect(reservationConfirmButton).toBeVisible();
   await expect(reservationConfirmButton).toBeDisabled();
@@ -137,7 +135,7 @@ test("uses customer popups and staged table, reservation, and pickup selection v
   await expect(reservationTable).toHaveAttribute("aria-pressed", "false");
   await reservationTable.click();
   await expect(reservationTable).toHaveAttribute("aria-pressed", "true");
-  await expect(reservationBoard.getByRole("button", { name: /Use selected tables|Select table\/s/ })).toHaveCount(0);
+  await expect(reservationBoard.getByRole("button", { name: "Select table/s" })).toBeVisible();
   await expect(reservationConfirmButton).toBeEnabled();
   await expect(page.getByText("Selected seats: 4 / 2")).toBeVisible();
   await reservationConfirmButton.click();
@@ -146,18 +144,17 @@ test("uses customer popups and staged table, reservation, and pickup selection v
   expect(reservationSeatCount).toBe(0);
 
   await page.getByRole("button", { name: "New Customer" }).click();
-  await page.getByRole("dialog", { name: "New Customer" }).getByRole("button", { name: "Take-out" }).click();
-  await page.getByRole("dialog", { name: "Take-out" }).getByRole("button", { name: "Walk-in" }).click();
+  await page.getByRole("dialog", { name: "New Customer" }).getByRole("button", { name: /Take-out/ }).click();
+  await page.getByRole("dialog", { name: "Take-out" }).getByRole("button", { name: /Walk-in/ }).click();
+  await page.getByRole("dialog", { name: "Ready to order" }).getByRole("button", { name: "Start ordering" }).click();
   await expect(page.getByRole("region", { name: "POS order builder" })).toContainText("PHP 45.00");
 
   await page.getByRole("button", { name: "New Customer" }).click();
-  await page.getByRole("dialog", { name: "New Customer" }).getByRole("button", { name: "Take-out" }).click();
-  await page.getByRole("dialog", { name: "Take-out" }).getByRole("button", { name: "Pickup" }).click();
-  await expect(page.getByRole("region", { name: "Pickup order list" })).toBeVisible();
-  await expect(page.getByRole("region", { name: "POS order builder" })).toBeVisible();
-  await expect(page.getByRole("region", { name: "POS order builder" })).toContainText("Choose a pickup order to load its read-only items.");
-  await page.getByLabel("Search by Order ID or customer name").fill("PICK");
-  await page.getByRole("button", { name: /PICK-123 · Mika Customer/ }).click();
+  await page.getByRole("dialog", { name: "New Customer" }).getByRole("button", { name: /Take-out/ }).click();
+  await page.getByRole("dialog", { name: "Take-out" }).getByRole("button", { name: /Pickup/ }).click();
+  await page.getByLabel("Search pickup orders by customer or reference").fill("PICK");
+  await page.getByRole("dialog", { name: "Select pickup order" }).getByRole("button", { name: /Mika Customer.*PICK-123/ }).click();
+  await page.getByRole("dialog", { name: "Ready to order" }).getByRole("button", { name: "Start ordering" }).click();
   await expect(page.getByRole("region", { name: "POS order builder" })).toContainText("1 × Iced Tea");
   await expect(page.getByRole("region", { name: "POS order builder" })).toContainText("PHP 250.00");
   await expect(page.getByRole("button", { name: "Checkout" })).toBeVisible();
@@ -238,8 +235,9 @@ test("confirms a walk-in dine-in order atomically after table selection and rese
 
   const builder = page.getByRole("region", { name: "POS order builder" });
   await page.getByRole("button", { name: "New Customer" }).click();
-  await page.getByRole("dialog", { name: "New Customer" }).getByRole("button", { name: "Dine-in" }).click();
-  await page.getByRole("dialog", { name: "Dine-in" }).getByRole("button", { name: "Walk-in" }).click();
+  await page.getByRole("dialog", { name: "New Customer" }).getByRole("button", { name: /Dine-in/ }).click();
+  await page.getByRole("dialog", { name: "Dine-in" }).getByRole("button", { name: /Walk-in/ }).click();
+  await page.getByRole("dialog", { name: "Ready to order" }).getByRole("button", { name: "Start ordering" }).click();
   await builder.getByRole("button", { name: /California Roll/ }).click();
   await expect(builder).toContainText("1 × California Roll");
   await page.getByRole("button", { name: "Proceed" }).click();

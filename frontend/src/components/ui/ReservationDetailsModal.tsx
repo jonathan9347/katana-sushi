@@ -60,8 +60,10 @@ export function ReservationDetailsModal({ open, title, reservation, actions, onP
   const isFullyPaid = remainingBalance <= 0 || paymentStatus.toLowerCase() === "fully paid";
   const offBookingDate = Boolean(reservation?.date && manilaDateKey(reservation.date) !== todayManilaDateKey());
   const isAdmin = localStorage.getItem("katana_role")?.toLowerCase() === "admin";
-  const canRecordPayment = Boolean(reservation?.id) && remainingBalance > 0 &&
-    !["cancelled", "canceled", "declined", "rejected", "expired", "no-show", "no_show"].includes(reservation?.status?.toLowerCase() ?? "");
+  const canRecordPayment = Boolean(reservation?.id) && remainingBalance > 0 && (
+    reservation?.type !== "catering" ||
+    ["confirmed", "approved", "in_progress", "preparing", "pending_final_payment"].includes(reservation?.status?.toLowerCase() ?? "")
+  ) && !["cancelled", "canceled", "declined", "rejected", "expired", "no-show", "no_show", "completed"].includes(reservation?.status?.toLowerCase() ?? "");
   const needsReference = paymentMethod !== "cash";
   const endpoint = useMemo(() => {
     if (!reservation?.id) return "";

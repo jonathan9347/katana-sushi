@@ -1,8 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ChefHat, Printer, ShoppingCart } from "lucide-react";
-import { Link } from "react-router-dom";
-import SectionNav, { SectionNavTab } from "../../../components/layout/SectionNav";
+import { Check, Printer, X } from "lucide-react";
 import { Dialog } from "../../../components/ui/dialog";
 import UnlimitedTimer from "../../../components/pos/UnlimitedTimer";
 import { usePosCart, type PosCartKey } from "./store";
@@ -178,6 +176,9 @@ type Props = {
   onReservationSelected?: (reservation: UpcomingReservation) => void;
   onDraftStateChange?: (hasDrafts: boolean) => void;
   onBackToBoard?: () => void;
+  boardActionLabel?: string;
+  boardActionDisabled?: boolean;
+  onBoardAction?: () => void;
 };
 type DraftItem = { productId: string; quantity: number };
 type CommitOrderInput = { review: ReviewedOrder; printWindow: Window | null };
@@ -188,11 +189,6 @@ type DiningActionResult = {
   replayed?: boolean;
   session?: { id: string };
 };
-
-const posTabs: SectionNavTab[] = [
-  { id: "sale", label: "Main POS", icon: <ShoppingCart className="h-4 w-4" />, to: "/staff/pos", end: true },
-  { id: "kitchen", label: "Kitchen Tickets", icon: <ChefHat className="h-4 w-4" />, to: "/staff/kitchen" }
-];
 
 function money(value: number) {
   return `PHP ${Number(value).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -303,7 +299,10 @@ export default function DiningService({
   reservationPartySize = 0,
   onReservationSelected,
   onDraftStateChange,
-  onBackToBoard
+  onBackToBoard,
+  boardActionLabel,
+  boardActionDisabled = false,
+  onBoardAction
 }: Props) {
   const role = (localStorage.getItem("katana_role") ?? "").toLowerCase();
   const isAdmin = role === "admin";
@@ -349,6 +348,10 @@ export default function DiningService({
   const [temporaryTableReservationId, setTemporaryTableReservationId] = useState<string | null>(null);
   const [reservationTableSelection, setReservationTableSelection] = useState<string[]>([]);
   const [completedTransaction, setCompletedTransaction] = useState<CheckoutTransaction | null>(null);
+  const boardDialogRef = useRef<HTMLDivElement>(null);
+  const boardReturnFocusRef = useRef<HTMLElement | null>(null);
+  const onBackToBoardRef = useRef(onBackToBoard);
+  onBackToBoardRef.current = onBackToBoard;
   const queryClient = useQueryClient();
   const { toast } = useToast();
   const aLaCarteDraftItems = carts.dine_in_ala_carte;
@@ -360,6 +363,63 @@ export default function DiningService({
   }));
   const draftKey = draftKeys[cartKey];
   const hasDraftItems = aLaCarteDraftItems.length > 0 || unlimitedDraftItems.length > 0;
+
+  useEffect(() => {
+    if (!boardOnly) return;
+
+    boardReturnFocusRef.current = document.activeElement instanceof HTMLElement
+      ? document.activeElement
+      : null;
+    boardDialogRef.current?.focus();
+    const handleBoardKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        onBackToBoardRef.current?.();
+        return;
+      }
+      if (event.key !== "Tab" || !boardDialogRef.current) return;
+      const focusable = [...boardDialogRef.current.querySelectorAll<HTMLElement>(
+        'button:not([disabled]), a[href], input:not([disabled]), [tabindex]:not([tabindex="-1"])'
+      )];
+      if (focusable.length === 0) {
+        event.preventDefault();
+        boardDialogRef.current.focus();
+        return;
+      }
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+    document.addEventListener("keydown", handleBoardKeyDown);
+    return () => {
+      document.removeEventListener("keydown", handleBoardKeyDown);
+      const returnTarget = boardReturnFocusRef.current;
+      window.requestAnimationFrame(() => {
+        if (returnTarget?.isConnected) {
+          returnTarget.focus();
+          return;
+        }
+        const reservationList = document.querySelector<HTMLElement>('[aria-label="Today\'s reservation list"]');
+        if (reservationList && boardPurpose === "reservation" && reservationForBoard) {
+          const reservationButton = [...reservationList.querySelectorAll<HTMLButtonElement>("button")]
+            .find((button) => button.textContent?.includes(reservationForBoard.customer_name));
+          if (reservationButton) {
+            reservationButton.focus();
+            return;
+          }
+        }
+        const orderAction = [...document.querySelectorAll<HTMLButtonElement>('[aria-label="POS order builder"] button')]
+          .find((button) => /^(Proceed|Confirm & Print|Print order)$/.test(button.textContent?.trim() ?? ""));
+        orderAction?.focus();
+      });
+    };
+  }, [boardOnly]);
 
   useEffect(() => {
     onDraftStateChange?.(hasDraftItems);
@@ -796,7 +856,6 @@ export default function DiningService({
             <p className="text-sm font-bold uppercase text-red-700">Kitchen</p>
             <h1 className="text-3xl font-black text-slate-950">Kitchen tickets</h1>
           </header>
-          <SectionNav orientation="horizontal" tabs={posTabs} />
           {kitchenQuery.isError && <p className="rounded bg-red-50 p-3 text-sm text-red-800">Unable to load kitchen tickets.</p>}
           <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
             {currentOrders.map((order) => (
@@ -839,30 +898,62 @@ export default function DiningService({
   }
 
   return (
-    <MainContainer className={embedded ? "space-y-5" : "min-h-screen bg-slate-100 px-4 py-5 lg:pr-6"}>
-      <div className={embedded ? "space-y-5" : "mx-auto max-w-7xl space-y-5"}>
-        <header className="flex flex-wrap items-end justify-between gap-3">
+    <MainContainer
+      className={boardOnly && embedded
+        ? "pos-table-modal-backdrop"
+        : embedded ? "space-y-5" : "min-h-screen bg-slate-100 px-4 py-5 lg:pr-6"}
+      onClick={boardOnly && embedded ? (event) => {
+        if (event.target === event.currentTarget) onBackToBoard?.();
+      } : undefined}
+    >
+      <div
+        ref={boardOnly ? boardDialogRef : undefined}
+        role={boardOnly ? "dialog" : undefined}
+        aria-modal={boardOnly ? true : undefined}
+        aria-labelledby={boardOnly ? "pos-table-board-title" : undefined}
+        tabIndex={boardOnly ? -1 : undefined}
+        className={`${embedded ? "space-y-5" : "mx-auto max-w-7xl space-y-5"}${boardOnly && embedded ? " pos-table-modal" : ""}`}
+      >
+        <header className={`flex flex-wrap items-end justify-between gap-3${boardOnly && embedded ? " pos-table-modal-header" : ""}`}>
           <div>
-            <p className="text-sm font-bold uppercase text-red-700">Point of sale</p>
-            <h1 className="text-3xl font-black text-slate-950">
+            <p className="text-sm font-bold uppercase text-red-700">{boardOnly && embedded ? "Point of Sale" : "Point of sale"}</p>
+            <h1 id={boardOnly && embedded ? "pos-table-board-title" : undefined} className="text-3xl font-black text-slate-950">
               {boardOnly ? "Table board" : reservationOnly ? "Today's reservations" : embedded ? "Dine-in ordering" : "Table service"}
             </h1>
+            {boardOnly && embedded && (
+              <p className="pos-table-modal-subtitle">
+                {boardPurpose === "reservation"
+                  ? "Choose available table(s) for this reservation."
+                  : boardPurpose === "existing_table"
+                    ? "Select an occupied table to continue its active order."
+                    : "Choose an available table for this walk-in."}
+              </p>
+            )}
           </div>
           <div className="flex flex-wrap items-center gap-3">
             {!boardOnly && <p className="text-sm text-slate-500">New dine-in orders deduct stock at Confirm &amp; Print; legacy kitchen tickets deduct when released.</p>}
             {(boardOnly || reservationOnly) && onBackToBoard && (
-              <ActionButton tone="muted" onClick={onBackToBoard}>
+              <ActionButton tone="muted" className={boardOnly && embedded ? "pos-table-modal-back-button" : ""} onClick={onBackToBoard}>
                 {boardOnly && boardPurpose === "reservation" ? "Back to reservations" : "Back to POS"}
               </ActionButton>
             )}
             {embedded && !boardOnly && !reservationOnly && onBackToBoard && (
               <ActionButton tone="muted" onClick={onBackToBoard}>Back to table board</ActionButton>
             )}
-            {boardOnly && <ActionButton tone="muted" className="min-h-8 px-2 text-xs" onClick={() => setManageTablesOpen(true)}>Manage Tables</ActionButton>}
+            {boardOnly && !embedded && <ActionButton tone="muted" className="min-h-8 px-2 text-xs" onClick={() => setManageTablesOpen(true)}>Manage Tables</ActionButton>}
             {!embedded && !boardOnly && !reservationOnly && <ActionButton tone="muted" onClick={() => setManageTablesOpen(true)}>Manage tables</ActionButton>}
+            {boardOnly && embedded && onBackToBoard && (
+              <button
+                type="button"
+                aria-label="Close table board"
+                className="pos-table-modal-close"
+                onClick={onBackToBoard}
+              >
+                <X aria-hidden="true" />
+              </button>
+            )}
           </div>
         </header>
-        {!embedded && <SectionNav orientation="horizontal" tabs={posTabs} />}
         {boardOnly && (
           <section aria-label="Table board" className="space-y-4">
             {boardPurpose === "reservation" && reservationForBoard && (
@@ -873,7 +964,7 @@ export default function DiningService({
                 </p>
               </div>
             )}
-            <div className="flex flex-wrap gap-2 text-xs font-semibold" aria-label="Table status legend">
+            <div className="pos-table-status-legend flex flex-wrap gap-2 text-xs font-semibold" aria-label="Table status legend">
               <span className="rounded bg-emerald-100 px-2 py-1 text-emerald-900">Free</span>
               <span className="rounded bg-red-100 px-2 py-1 text-red-900">Occupied</span>
               <span className="rounded bg-amber-100 px-2 py-1 text-amber-900">Reserved</span>
@@ -885,7 +976,7 @@ export default function DiningService({
             {tablesQuery.isLoading ? (
               <p className="text-sm text-slate-600">Loading tables...</p>
             ) : (
-              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+              <div className="pos-table-grid grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
                 {(tablesQuery.data ?? []).map((table) => {
                   const status = normalizeTableStatus(table.status);
                   const reservation = reservationsByTableNumber.get(table.table_number);
@@ -912,6 +1003,7 @@ export default function DiningService({
                   const label = state[0].toUpperCase() + state.slice(1);
                   const contents = (
                     <>
+                      {reservationTableSelected && <span className="pos-table-check"><Check aria-hidden="true" /></span>}
                       <span className="text-xl font-bold">Table {table.table_number}</span>
                       <span className="text-sm">{table.capacity} seats</span>
                       <span className="mt-2 inline-flex rounded-full bg-white/80 px-3 py-1 text-sm font-bold">{label}</span>
@@ -932,7 +1024,7 @@ export default function DiningService({
                       type="button"
                       aria-label={`${boardPurpose === "reservation" ? "Choose" : "Select"} Table ${table.table_number}, ${label}`}
                       aria-pressed={boardPurpose === "reservation" ? reservationTableSelected : undefined}
-                      className={`grid min-h-36 place-items-center rounded-xl border p-4 shadow-sm transition hover:scale-[1.01] ${stateClass} ${reservationTableSelected ? "ring-4 ring-amber-500" : ""}`}
+                      className={`pos-table-card is-selectable grid min-h-36 place-items-center rounded-xl border p-4 shadow-sm transition ${stateClass} ${reservationTableSelected ? "is-selected" : ""}`}
                       onClick={() => {
                         if (boardPurpose === "reservation") {
                           const nextSelection = reservationTableSelection.includes(table.id)
@@ -962,7 +1054,7 @@ export default function DiningService({
                       {contents}
                     </button>
                   ) : (
-                    <article key={table.id} aria-label={`Table ${table.table_number}, ${label}`} className={`grid min-h-36 place-items-center rounded-xl border p-4 shadow-sm ${stateClass}`}>
+                    <article key={table.id} aria-label={`Table ${table.table_number}, ${label}`} className={`pos-table-card grid min-h-36 place-items-center rounded-xl border p-4 shadow-sm ${stateClass}`}>
                       {contents}
                     </article>
                   );
@@ -971,6 +1063,52 @@ export default function DiningService({
                   <p className="rounded border border-dashed p-5 text-sm text-slate-500">No tables are configured.</p>
                 )}
               </div>
+            )}
+            {boardOnly && embedded && (
+              <footer className="pos-table-modal-footer">
+                <div className="min-w-0 flex-1">
+                  {boardPurpose === "reservation" && (
+                    <>
+                      <p className="text-sm font-semibold text-slate-900">
+                        {reservationTableSelection.reduce((sum, id) =>
+                          sum + (tablesQuery.data?.find((table) => table.id === id)?.capacity ?? 0), 0
+                        )} seats selected / {boardRequiredPartySize} guests
+                      </p>
+                      {reservationTableSelection.length > 0 && (
+                        <p className="text-xs text-slate-600">
+                          Selected table{reservationTableSelection.length === 1 ? "" : "s"}: {reservationTableSelection
+                            .map((id) => tablesQuery.data?.find((table) => table.id === id)?.table_number)
+                            .filter((tableNumber): tableNumber is number => tableNumber !== undefined)
+                            .sort((left, right) => left - right)
+                            .join(", ")}
+                        </p>
+                      )}
+                      <div className="pos-reservation-capacity-track" aria-hidden="true">
+                        <span style={{
+                          width: `${boardRequiredPartySize > 0
+                            ? Math.min(100, reservationTableSelection.reduce((sum, id) =>
+                              sum + (tablesQuery.data?.find((table) => table.id === id)?.capacity ?? 0), 0
+                            ) / boardRequiredPartySize * 100)
+                            : 0}%`
+                        }} />
+                      </div>
+                    </>
+                  )}
+                  {boardPurpose !== "reservation" && (
+                    <p className="text-sm text-slate-600">
+                      {boardPurpose === "existing_table"
+                        ? "Select an occupied table to continue."
+                        : "Select a free table to continue."}
+                    </p>
+                  )}
+                </div>
+                <ActionButton tone="muted" className="pos-table-manage-action" onClick={() => setManageTablesOpen(true)}>Manage Tables</ActionButton>
+                {boardActionLabel && onBoardAction && (
+                  <ActionButton className="pos-primary-action" disabled={boardActionDisabled} onClick={onBoardAction}>
+                    {boardActionLabel}
+                  </ActionButton>
+                )}
+              </footer>
             )}
           </section>
         )}
@@ -1149,9 +1287,6 @@ export default function DiningService({
               <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
                 <h2 className="mb-2 text-lg font-bold">Kitchen queue</h2>
                 <p className="mb-3 text-sm text-slate-500">{currentOrders.length} tickets waiting for preparation, readiness, or release.</p>
-                <Link to="/staff/kitchen" className="inline-flex items-center gap-2 rounded border border-slate-300 px-3 py-2 text-sm font-bold text-slate-700 hover:bg-slate-50">
-                  <ChefHat className="h-4 w-4" /> Open kitchen board
-                </Link>
               </section>
             )}
           </section>

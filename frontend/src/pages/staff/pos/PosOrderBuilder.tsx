@@ -1,10 +1,11 @@
-import { Minus, Plus, ShoppingCart, Trash2 } from "lucide-react";
+import { Check, LoaderCircle, Minus, Plus, Search, ShoppingCart, Trash2, Utensils } from "lucide-react";
 import type { ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "../../../components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "../../../components/ui/card";
-import { Select } from "../../../components/ui/select";
 import { formatManilaDateTime } from "../../../lib/dateTime";
 import type { CartItem, PosCartKey, PosProduct } from "./store";
+import "./PosPage.css";
 
 type CustomerType = "new_customer" | "existing_table" | "pickup_customer";
 type ServiceType = "dine_in" | "takeout";
@@ -14,9 +15,12 @@ type Props = {
   onNewCustomer: () => void;
   onExistingTable: () => void;
   selectionContent?: ReactNode;
+  actionInSelectionView?: boolean;
   cartSelectionStatus?: ReactNode;
   sessionControls?: ReactNode;
   selectionSummary?: string | null;
+  currentOrderPath?: string[];
+  onClearCurrentOrder?: () => void;
   customerService: ServiceType;
   cartKey: PosCartKey;
   orderType: "ala_carte" | "unlimited";
@@ -29,8 +33,6 @@ type Props = {
   products: PosProduct[];
   productsLoading: boolean;
   productsError: boolean;
-  category: string;
-  onCategoryChange: (category: string) => void;
   items: CartItem[];
   pickupOrder?: {
     order_number: string;
@@ -49,6 +51,8 @@ type Props = {
   onReprintLastOrder?: () => void;
   actionLabel: string;
   actionDisabled: boolean;
+  actionPending?: boolean;
+  actionSucceeded?: boolean;
   onAction: () => void;
 };
 
@@ -87,9 +91,12 @@ export default function PosOrderBuilder({
   onNewCustomer,
   onExistingTable,
   selectionContent,
+  actionInSelectionView = false,
   cartSelectionStatus,
   sessionControls,
   selectionSummary = null,
+  currentOrderPath = [],
+  onClearCurrentOrder,
   customerService,
   cartKey,
   orderType,
@@ -102,8 +109,6 @@ export default function PosOrderBuilder({
   products,
   productsLoading,
   productsError,
-  category,
-  onCategoryChange,
   items,
   pickupOrder = null,
   onAddItem,
@@ -115,11 +120,32 @@ export default function PosOrderBuilder({
   onReprintLastOrder,
   actionLabel,
   actionDisabled,
+  actionPending = false,
+  actionSucceeded = false,
   onAction
 }: Props) {
-  const categories = ["All", ...Array.from(new Set(products.map((product) => product.category))).sort()];
+  const [menuSearch, setMenuSearch] = useState("");
+  const [selectedCategory, setSelectedCategory] = useState("All");
+  const [cartPulse, setCartPulse] = useState(0);
+  const [flyDot, setFlyDot] = useState(0);
+  const [flyDotProductId, setFlyDotProductId] = useState<string | null>(null);
+  const [showActionSuccess, setShowActionSuccess] = useState(false);
+  const cartBadgeRef = useRef<HTMLSpanElement>(null);
+  const normalizedSearch = menuSearch.trim().toLocaleLowerCase();
+  const categories = useMemo(() => {
+    const counts = new Map<string, number>();
+    products.filter((product) => canAddToCart(product, cartKey)).forEach((product) => {
+      counts.set(product.category, (counts.get(product.category) ?? 0) + 1);
+    });
+    return [{ name: "All", count: [...counts.values()].reduce((total, count) => total + count, 0) },
+      ...[...counts].map(([name, count]) => ({ name, count }))];
+  }, [cartKey, products]);
   const visibleProducts = products.filter((product) =>
-    (category === "All" || product.category === category) && canAddToCart(product, cartKey)
+    canAddToCart(product, cartKey)
+    && (selectedCategory === "All" || product.category === selectedCategory)
+    && (!normalizedSearch
+      || product.name.toLocaleLowerCase().includes(normalizedSearch)
+      || product.category.toLocaleLowerCase().includes(normalizedSearch))
   );
   const isPickup = customerType === "pickup_customer";
   const isDineIn = cartKey !== "takeout";
@@ -133,10 +159,38 @@ export default function PosOrderBuilder({
     : null;
   const subtotal = isPickup ? pickupOrder?.total ?? 0 : itemSubtotal;
   const total = subtotal + (hasUnlimitedItems ? unlimitedPackageEstimate ?? 0 : 0);
+  const cartCount = isPickup && pickupOrder
+    ? pickupOrder.items.reduce((count, item) => count + item.quantity, 0)
+    : items.reduce((count, item) => count + item.quantity, 0);
+
+  useEffect(() => {
+    if (!actionSucceeded) {
+      setShowActionSuccess(false);
+      return;
+    }
+    setShowActionSuccess(true);
+    const timer = window.setTimeout(() => setShowActionSuccess(false), 650);
+    return () => window.clearTimeout(timer);
+  }, [actionSucceeded]);
+
+  function addProduct(product: PosProduct, diningOrderType?: CartItem["diningOrderType"]) {
+    onAddItem(product, diningOrderType);
+    setFlyDot((current) => current + 1);
+    setFlyDotProductId(product.id);
+    window.setTimeout(() => setFlyDotProductId((current) => current === product.id ? null : current), 450);
+    setCartPulse((current) => current + 1);
+    window.setTimeout(() => setCartPulse((current) => current + 1), 180);
+  }
+
+  function setRipplePosition(event: React.PointerEvent<HTMLButtonElement>) {
+    const bounds = event.currentTarget.getBoundingClientRect();
+    event.currentTarget.style.setProperty("--pos-ripple-x", `${event.clientX - bounds.left}px`);
+    event.currentTarget.style.setProperty("--pos-ripple-y", `${event.clientY - bounds.top}px`);
+  }
 
   return (
     <section
-      className={`grid gap-4 ${isSelectingExistingTable ? "xl:grid-cols-1" : "xl:grid-cols-[minmax(0,1fr)_minmax(18rem,0.34fr)]"}`}
+      className={`pos-order-builder grid gap-4${isSelectingExistingTable ? " is-existing-table-selection xl:grid-cols-1" : " xl:grid-cols-[minmax(0,1fr)_minmax(18rem,0.34fr)]"}`}
       aria-label="POS order builder"
     >
       <div className="min-w-0 space-y-4">
@@ -145,33 +199,69 @@ export default function PosOrderBuilder({
             <Button className="min-h-12 px-5 font-bold" onClick={onNewCustomer}>New Customer</Button>
             <Button className="min-h-12 px-5 font-bold" variant="outline" onClick={onExistingTable}>Existing Table</Button>
           </div>
+          {currentOrderPath.length > 0 && (
+            <div role="region" aria-label="Current order" className="mt-3 flex flex-wrap items-center justify-between gap-3 rounded-md border border-red-100 bg-red-50 px-3 py-2">
+              <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+                <span className="mr-1 text-[10px] font-bold uppercase tracking-wide text-red-800">Current order</span>
+                {currentOrderPath.map((part, index) => (
+                  <span key={`${part}-${index}`} className="inline-flex items-center gap-1.5">
+                    {index > 0 && <span aria-hidden="true" className="text-red-500">›</span>}
+                    <span className="rounded-md border border-red-100 bg-white px-2 py-1 text-xs font-semibold text-red-900">{part}</span>
+                  </span>
+                ))}
+              </div>
+              <Button type="button" size="sm" variant="outline" onClick={onClearCurrentOrder}>Clear</Button>
+            </div>
+          )}
           {selectionSummary && <p className="mt-3 rounded bg-emerald-50 p-2 text-sm font-semibold text-emerald-900">{selectionSummary}</p>}
           <p className="mt-3 text-xs text-slate-500">
-            {isPickup ? "Pickup selection is handled in a temporary order list." : "A la carte and Unlimited items can share one table cart."}
+            {isPickup ? "Selected pickup order items are read-only." : "A la carte and Unlimited items can share one table cart."}
           </p>
         </section>
 
-        {selectionContent ?? <Card className="min-w-0">
-          <CardHeader className="gap-3">
-            <div className="flex items-center justify-between gap-3">
+        {selectionContent ?? <Card className="pos-menu-card min-w-0">
+          <CardHeader className="pos-menu-header gap-3">
+            <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-center">
               <CardTitle>Menu</CardTitle>
-              <Select
-                aria-label="Menu category"
-                className="h-11 w-56"
-                value={category}
-                onChange={(event) => onCategoryChange(event.target.value)}
-              >
-                {categories.map((item) => <option key={item} value={item}>{item}</option>)}
-              </Select>
+              <label className="relative block w-full sm:max-w-xs">
+                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" aria-hidden="true" />
+                <input
+                  type="search"
+                  aria-label="Search menu products"
+                  placeholder="Search menu..."
+                  value={menuSearch}
+                  onChange={(event) => setMenuSearch(event.target.value)}
+                  className="h-11 w-full rounded-md border border-slate-300 bg-white pl-9 pr-3 text-sm text-slate-900 outline-none placeholder:text-slate-400 focus:border-red-700 focus:ring-2 focus:ring-red-100"
+                />
+              </label>
+            </div>
+            <div className="pos-category-filters" role="group" aria-label="Filter menu by category">
+              {categories.map(({ name, count }) => (
+                <button
+                  type="button"
+                  key={name}
+                  className={`pos-category-chip${selectedCategory === name ? " is-active" : ""}`}
+                  aria-pressed={selectedCategory === name}
+                  onClick={() => setSelectedCategory(name)}
+                >
+                  {name}<span>{count}</span>
+                </button>
+              ))}
             </div>
           </CardHeader>
           <CardContent>
             {productsLoading && <p className="text-sm text-slate-500">Loading products...</p>}
             {productsError && <p role="alert" className="text-sm text-red-700">Unable to load products.</p>}
             {!productsLoading && !productsError && visibleProducts.length === 0 && (
-              <p className="text-sm text-slate-500">No products are available in this menu category.</p>
+              <p className="text-sm text-slate-500">
+                {normalizedSearch
+                  ? `No menu products match "${menuSearch.trim()}".`
+                  : selectedCategory !== "All"
+                    ? `No products are available in ${selectedCategory}.`
+                    : "No products are currently available."}
+              </p>
             )}
-            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4">
+            <div className="pos-menu-grid grid gap-3 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4">
               {visibleProducts.map((product) => {
                 const cartQuantity = items.filter((item) => item.product.id === product.id).reduce((sum, item) => sum + item.quantity, 0);
                 const availableStock = product.available_stock == null ? null : Math.floor(product.available_stock);
@@ -185,25 +275,34 @@ export default function PosOrderBuilder({
                 return (
                   <button
                     key={product.id}
-                    className="flex min-h-32 flex-col justify-between rounded-md border border-slate-200 bg-white p-4 text-left shadow-sm transition hover:border-red-200 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60"
+                    className={`pos-menu-item${disabled ? " is-unavailable" : ""}`}
                     disabled={disabled}
                     type="button"
-                    onClick={() => onAddItem(product, addedItemOrderType)}
+                    onPointerDown={setRipplePosition}
+                    onClick={() => addProduct(product, addedItemOrderType)}
                   >
-                    <span>
-                      <span className="block text-base font-semibold text-slate-950">{product.name}</span>
-                      <span className="mt-1 block text-xs font-medium uppercase text-slate-500">{product.category}</span>
+                    <span className="pos-menu-image" aria-hidden="true">
+                      <Utensils />
+                      {cartQuantity > 0 && <span className="pos-menu-quantity">{cartQuantity}</span>}
+                      {!disabled && <span className="pos-menu-add">+</span>}
                     </span>
-                    <span className="mt-3 flex items-end justify-between gap-2">
-                      <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-bold ${isSoldOut || product.is_available === false ? "bg-red-100 text-red-800" : "bg-emerald-100 text-emerald-800"}`}>
+                    <span className="pos-menu-copy">
+                      <span className="pos-menu-name">{product.name}</span>
+                      <span className="pos-menu-category">{product.category}</span>
+                    </span>
+                    <span className="pos-menu-meta">
+                      <span className={`pos-stock-chip ${isSoldOut || product.is_available === false ? "is-out" : availableStock === null ? "is-unknown" : "is-available"}`}>
                         {product.is_available === false
                           ? `Unavailable · ${availableStock ?? "stock unknown"}`
                           : isSoldOut
                             ? "Out of stock · 0 available"
                             : availableStock === null ? "Stock not provided" : `${availableStock} available`}
                       </span>
-                      <span className="text-lg font-semibold text-red-700">{price === 0 ? "Included" : money(price)}</span>
+                      <span className="pos-menu-price">{price === 0 ? "Included" : money(price)}</span>
                     </span>
+                    {flyDotProductId === product.id && !disabled && (
+                      <span key={flyDot} className="pos-menu-fly-dot" aria-hidden="true" />
+                    )}
                   </button>
                 );
               })}
@@ -214,16 +313,25 @@ export default function PosOrderBuilder({
 
       {!isSelectingExistingTable && <aside
         data-testid="pos-cart-panel"
-        className="min-w-0 lg:sticky lg:top-4 lg:h-[calc(100vh-2rem)] lg:self-start"
+        className="pos-order-panel min-w-0"
       >
-        <Card className="flex h-full min-h-0 flex-col">
-          <CardHeader>
+        <Card className="pos-order-card flex h-full min-h-0 flex-col">
+          <CardHeader className="pos-order-header">
             <CardTitle>{isPickup ? "Pickup order" : "Order"}</CardTitle>
+            <span
+              ref={cartBadgeRef}
+              key={cartPulse}
+              className="pos-cart-count"
+              aria-label={`${cartCount} items in order`}
+            >
+              {cartCount}
+            </span>
           </CardHeader>
-          <CardContent className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto">
+          <CardContent className="pos-order-body flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto">
             {isDineIn && (
               <>
-                <div aria-label="Order type" className="grid grid-cols-2 gap-2" role="group">
+                <div aria-label="Order type" className="pos-order-type-toggle grid grid-cols-2 gap-2" role="group">
+                  <span className={`pos-order-type-highlight${orderType === "unlimited" ? " is-unlimited" : ""}`} />
                   {([
                     ["ala_carte", "A la carte"],
                     ["unlimited", "Unlimited"]
@@ -231,7 +339,7 @@ export default function PosOrderBuilder({
                     <button
                       key={value}
                       aria-pressed={orderType === value}
-                      className={`rounded-md border px-3 py-2 text-sm font-bold ${orderType === value ? "border-slate-900 bg-slate-900 text-white" : "border-slate-300 bg-white text-slate-700"}`}
+                      className={`pos-order-type-option${orderType === value ? " is-selected" : ""}`}
                       onClick={() => onOrderTypeChange(value)}
                       type="button"
                     >
@@ -239,19 +347,32 @@ export default function PosOrderBuilder({
                     </button>
                   ))}
                 </div>
-                <label className="grid gap-1 text-sm font-medium text-slate-700">
+                <label className="pos-headcount-control grid gap-1 text-sm font-medium text-slate-700">
                   {orderType === "unlimited" ? "Unlimited headcount" : "Headcount"}
-                  <input
-                    aria-label={orderType === "unlimited" ? "Unlimited headcount" : "Headcount"}
-                    className="h-10 rounded-md border border-slate-300 px-3"
-                    type="number"
-                    min={1}
-                    max={100}
-                    step={1}
-                    value={headcount}
-                    disabled={activeUnlimitedPaxCount !== null}
-                    onChange={(event) => onHeadcountChange(Number(event.target.value))}
-                  />
+                  <span className="pos-headcount-stepper">
+                    <button
+                      type="button"
+                      aria-label="Decrease headcount"
+                      disabled={activeUnlimitedPaxCount !== null || headcount <= 1}
+                      onClick={() => onHeadcountChange(headcount - 1)}
+                    ><Minus /></button>
+                    <input
+                      aria-label={orderType === "unlimited" ? "Unlimited headcount" : "Headcount"}
+                      type="number"
+                      min={1}
+                      max={100}
+                      step={1}
+                      value={headcount}
+                      disabled={activeUnlimitedPaxCount !== null}
+                      onChange={(event) => onHeadcountChange(Number(event.target.value))}
+                    />
+                    <button
+                      type="button"
+                      aria-label="Increase headcount"
+                      disabled={activeUnlimitedPaxCount !== null || headcount >= 100}
+                      onClick={() => onHeadcountChange(headcount + 1)}
+                    ><Plus /></button>
+                  </span>
                 </label>
                 {orderType === "unlimited" && (
                   <div className="rounded-md bg-amber-50 p-3 text-sm text-amber-950">
@@ -296,19 +417,20 @@ export default function PosOrderBuilder({
                 </div>
               )
             ) : (
-              <div className="grid max-h-[52vh] gap-2 overflow-y-auto pr-1">
+              <div className="pos-cart-lines grid max-h-[52vh] gap-2 overflow-y-auto pr-1">
                 {items.length === 0 ? (
-                  <div className="grid justify-items-center gap-2 rounded-md border border-dashed border-slate-300 p-6 text-center text-sm text-slate-500">
+                    <div className="pos-cart-empty grid justify-items-center gap-2 rounded-md border border-dashed border-slate-300 p-6 text-center text-sm text-slate-500">
                     <ShoppingCart className="h-8 w-8" />
                     Cart is empty
                   </div>
                 ) : items.map((item) => {
                   const unitPrice = getCartPrice(item, cartKey);
                   return (
-                    <div key={`${item.product.id}-${item.diningOrderType ?? "default"}`} className="rounded-md border border-slate-200 bg-white p-3">
+                    <div key={`${item.product.id}-${item.diningOrderType ?? "default"}`} className="pos-cart-line rounded-md border border-slate-200 bg-white p-3">
                       <div className="flex items-start justify-between gap-3">
                         <div>
-                          <p className="font-semibold text-slate-950">{item.quantity} × {item.product.name}</p>
+                        <span className="pos-cart-line-icon" aria-hidden="true"><ShoppingCart /></span>
+                        <p className="font-semibold text-slate-950">{item.quantity} × {item.product.name}</p>
                           <p className="text-sm text-slate-500">
                             {item.diningOrderType === "unlimited"
                               ? "Unlimited included"
@@ -346,7 +468,8 @@ export default function PosOrderBuilder({
             {sessionControls}
             {cartSelectionStatus}
 
-            <div className="mt-auto grid gap-2 border-t border-slate-200 pt-4 text-sm">
+          </CardContent>
+          <div className="pos-order-footer grid gap-2 border-t border-slate-200 pt-4 text-sm">
               <div className="flex items-center justify-between text-slate-600"><span>Subtotal</span><span>{money(subtotal)}</span></div>
               {hasUnlimitedItems && unlimitedPackageEstimate !== null && (
                 <div className="flex items-center justify-between text-slate-600">
@@ -360,9 +483,21 @@ export default function PosOrderBuilder({
                   Reprint last order · {lastCommittedOrderNumber}
                 </Button>
               )}
-              <Button className="mt-2 min-h-12" disabled={actionDisabled} onClick={onAction}>{actionLabel}</Button>
-            </div>
-          </CardContent>
+              {!actionInSelectionView && (
+                <Button
+                  className={`pos-primary-action mt-2 min-h-12${actionPending ? " is-processing" : ""}${showActionSuccess ? " is-success" : ""}`}
+                  disabled={actionDisabled || actionPending}
+                  onPointerDown={setRipplePosition}
+                  onClick={onAction}
+                >
+                  {actionPending
+                    ? <><LoaderCircle className="pos-action-spinner" aria-hidden="true" />Processing…</>
+                    : showActionSuccess
+                      ? <><Check aria-hidden="true" />Done</>
+                      : actionLabel}
+                </Button>
+              )}
+          </div>
         </Card>
       </aside>}
     </section>

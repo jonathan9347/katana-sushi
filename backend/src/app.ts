@@ -20,6 +20,15 @@ import { assertDevelopmentDatabase } from "./lib/seedSafety";
 import { getBeverageStockMaterialName } from "./lib/beverageStock";
 import { getProductCartCompatibility } from "./services/productCartCompatibility.service";
 import {
+  getDashboardCalendar,
+  getDashboardFeedback,
+  getDashboardNotifications,
+  getRecentDashboardSales,
+  getDashboardReminders,
+  getDashboardSummary,
+  getInventoryAlerts
+} from "./services/dashboard.service";
+import {
   getCateringPackagePrice as calculateCateringPackagePrice,
   getCateringInventoryRequirements,
   getCateringInitialPayment,
@@ -871,8 +880,8 @@ const cateringReservationBodySchema = z.object({
   package_quantities: z.record(z.string(), z.coerce.number().positive()).optional(),
   sashimi_quantity_kg: z.number().int().positive().optional(),
   payment_plan: z.enum(["downpayment", "full_payment"]),
-  payment_method: z.enum(["cash", "gcash", "bank_transfer"]).optional(),
-  payment_transaction_id: z.string().optional(),
+  payment_method: z.enum(["cash", "gcash", "bank_transfer"]),
+  payment_transaction_id: z.string().trim().min(1),
   reservation_id: z.string().optional(),
   special_requests: z.string().optional()
 }).superRefine((data, ctx) => {
@@ -1472,9 +1481,6 @@ async function createCateringIngredientLocks(
   const sushiPackages = packages.filter((item) =>
     normalizeCateringStationType(item.stationType, item.name, getCateringPackageItems(item.items)) === "sushi_station"
   );
-  const tempuraPackages = packages.filter((item) =>
-    normalizeCateringStationType(item.stationType, item.name, getCateringPackageItems(item.items)) === "tempura_live"
-  );
   const locksByMaterial = new Map<string, { raw_material_id: string; reserved_quantity: number; unit: string }>();
 
   const addMaterialRequirement = async (name: string, quantity: number, unit: string) => {
@@ -1611,10 +1617,6 @@ async function createCateringIngredientLocks(
     for (const productName of inclusionNames) {
       await addRecipeRequirements(productName, portionsPerItem);
     }
-  }
-
-  for (const _item of tempuraPackages) {
-    await addRecipeRequirements("Futo Ebi", 50);
   }
 
   if (locksByMaterial.size === 0) {
@@ -2307,7 +2309,7 @@ async function allocateReservationTables(
     session.table_id,
     ...(session.table_combination?.members.map((member) => member.table_id) ?? [])
   ]));
-  const unavailableTableIds = tables
+  const unavailableTableIdsFromStatus = tables
     .filter((table) => {
       const status = normalizeTableStatus(table.status);
       return Boolean(table.linked_to_table_id) ||
@@ -2341,6 +2343,13 @@ async function allocateReservationTables(
     reservationWindows,
     activeDiningSessions
   );
+  const unavailableTableIds = new Set([...unavailableTableIdsFromStatus, ...unavailableForSlot]);
+  const seatsLeft = Math.min(
+    RESERVATION_SETTINGS.MAX_PAX_PER_SLOT,
+    tables.reduce((total, table) => total + (
+      unavailableTableIds.has(table.id) || table.is_temporary ? 0 : table.capacity
+    ), 0)
+  );
   const result = findBestTableCombination(
     partySize,
     tables.map((table) => ({
@@ -2349,11 +2358,11 @@ async function allocateReservationTables(
       capacity: table.capacity,
       is_temporary: table.is_temporary
     })),
-    { unavailableTableIds: [...unavailableTableIds, ...unavailableForSlot] }
+    { unavailableTableIds }
   );
 
   if (!result) {
-    return null;
+    return { assignments: null, seats_left: seatsLeft };
   }
 
   const selectedTableIds = new Set(result.tableIds);
@@ -2366,11 +2375,12 @@ async function allocateReservationTables(
     );
   }
   let remainingSeats = partySize;
-  return selectedTables.map((table) => {
+  const assignmentsForReservation = selectedTables.map((table) => {
     const seatCount = Math.min(table.capacity, remainingSeats);
     remainingSeats -= seatCount;
     return { table_id: table.id, seat_count: seatCount };
   });
+  return { assignments: assignmentsForReservation, seats_left: seatsLeft };
 }
 
 async function getAvailableCapacity(date: Date, time: string) {
@@ -2483,17 +2493,18 @@ app.get("/api/reservations/table-availability", async (req, res, next) => {
     }
     const timeError = reservationTimeError(query.date, query.time);
     if (timeError) {
-      return res.status(400).json({ message: timeError });
+      return res.status(400).json({ message: timeError, code: "RESERVATION_TIME_INVALID" });
     }
 
     const assignments = await allocateReservationTables(
       prisma,
       query.date,
-      query.time,
+      getReservationSlotStart(query.time, RESERVATION_SETTINGS.OPENING_TIME, RESERVATION_SETTINGS.SLOT_DURATION_MINUTES),
       query.party_size
     );
     return res.json({
-      availability: assignments ? "available" : "full",
+      availability: assignments.assignments ? "available" : "full",
+      seats_left: assignments.seats_left,
       checked_at: new Date().toISOString()
     });
   } catch (error) {
@@ -2902,17 +2913,15 @@ app.post("/api/catering/reservations", async (req, res, next) => {
     );
 
     const reservation_id = body.reservation_id ?? (await generateReadableId("CAT", body.event_date, "reservation_id"));
-    const verifiedPayment = body.payment_transaction_id
-      ? await getVerifiedDownpayment(
-          body.payment_transaction_id,
-          reservation_id,
-          "catering",
-          body.payment_method,
-          expectedInitialPayment,
-          isFullPayment ? "full_payment" : "downpayment"
-        )
-      : null;
-    const paidAmount = verifiedPayment ? expectedInitialPayment : 0;
+    const verifiedPayment = await getVerifiedDownpayment(
+      body.payment_transaction_id,
+      reservation_id,
+      "catering",
+      body.payment_method,
+      expectedInitialPayment,
+      isFullPayment ? "full_payment" : "downpayment"
+    );
+    const paidAmount = expectedInitialPayment;
     const remaining_balance = Number((total_price - paidAmount).toFixed(2));
     if (body.reservation_id) {
       const existing = await prisma.cateringReservation.findUnique({
@@ -2935,6 +2944,93 @@ app.post("/api/catering/reservations", async (req, res, next) => {
         if (!sameRequest) {
           return res.status(409).json({ message: "This reservation reference is already associated with a different request." });
         }
+        if (existing.downpayment_status !== "paid") {
+          const paidExisting = await prisma.$transaction(async (tx) => {
+            await lockCateringReservationForUpdate(tx, existing.id);
+            const current = await tx.cateringReservation.findUnique({ where: { id: existing.id } });
+            if (!current) {
+              throw new InventoryError("Catering booking not found.", "BOOKING_NOT_FOUND", 404);
+            }
+            const paymentStage = isFullPayment ? "full_payment" : "downpayment";
+            const claim = await tx.paymentTransactionClaim.findUnique({
+              where: { transaction_id: verifiedPayment.transactionId }
+            });
+            if (claim) {
+              const claimedPayment = await tx.reservationPayment.findFirst({
+                where: {
+                  catering_reservation_id: current.id,
+                  reference_number: verifiedPayment.transactionId
+                },
+                select: { payment_stage: true }
+              });
+              if (
+                claim.catering_reservation_id !== current.id ||
+                claimedPayment?.payment_stage !== paymentStage
+              ) {
+                throw new InventoryError("This payment was already used for another booking.", "PAYMENT_ALREADY_CLAIMED", 409);
+              }
+              return tx.cateringReservation.findUnique({
+                where: { id: current.id },
+                include: { payments: { orderBy: { received_at: "asc" } } }
+              });
+            }
+            if (current.status !== "pending_approval") {
+              throw new InventoryError("Initial package payment is available only for a pending catering request.", "BOOKING_NOT_PENDING", 409);
+            }
+            if (current.downpayment_status === "paid") {
+              throw new InventoryError("The initial package payment has already been recorded.", "PAYMENT_ALREADY_RECORDED", 409);
+            }
+
+            const paidAt = verifiedPayment.paidAt ?? new Date();
+            const remaining = roundMoney(Math.max(Number(current.total_price) - expectedInitialPayment, 0));
+            await recordVerifiedDownpayment(tx, {
+              transactionId: verifiedPayment.transactionId,
+              cateringReservationId: current.id,
+              amount: expectedInitialPayment,
+              method: body.payment_method,
+              paidAt,
+              paymentStage
+            });
+            const updated = await tx.cateringReservation.update({
+              where: { id: current.id },
+              data: {
+                downpayment_amount: expectedInitialPayment,
+                downpayment_status: "paid",
+                downpayment_method: body.payment_method,
+                downpayment_date: paidAt,
+                downpayment_transaction_id: verifiedPayment.transactionId,
+                deposit_paid: expectedInitialPayment,
+                remaining_balance: remaining,
+                full_payment_paid: isFullPayment && remaining === 0,
+                full_payment_date: isFullPayment && remaining === 0 ? paidAt : null,
+                final_payment_status: remaining === 0 ? "paid" : "pending",
+                final_payment_method: remaining === 0 ? body.payment_method : null,
+                final_payment_date: remaining === 0 ? paidAt : null
+              },
+              include: { payments: { orderBy: { received_at: "asc" } } }
+            });
+            await addReservationActivity(tx, {
+              cateringReservationId: current.id,
+              eventType: "initial_package_payment_recorded",
+              fromStatus: current.status,
+              toStatus: updated.status,
+              actorType: "customer",
+              actorName: current.customer_name,
+              details: { amount: expectedInitialPayment, payment_method: body.payment_method }
+            });
+            return updated;
+          });
+          return res.status(200).json({
+            success: true,
+            reservation_id: paidExisting?.reservation_id ?? existing.reservation_id,
+            paid_amount: Number(paidExisting?.downpayment_amount ?? 0),
+            remaining_balance: Number(paidExisting?.remaining_balance ?? 0),
+            package_total: Number(paidExisting?.package_total || paidExisting?.total_price || total_price),
+            initial_payment_due: 0,
+            payment_plan: paidExisting?.payment_plan ?? existing.payment_plan,
+            message: "Catering request already received."
+          });
+        }
         return res.status(200).json({
           success: true,
           reservation_id: existing.reservation_id,
@@ -2954,25 +3050,6 @@ app.post("/api/catering/reservations", async (req, res, next) => {
     const inquiry_id = await generateReadableId("CAT", body.event_date, "inquiry_id");
 
     const reservation = await prisma.$transaction(async (tx) => {
-      const duplicate = await tx.cateringReservation.findFirst({
-        where: {
-          event_date: body.event_date,
-          headcount,
-          status: { notIn: ["cancelled", "canceled", "rejected", "declined", "expired", "no-show", "no_show"] },
-          OR: [
-            { customer_email: { equals: body.customer_email, mode: "insensitive" } },
-            { customer_phone: body.customer_phone }
-          ]
-        },
-        select: { reservation_id: true }
-      });
-      if (duplicate) {
-        throw new InventoryError(
-          `A catering booking with the same customer, date, and guest count already exists (${duplicate.reservation_id}).`,
-          "DUPLICATE_BOOKING",
-          409
-        );
-      }
       const inquiry = await tx.cateringInquiry.create({
         data: {
           inquiry_id,
@@ -3490,9 +3567,8 @@ app.put("/api/staff/catering/reservations/:id/approve", async (req, res, next) =
       if (current.status !== "pending_approval") {
         throw new InventoryError("Only a pending catering booking can be approved.", "BOOKING_NOT_PENDING", 409);
       }
-      if (current.payment_plan !== "pay_at_venue" &&
-          (current.downpayment_status !== "paid" || Number(current.downpayment_amount) <= 0)) {
-        throw new InventoryError("A recorded downpayment is required before approval.", "DOWNPAYMENT_REQUIRED", 409);
+      if (current.downpayment_status !== "paid" || Number(current.downpayment_amount) <= 0) {
+        throw new InventoryError("A verified initial payment is required before approval.", "DOWNPAYMENT_REQUIRED", 409);
       }
 
       const packageIds = getCateringReservationPackageIds(current.package_ids, current.package_id);
@@ -3967,7 +4043,7 @@ app.post("/api/reservations/table", async (req, res, next) => {
 
     const timeError = reservationTimeError(body.date, body.time);
     if (timeError) {
-      return res.status(400).json({ message: timeError });
+      return res.status(400).json({ message: timeError, code: "RESERVATION_TIME_INVALID" });
     }
 
     if (manilaDateKey(date) !== body.date) {
@@ -4008,10 +4084,10 @@ app.post("/api/reservations/table", async (req, res, next) => {
       const tableAssignments = await allocateReservationTables(
         tx,
         body.date,
-        body.time,
+        getReservationSlotStart(body.time, RESERVATION_SETTINGS.OPENING_TIME, RESERVATION_SETTINGS.SLOT_DURATION_MINUTES),
         body.party_size
       );
-      if (!tableAssignments) {
+      if (!tableAssignments.assignments) {
         throw new InventoryError(
           "No suitable tables are available for this party at the selected time. Choose another time or a smaller party.",
           "TABLE_ASSIGNMENT_CONFLICT",
@@ -4053,7 +4129,7 @@ app.post("/api/reservations/table", async (req, res, next) => {
         }
       });
       await tx.reservationTableAssignment.createMany({
-        data: tableAssignments.map((assignment) => ({
+        data: tableAssignments.assignments.map((assignment) => ({
           reservation_id: created.id,
           table_id: assignment.table_id,
           seat_count: assignment.seat_count,
@@ -4087,6 +4163,9 @@ app.post("/api/reservations/table", async (req, res, next) => {
       message: "Reservation confirmed. Pay at the restaurant after dining."
     });
   } catch (error) {
+    if (error instanceof InventoryError) {
+      return res.status(error.statusCode).json({ message: error.message, code: error.code });
+    }
     return next(error);
   }
 });
@@ -4285,6 +4364,78 @@ app.get("/api/staff/reminders", async (req, res, next) => {
   }
 });
 
+app.get("/api/staff/dashboard/summary", async (req, res, next) => {
+  try {
+    const user = requireRole(req, res, ["admin", "inventory_manager", "cashier", "receptionist", "event_coordinator", "chef"]);
+    if (!user) return;
+
+    // Sales use paid POS transactions inside the configured business-local day; pending and refunded transactions are excluded.
+    // Pending approvals include pending table, catering, and pickup bookings; upcoming events are approved catering bookings from today onward.
+    return res.json(await getDashboardSummary());
+  } catch (error) {
+    return next(error);
+  }
+});
+
+app.get("/api/staff/dashboard/recent-sales", async (req, res, next) => {
+  try {
+    const user = requireRole(req, res, ["admin", "inventory_manager", "cashier", "receptionist", "event_coordinator", "chef"]);
+    if (!user) return;
+    const query = z.object({ limit: z.coerce.number().int().min(1).max(25).default(3) }).parse(req.query);
+    return res.json({ sales: await getRecentDashboardSales(query.limit) });
+  } catch (error) {
+    return next(error);
+  }
+});
+
+app.get("/api/staff/dashboard/inventory-alerts", async (req, res, next) => {
+  try {
+    const user = requireRole(req, res, ["admin", "inventory_manager", "cashier", "receptionist", "event_coordinator", "chef"]);
+    if (!user) return;
+    const query = z.object({ limit: z.coerce.number().int().min(1).max(25).default(4) }).parse(req.query);
+    // Critical is zero available or no more than 25% of par; inventory availability deducts active reservations.
+    return res.json(await getInventoryAlerts(query.limit));
+  } catch (error) {
+    return next(error);
+  }
+});
+
+app.get("/api/staff/dashboard/reminders", async (req, res, next) => {
+  try {
+    const user = requireRole(req, res, ["admin", "inventory_manager", "cashier", "receptionist", "event_coordinator", "chef"]);
+    if (!user) return;
+    const query = z.object({
+      days: z.coerce.number().int().min(1).max(31).default(7),
+      limit: z.coerce.number().int().min(1).max(100).default(25)
+    }).parse(req.query);
+    return res.json({ reminders: await getDashboardReminders(query.days, query.limit) });
+  } catch (error) {
+    return next(error);
+  }
+});
+
+app.get("/api/staff/dashboard/feedback", async (req, res, next) => {
+  try {
+    const user = requireRole(req, res, ["admin", "inventory_manager", "cashier", "receptionist", "event_coordinator", "chef"]);
+    if (!user) return;
+    const query = z.object({ limit: z.coerce.number().int().min(1).max(100).default(25) }).parse(req.query);
+    return res.json({ feedback: await getDashboardFeedback(query.limit) });
+  } catch (error) {
+    return next(error);
+  }
+});
+
+app.get("/api/staff/dashboard/calendar", async (req, res, next) => {
+  try {
+    const user = requireRole(req, res, ["admin", "inventory_manager", "cashier", "receptionist", "event_coordinator", "chef"]);
+    if (!user) return;
+    const query = z.object({ month: z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/) }).parse(req.query);
+    return res.json({ month: query.month, approvedDates: await getDashboardCalendar(query.month) });
+  } catch (error) {
+    return next(error);
+  }
+});
+
 app.get("/api/staff/notifications", async (req, res, next) => {
   try {
     const user = requireRole(req, res, ["admin", "inventory_manager", "cashier", "receptionist", "event_coordinator", "chef"]);
@@ -4293,67 +4444,12 @@ app.get("/api/staff/notifications", async (req, res, next) => {
       return;
     }
 
-    const role = user.role.toLowerCase();
-    const [dineInReservations, cateringReservations] = await Promise.all([
-      ["admin", "receptionist"].includes(role)
-        ? prisma.reservation.findMany({
-            where: { status: { in: ["pending", "pending_approval"] } },
-            select: {
-              id: true,
-              booking_id: true,
-              customer_name: true,
-              date: true,
-              time: true,
-              status: true,
-              created_at: true
-            },
-            orderBy: { created_at: "desc" },
-            take: 8
-          })
-        : Promise.resolve([]),
-      ["admin", "event_coordinator"].includes(role)
-        ? prisma.cateringReservation.findMany({
-            where: { status: { in: ["pending", "pending_approval"] } },
-            select: {
-              id: true,
-              reservation_id: true,
-              customer_name: true,
-              event_date: true,
-              status: true,
-              created_at: true
-            },
-            orderBy: { created_at: "desc" },
-            take: 8
-          })
-        : Promise.resolve([])
-    ]);
-
-    const notifications = [
-      ...dineInReservations.map((reservation) => ({
-        id: reservation.id,
-        type: "dine_in" as const,
-        reference: reservation.booking_id,
-        customerName: reservation.customer_name,
-        date: reservation.date,
-        time: reservation.time,
-        status: reservation.status,
-        createdAt: reservation.created_at
-      })),
-      ...cateringReservations.map((reservation) => ({
-        id: reservation.id,
-        type: "catering" as const,
-        reference: reservation.reservation_id ?? "Catering booking",
-        customerName: reservation.customer_name ?? "Customer",
-        date: reservation.event_date ?? reservation.created_at,
-        time: null,
-        status: reservation.status ?? "pending_approval",
-        createdAt: reservation.created_at
-      }))
-    ]
-      .sort((first, second) => second.createdAt.getTime() - first.createdAt.getTime())
-      .slice(0, 8);
-
-    return res.json({ notifications });
+    const query = z.object({
+      status: z.enum(["pending"]).default("pending"),
+      limit: z.coerce.number().int().min(1).max(100).default(50)
+    }).parse(req.query);
+    const result = await getDashboardNotifications(query.limit);
+    return res.json({ notifications: result.items, total: result.total });
   } catch (error) {
     return next(error);
   }
@@ -5845,7 +5941,7 @@ app.get("/api/inventory/reservations", async (req, res, next) => {
       }),
       prisma.takeoutOrder.findMany({
         where: {
-          status: { in: ["pending_payment", "payment_failed", "pending_approval", "confirmed", "preparing", "ready"] },
+          status: { in: ["pending_payment", "payment_failed", "pending_approval", "confirmed", "preparing", "ready", "released"] },
           OR: [
             { payment_plan: "pay_at_pickup" },
             { payment_status: "paid" },
@@ -5857,7 +5953,6 @@ app.get("/api/inventory/reservations", async (req, res, next) => {
         include: {
           items: { orderBy: { created_at: "asc" } },
           ingredient_locks: {
-            where: { is_released: false },
             orderBy: { created_at: "asc" },
             include: { raw_material: { select: { id: true, name: true, unit: true } } }
           }
@@ -5893,14 +5988,14 @@ app.get("/api/inventory/reservations", async (req, res, next) => {
         date: order.created_at,
         time: null,
         guests: null,
-        status: order.status,
+        status: order.status === "released" ? "completed" : order.status,
         menu: order.items.map((item) => `${item.quantity} × ${item.name_snapshot}`),
         ingredients: order.ingredient_locks.map((lock) => ({
           material_id: lock.raw_material_id,
           material: lock.raw_material.name,
           quantity: lock.reserved_quantity,
           unit: lock.unit,
-          status: "Reserved"
+          status: lock.is_released ? "Released" : "Reserved"
         })),
         stock_note: order.ingredient_locks.length ? null : "No inventory recipe linked to these items."
       }))
@@ -7991,7 +8086,7 @@ app.post("/api/pos/pickup-orders/:orderNumber/complete", async (req, res, next) 
         }
       }
 
-      await tx.posTransaction.create({
+      const transaction = await tx.posTransaction.create({
         data: {
           transaction_number: transactionNumber,
           customer_name: current.customer_name,
@@ -8027,7 +8122,7 @@ app.post("/api/pos/pickup-orders/:orderNumber/complete", async (req, res, next) 
         }
       });
 
-      return tx.takeoutOrder.update({
+      const updatedOrder = await tx.takeoutOrder.update({
         where: { id: current.id },
         data: {
           status: "released",
@@ -8040,8 +8135,30 @@ app.post("/api/pos/pickup-orders/:orderNumber/complete", async (req, res, next) 
         },
         include: { items: { orderBy: { created_at: "asc" } } }
       });
+      return {
+        order: updatedOrder,
+        transaction: {
+          id: transaction.id,
+          transaction_number: transaction.transaction_number,
+          customer_name: transaction.customer_name,
+          transaction_type: transaction.transaction_type,
+          subtotal: Number(transaction.subtotal),
+          tax: Number(transaction.tax),
+          total: Number(transaction.total),
+          payment_method: transaction.payment_method,
+          cash_received: transaction.cash_received === null ? null : Number(transaction.cash_received),
+          change_due: transaction.change_due === null ? null : Number(transaction.change_due),
+          created_at: transaction.created_at,
+          items: current.items.map((item) => ({
+            quantity: item.quantity,
+            unit_price: Number(item.unit_price),
+            total_price: Number(item.total_price),
+            selling_product: { name: item.name_snapshot }
+          }))
+        }
+      };
     });
-    return res.json({ order: takeoutOrderSummary(order) });
+    return res.json({ order: takeoutOrderSummary(order.order), transaction: order.transaction });
   } catch (error) {
     if (error instanceof z.ZodError) {
       return res.status(400).json({ message: error.errors[0]?.message ?? "Invalid pickup completion." });

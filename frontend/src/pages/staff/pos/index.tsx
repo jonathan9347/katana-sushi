@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
-import { Banknote, Landmark, Printer, Smartphone } from "lucide-react";
+import { Banknote, Landmark, LoaderCircle, Printer, Smartphone } from "lucide-react";
 import PaymentModal from "./PaymentModal";
 import { PosCartKey, PosProduct, usePosCart } from "./store";
 import { api } from "../../../lib/api";
@@ -17,6 +17,12 @@ import DiningService, {
 import UnlimitedTimer from "../../../components/pos/UnlimitedTimer";
 import PosOrderBuilder from "./PosOrderBuilder";
 import PosHeader from "./PosHeader";
+import NewCustomerFlowModal, {
+  type NewCustomerPickupOrder,
+  type NewCustomerReservation,
+  type NewCustomerSelection
+} from "./NewCustomerFlowModal";
+import "./PosPage.css";
 
 type PosTransaction = {
   id: string;
@@ -40,18 +46,9 @@ type PosTransaction = {
   }>;
 };
 
-type PickupOrder = {
-  order_number: string;
-  status: "preparing" | "ready" | "completed";
-  payment_plan: "pay_now" | "pay_at_pickup";
-  payment_status: string;
-  payment_method: string | null;
-  customer_name: string;
-  created_at: string;
-  pickup_time: string | null;
-  total: number;
-  items: Array<{ name: string; quantity: number; unit_price: number; total_price: number }>;
-};
+type PickupReceiptTransaction = PosTransaction;
+
+type PickupOrder = NewCustomerPickupOrder;
 
 type PosUnlimitedSession = {
   id: string;
@@ -89,8 +86,7 @@ type UnlimitedPricingSettings = {
   extension_minutes: number;
 };
 
-type SelectionView = "menu" | "table-board" | "reservation-list" | "pickup-list";
-type DialogStep = "service" | "entry" | null;
+type SelectionView = "menu" | "table-board" | "reservation-list";
 
 function getStoredRole() {
   if (!localStorage.getItem("katana_token")) {
@@ -118,7 +114,8 @@ export default function PosPage() {
   const [customerService, setCustomerService] = useState<"dine_in" | "takeout">("takeout");
   const [dineInEntryType, setDineInEntryType] = useState<"walk_in" | "reservation">("walk_in");
   const [selectionView, setSelectionView] = useState<SelectionView>("menu");
-  const [dialogStep, setDialogStep] = useState<DialogStep>(null);
+  const [newCustomerFlowOpen, setNewCustomerFlowOpen] = useState(false);
+  const [currentOrderPath, setCurrentOrderPath] = useState<string[]>([]);
   const [tableBoardPurpose, setTableBoardPurpose] = useState<"walk_in" | "existing_table" | "reservation">("walk_in");
   const [selectedTable, setSelectedTable] = useState<{
     id: string;
@@ -138,12 +135,11 @@ export default function PosPage() {
   >([]);
   const [selectedDiningSessionId, setSelectedDiningSessionId] = useState("");
   const [customerName, setCustomerName] = useState("");
-  const [pickupSearch, setPickupSearch] = useState("");
   const [selectedPickupOrder, setSelectedPickupOrder] = useState<PickupOrder | null>(null);
+  const [lastPickupReceipt, setLastPickupReceipt] = useState<PickupReceiptTransaction | null>(null);
   const [lastCommittedOrderId, setLastCommittedOrderId] = useState(
     () => localStorage.getItem(LAST_COMMITTED_ORDER_STORAGE_KEY)
   );
-  const [category, setCategory] = useState("All");
   const [paymentOpen, setPaymentOpen] = useState(false);
   const [billOutOpen, setBillOutOpen] = useState(false);
   const [billOutGuestCount, setBillOutGuestCount] = useState("1");
@@ -182,18 +178,6 @@ export default function PosPage() {
     },
     refetchInterval: 15_000,
     enabled: allowed
-  });
-
-  const pickupOrdersQuery = useQuery({
-    queryKey: ["pos", "pickup-orders", pickupSearch.trim()],
-    queryFn: async () => {
-      const response = await api.get<{ orders: PickupOrder[] }>("/api/pos/pickup-orders", {
-        params: { search: pickupSearch.trim() }
-      });
-      return response.data.orders;
-    },
-    enabled: allowed && selectionView === "pickup-list" && pickupSearch.trim().length >= 2,
-    staleTime: 5_000
   });
 
   const lastCommittedOrderQuery = useQuery({
@@ -418,26 +402,41 @@ export default function PosPage() {
   });
 
   const pickupCompletionMutation = useMutation({
-    mutationFn: async (payment: { paymentMethod?: "cash"; cashReceived?: number }) => {
+    mutationFn: async (input: {
+      payment: { paymentMethod?: "cash"; cashReceived?: number };
+      printWindow: Window | null;
+    }) => {
       if (!selectedPickupOrder) {
         throw new Error("Select a preparing or ready pickup order first.");
       }
-      const response = await api.post<{ order: PickupOrder }>(
+      const response = await api.post<{ order: PickupOrder; transaction: PickupReceiptTransaction }>(
         `/api/pos/pickup-orders/${encodeURIComponent(selectedPickupOrder.order_number)}/complete`,
-        selectedPickupOrder.payment_status === "paid" ? {} : payment
+        selectedPickupOrder.payment_status === "paid" ? {} : input.payment
       );
-      return response.data.order;
+      return { ...response.data, printWindow: input.printWindow };
     },
-    onSuccess: () => {
+    onSuccess: ({ transaction, printWindow }) => {
       setPaymentOpen(false);
       setSelectedPickupOrder(null);
-      setPickupSearch("");
       setSelectionView("menu");
+      setLastPickupReceipt(transaction);
       queryClient.invalidateQueries({ queryKey: ["pos", "pickup-orders"] });
       queryClient.invalidateQueries({ queryKey: ["inventory"] });
-      toast("Pickup order completed and handed over.");
+      if (printWindow) {
+        try {
+          printReceipt(transaction, systemSettings, printWindow);
+          toast("Pickup order completed. Receipt sent to print.");
+        } catch (error) {
+          printWindow.close();
+          console.error("Pickup receipt printing failed", error);
+          toast("Pickup order completed, but the receipt could not be printed. Use Print Receipt to retry.");
+        }
+      } else {
+        toast("Pickup order completed. Use Print Receipt to print the receipt.");
+      }
     },
-    onError: (error) => {
+    onError: (error, input) => {
+      input.printWindow?.close();
       toast(getApiErrorMessage(error, "Unable to complete this pickup order."));
       queryClient.invalidateQueries({ queryKey: ["pos", "pickup-orders"] });
     }
@@ -515,7 +514,11 @@ export default function PosPage() {
   function handlePickupCheckout() {
     if (!selectedPickupOrder) return;
     if (selectedPickupOrder.payment_status === "paid") {
-      pickupCompletionMutation.mutate({});
+      const printWindow = window.open("", "_blank", "width=380,height=640");
+      if (!printWindow) {
+        toast("Allow pop-ups to print the pickup receipt after checkout.");
+      }
+      pickupCompletionMutation.mutate({ payment: {}, printWindow });
       return;
     }
     setPaymentOpen(true);
@@ -542,26 +545,16 @@ export default function PosPage() {
   }
 
   function beginNewCustomer() {
-    setCustomerType("new_customer");
-    setSelectedDiningSessionId("");
-    setSelectedTable(null);
-    setSelectedReservation(null);
-    setReservationTableSelection([]);
-    setSelectedPickupOrder(null);
-    setUnlimitedGuestsConfirmed(false);
-    setPendingUnlimitedProduct(null);
-    setDialogStep("service");
+    setNewCustomerFlowOpen(true);
   }
 
   function chooseCustomerService(nextService: "dine_in" | "takeout") {
     setCustomerService(nextService);
-    setDialogStep("entry");
   }
 
-  function chooseCustomerEntry(entry: "walk_in" | "reservation" | "pickup") {
-    setDialogStep(null);
+  function chooseCustomerEntry(entry: "walk_in" | "reservation" | "pickup", service = customerService) {
     setSelectedDiningSessionId("");
-    if (customerService === "dine_in") {
+    if (service === "dine_in") {
       setCustomerType("new_customer");
       if (entry === "reservation") {
         setDineInEntryType("reservation");
@@ -582,11 +575,39 @@ export default function PosPage() {
 
     setCustomerType(entry === "pickup" ? "pickup_customer" : "new_customer");
     setSelectedPickupOrder(null);
-    setPickupSearch("");
-    setSelectionView(entry === "pickup" ? "pickup-list" : "menu");
+    setSelectionView("menu");
+  }
+
+  function startNewCustomerOrdering(selection: NewCustomerSelection) {
+    chooseCustomerService(selection.service);
+    chooseCustomerEntry(selection.entry, selection.service);
+    setCurrentOrderPath(selection.path);
+    if (selection.reservation) {
+      selectReservation(selection.reservation);
+    }
+    if (selection.pickupOrder) {
+      selectPickupOrder(selection.pickupOrder);
+    }
+  }
+
+  function clearCurrentOrderPath() {
+    setCustomerType("new_customer");
+    setCustomerService("takeout");
+    setDineInEntryType("walk_in");
+    setSelectionView("menu");
+    setTableBoardPurpose("walk_in");
+    setSelectedDiningSessionId("");
+    setSelectedTable(null);
+    setSelectedReservation(null);
+    setReservationTableSelection([]);
+    setSelectedPickupOrder(null);
+    setCurrentOrderPath([]);
+    setUnlimitedGuestsConfirmed(false);
+    setPendingUnlimitedProduct(null);
   }
 
   function beginExistingTable() {
+    setCurrentOrderPath([]);
     setCustomerType("existing_table");
     setCustomerService("dine_in");
     setTableBoardPurpose("existing_table");
@@ -724,6 +745,30 @@ export default function PosPage() {
     handleCheckout();
   }
 
+  const actionLabel = isPickupCustomer
+    ? "Checkout"
+    : customerType === "existing_table"
+      ? "Print order"
+      : isDineIn
+        ? selectedTable ? "Confirm & Print" : selectedReservation ? "Select table/s" : "Proceed"
+        : "Checkout";
+  const actionDisabled = isPickupCustomer
+    ? !selectedPickupOrder || pickupCompletionMutation.isPending
+    : isDineIn
+      ? Boolean(selectedReservation) && !selectedTable
+        ? !reservationTablesReady
+        : (Boolean(selectedTable) && items.length === 0)
+          || dineInConfirmationMutation.isPending
+          || (hasUnlimitedItems && (
+            !Number.isInteger(headcount)
+            || headcount < 1
+            || headcount > 100
+            || !unlimitedGuestsConfirmed
+            || unlimitedSettingsQuery.isError
+            || !unlimitedSettingsQuery.data
+          ))
+      : items.length === 0 || checkoutMutation.isPending;
+
   const selectionContent = selectionView === "table-board" ? (
     <DiningService
       key={`table-board-${tableBoardPurpose}-${selectedReservation?.id ?? ""}`}
@@ -750,6 +795,9 @@ export default function PosPage() {
       }}
       onTableSelected={selectTable}
       onReservationTableSelectionChange={setReservationTableSelection}
+      boardActionLabel={tableBoardPurpose === "reservation" ? actionLabel : undefined}
+      boardActionDisabled={actionDisabled}
+      onBoardAction={tableBoardPurpose === "reservation" ? handlePrimaryAction : undefined}
     />
   ) : selectionView === "reservation-list" ? (
     <DiningService
@@ -759,48 +807,6 @@ export default function PosPage() {
       onBackToBoard={() => setSelectionView("menu")}
       onReservationSelected={selectReservation}
     />
-  ) : selectionView === "pickup-list" ? (
-    <section aria-label="Pickup order list" className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
-      <div className="mb-4 flex items-center justify-between gap-3">
-        <div>
-          <h2 className="text-xl font-bold">Pickup Orders</h2>
-          <p className="text-sm text-slate-600">Approved Preparing and Ready orders are listed here.</p>
-        </div>
-        <Button variant="outline" onClick={() => setSelectionView("menu")}>Back to menu</Button>
-      </div>
-      <label className="mb-4 grid max-w-xl gap-1 text-sm font-medium text-slate-700">
-        <span>Search by Order ID or customer name</span>
-        <input
-          className="h-11 rounded-md border border-slate-300 px-3 text-sm"
-          autoComplete="off"
-          value={pickupSearch}
-          onChange={(event) => setPickupSearch(event.target.value)}
-          placeholder="Enter at least 2 characters"
-        />
-      </label>
-      {pickupSearch.trim().length < 2 && <p className="text-sm text-slate-500">Enter at least 2 characters of the order ID.</p>}
-      {pickupOrdersQuery.isLoading && <p className="text-sm text-slate-500">Searching pickup orders...</p>}
-      {pickupOrdersQuery.isError && <p role="alert" className="text-sm text-red-700">Unable to search pickup orders. Please retry.</p>}
-      {pickupSearch.trim().length >= 2 && pickupOrdersQuery.isSuccess && pickupOrdersQuery.data.length === 0 && (
-        <p className="text-sm text-slate-500">No Preparing or Ready orders match that order ID or customer name.</p>
-      )}
-      <div className="grid gap-2">
-        {pickupOrdersQuery.data?.map((order) => (
-          <button
-            key={order.order_number}
-            type="button"
-            className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-slate-200 p-4 text-left hover:bg-slate-50"
-            onClick={() => selectPickupOrder(order)}
-          >
-            <span>
-              <span className="block font-semibold">{order.order_number} · {order.customer_name}</span>
-              <span className="text-sm text-slate-600">{order.status === "ready" ? "Ready" : "Preparing"}</span>
-            </span>
-            <span className="font-semibold">{money(order.total)}</span>
-          </button>
-        ))}
-      </div>
-    </section>
   ) : null;
 
   if (!allowed) {
@@ -816,16 +822,31 @@ export default function PosPage() {
   }
 
   return (
-    <main className="min-h-screen bg-slate-100 px-4 py-4 lg:pr-6">
+    <main className="pos-page min-h-screen bg-slate-100 px-4 py-4 lg:pr-6">
       <div className="grid w-full gap-4">
         <PosHeader />
         <p className="text-sm text-slate-500">Signed in as {role}</p>
+        {lastPickupReceipt && (
+          <div className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-emerald-200 bg-emerald-50 px-4 py-3">
+            <p className="text-sm font-medium text-emerald-900">
+              Pickup order {lastPickupReceipt.transaction_number} completed.
+            </p>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => printReceipt(lastPickupReceipt, systemSettings)}
+            >
+              <Printer className="mr-2 h-4 w-4" /> Print Receipt
+            </Button>
+          </div>
+        )}
 
         <PosOrderBuilder
           customerType={customerType}
           onNewCustomer={beginNewCustomer}
           onExistingTable={beginExistingTable}
           selectionContent={selectionContent}
+          actionInSelectionView={selectionView === "table-board"}
           cartSelectionStatus={selectedReservation && !selectedTable ? (
             <div className="rounded-md border border-slate-200 bg-slate-50 p-3 text-sm">
               <p className="font-semibold text-slate-900">{selectedReservation.name}</p>
@@ -942,6 +963,8 @@ export default function PosPage() {
             : selectedReservation
               ? `${selectedReservation.name} · ${selectedReservation.time} · ${selectedReservation.partySize} guests · choose table(s)`
               : null}
+          currentOrderPath={currentOrderPath}
+          onClearCurrentOrder={clearCurrentOrderPath}
           customerService={customerService}
           cartKey={cartKey}
           orderType={orderType}
@@ -951,8 +974,6 @@ export default function PosPage() {
           products={productsQuery.data ?? []}
           productsLoading={productsQuery.isLoading}
           productsError={productsQuery.isError}
-          category={category}
-          onCategoryChange={setCategory}
           items={isPickupCustomer ? [] : items}
           pickupOrder={selectedPickupOrder}
           unlimitedPricePerPerson={unlimitedSettingsQuery.data?.price_per_person ?? null}
@@ -967,58 +988,20 @@ export default function PosPage() {
           onCustomerNameChange={setCustomerName}
           lastCommittedOrderNumber={isPickupCustomer ? null : lastCommittedOrderQuery.data?.order_number}
           onReprintLastOrder={handleReprintLastOrder}
-          actionLabel={isPickupCustomer
-            ? "Checkout"
-            : customerType === "existing_table"
-              ? "Print order"
-            : isDineIn
-              ? selectedTable ? "Confirm & Print" : selectedReservation ? "Select table/s" : "Proceed"
-              : "Checkout"}
-          actionDisabled={isPickupCustomer
-            ? !selectedPickupOrder || pickupCompletionMutation.isPending
-            : isDineIn
-              ? Boolean(selectedReservation) && !selectedTable
-                ? !reservationTablesReady
-                : (Boolean(selectedTable) && items.length === 0)
-                  || dineInConfirmationMutation.isPending
-                  || (hasUnlimitedItems && (
-                  !Number.isInteger(headcount)
-                  || headcount < 1
-                  || headcount > 100
-                  || !unlimitedGuestsConfirmed
-                  || unlimitedSettingsQuery.isError
-                  || !unlimitedSettingsQuery.data
-                ))
-              : items.length === 0 || checkoutMutation.isPending}
+          actionLabel={actionLabel}
+          actionDisabled={actionDisabled}
+          actionPending={pickupCompletionMutation.isPending || dineInConfirmationMutation.isPending || checkoutMutation.isPending}
+          actionSucceeded={pickupCompletionMutation.isSuccess || dineInConfirmationMutation.isSuccess || checkoutMutation.isSuccess}
           onAction={handlePrimaryAction}
         />
 
       </div>
 
-      <Dialog
-        open={dialogStep === "service"}
-        title="New Customer"
-        onClose={() => setDialogStep(null)}
-      >
-        <div className="grid gap-3 sm:grid-cols-2">
-          <Button className="min-h-14 text-base font-bold" onClick={() => chooseCustomerService("dine_in")}>Dine-in</Button>
-          <Button className="min-h-14 text-base font-bold" variant="outline" onClick={() => chooseCustomerService("takeout")}>Take-out</Button>
-        </div>
-      </Dialog>
-      <Dialog
-        open={dialogStep === "entry"}
-        title={customerService === "dine_in" ? "Dine-in" : "Take-out"}
-        onClose={() => setDialogStep(null)}
-      >
-        <div className="grid gap-3 sm:grid-cols-2">
-          <Button className="min-h-14 text-base font-bold" onClick={() => chooseCustomerEntry("walk_in")}>Walk-in</Button>
-          {customerService === "dine_in" ? (
-            <Button className="min-h-14 text-base font-bold" variant="outline" onClick={() => chooseCustomerEntry("reservation")}>Reservation</Button>
-          ) : (
-            <Button className="min-h-14 text-base font-bold" variant="outline" onClick={() => chooseCustomerEntry("pickup")}>Pickup</Button>
-          )}
-        </div>
-      </Dialog>
+      <NewCustomerFlowModal
+        open={newCustomerFlowOpen}
+        onClose={() => setNewCustomerFlowOpen(false)}
+        onStartOrdering={startNewCustomerOrdering}
+      />
       <Dialog
         open={unlimitedGuestDialogOpen}
         title="Unlimited guest count"
@@ -1081,9 +1064,16 @@ export default function PosPage() {
         onConfirm={(payment) => {
           if (isPickupCustomer) {
             if (payment.paymentMethod !== "cash") return;
+            const printWindow = window.open("", "_blank", "width=380,height=640");
+            if (!printWindow) {
+              toast("Allow pop-ups to print the pickup receipt after checkout.");
+            }
             pickupCompletionMutation.mutate({
-              paymentMethod: "cash",
-              cashReceived: payment.cashReceived
+              payment: {
+                paymentMethod: "cash",
+                cashReceived: payment.cashReceived
+              },
+              printWindow
             });
           } else {
             checkoutMutation.mutate(payment);
@@ -1192,6 +1182,7 @@ export default function PosPage() {
             </label>
           )}
           <Button
+            className="pos-primary-action"
             disabled={
               billOutMutation.isPending
               || !billOutPreviewQuery.data
@@ -1200,7 +1191,9 @@ export default function PosPage() {
             }
             onClick={() => billOutMutation.mutate()}
           >
-            {billOutMutation.isPending ? "Completing bill..." : "Confirm bill out"}
+            {billOutMutation.isPending
+              ? <><LoaderCircle className="pos-action-spinner mr-2 inline h-4 w-4" aria-hidden="true" />Completing bill...</>
+              : "Confirm bill out"}
           </Button>
         </div>
       </Dialog>
@@ -1217,8 +1210,8 @@ function TotalLine({ label, value, strong = false }: { label: string; value: num
   );
 }
 
-function printReceipt(transaction: PosTransaction, settings: SystemSettings) {
-  const receipt = window.open("", "_blank", "width=380,height=640");
+function printReceipt(transaction: PosTransaction, settings: SystemSettings, receiptWindow?: Window) {
+  const receipt = receiptWindow ?? window.open("", "_blank", "width=380,height=640");
 
   if (!receipt) {
     window.print();

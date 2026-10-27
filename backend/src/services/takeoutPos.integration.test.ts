@@ -380,7 +380,41 @@ test("cash checkout deducts approved stock exactly once from Preparing and Ready
     assert.deepEqual(responses.map((response) => response.status).sort(), [200, 409]);
     const completedResponse = responses.find((response) => response.status === 200);
     assert.ok(completedResponse);
-    assert.equal((await completedResponse.json() as { order: { status: string } }).order.status, "completed");
+    const completedResult = await completedResponse.json() as {
+      order: { status: string };
+      transaction: {
+        transaction_type: string;
+        transaction_number: string;
+        payment_method: string;
+        total: number;
+        items: Array<{ quantity: number; selling_product: { name: string } }>;
+      };
+    };
+    assert.equal(completedResult.order.status, "completed");
+    assert.equal(completedResult.transaction.transaction_type, "takeout");
+    assert.ok(completedResult.transaction.transaction_number);
+    assert.equal(completedResult.transaction.payment_method, "cash");
+    assert.equal(Number(completedResult.transaction.total), 20);
+    assert.equal(completedResult.transaction.items[0]?.selling_product.name.includes("Phase 4 Pickup Product"), true);
+
+    const inventoryReservationsResponse = await request("/api/inventory/reservations", {
+      method: "GET",
+      token: adminToken
+    });
+    assert.equal(inventoryReservationsResponse.status, 200, await inventoryReservationsResponse.clone().text());
+    const inventoryReservations = await inventoryReservationsResponse.json() as {
+      reservations: Array<{
+        reference: string;
+        status: string;
+        ingredients: Array<{ status: string }>;
+      }>;
+    };
+    const completedPickup = inventoryReservations.reservations.find(
+      (reservation) => reservation.reference === fixture.orderNumber
+    );
+    assert.equal(completedPickup?.status, "completed");
+    assert.ok(completedPickup?.ingredients.some((ingredient) => ingredient.status === "Released"));
+
     const [order, material, batch, updatedLock, transaction] = await Promise.all([
       prisma.takeoutOrder.findUniqueOrThrow({ where: { order_number: fixture.orderNumber } }),
       prisma.rawMaterial.findUniqueOrThrow({ where: { id: fixture.materialId } }),

@@ -1,0 +1,485 @@
+.catering-booking-panel {
+  position: sticky;
+  top: 24px;
+  display: flex;
+  min-width: 0;
+  height: calc(100vh - 48px);
+  height: calc(100dvh - 48px);
+  min-height: min(600px, calc(100dvh - 48px));
+  align-self: start;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid #f2d9db;
+  border-radius: 28px;
+  background: #fff;
+  color: #241c1d;
+  box-shadow: 0 18px 45px rgba(179, 41, 53, 0.1);
+}
+
+.catering-booking-header {
+  display: flex;
+  min-height: 68px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex: 0 0 auto;
+  border-bottom: 1px solid #f0dadd;
+  background: #fff;
+  padding: 16px 21px;
+}
+
+.catering-booking-header h2 {
+  color: #241c1d;
+  font-size: 15px;
+  font-weight: 800;
+}
+
+.catering-booking-header p {
+  color: #a14b53;
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.13em;
+  text-align: right;
+  text-transform: uppercase;
+}
+
+.catering-booking-body {
+  display: flex;
+  min-height: 0;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 12px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 14px;
+  scrollbar-color: rgb(179 41 53 / 24%) transparent;
+  scrollbar-width: thin;
+}
+
+.catering-booking-body::-webkit-scrollbar {
+  width: 7px;
+}
+
+.catering-booking-body::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: rgb(179 41 53 / 24%);
+}
+
+.catering-booking-event-fields,
+.catering-booking-order,
+.catering-booking-payment,
+.catering-booking-payment-method {
+  border: 1px solid #f3e0e2;
+  border-radius: 23px;
+  background: #fffdfd;
+  padding: 13px;
+  transition: background-color 240ms ease, border-color 240ms ease, box-shadow 240ms ease;
+}
+
+.catering-booking-event-fields > h3,
+.catering-booking-order > h3,
+.catering-booking-payment > h3,
+.catering-booking-payment-method > h3,
+.catering-booking-price-summary > h3 {
+  margin-bottom: 10px;
+  color: #a14b53;
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+}
+
+.catering-booking-event-fields > div {
+  gap: 10px;
+}
+
+.catering-booking-panel .customer-label {
+  display: inline-block;
+  margin-bottom: 5px;
+  color: #a14b53;
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.catering-booking-panel .customer-input {
+  width: 100%;
+  min-height: 42px;
+  border: 1.5px solid #efdadd;
+  border-radius: 13px;
+  background: #fff;
+  color: #241c1d;
+  font-size: 12px;
+  outline: none;
+  transition: border-color 180ms ease, box-shadow 180ms ease;
+}
+
+.catering-booking-panel .customer-input:focus {
+  border-color: #b32935;
+  outline: 3px solid rgb(179 41 53 / 14%);
+  outline-offset: 1px;
+}
+
+.catering-booking-empty {
+  display: grid;
+  justify-items: center;
+  gap: 6px;
+  border: 1px dashed #edcfd2;
+  border-radius: 18px;
+  background: #fff9f9;
+  padding: 16px 12px;
+  text-align: center;
+  transition: background-color 240ms ease, border-color 240ms ease;
+}
+
+.catering-booking-empty > span {
+  display: grid;
+  width: 38px;
+  height: 38px;
+  place-items: center;
+  border-radius: 50%;
+  background: #fde8ea;
+  color: #b32935;
+}
+
+.catering-booking-empty svg {
+  width: 18px;
+  height: 18px;
+}
+
+.catering-booking-empty strong {
+  color: #241c1d;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.catering-booking-empty p {
+  max-width: 240px;
+  color: #8f7376;
+  font-size: 10px;
+  line-height: 1.45;
+}
+
+.catering-booking-order-line {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  border-bottom: 1px solid #f0dadd;
+  padding: 9px 0;
+  color: #241c1d;
+  font-size: 11px;
+  transition: background-color 220ms ease;
+}
+
+.catering-booking-order-line:first-child {
+  padding-top: 0;
+}
+
+.catering-booking-order-line:last-child {
+  border-bottom: 0;
+  padding-bottom: 0;
+}
+
+.catering-booking-payment > .mt-2,
+.catering-booking-payment-method > .mt-2 {
+  margin-top: 0;
+  gap: 8px;
+}
+
+.catering-booking-payment-option,
+.catering-booking-method-option {
+  min-width: 0;
+  border: 1px solid #f0dadd;
+  border-radius: 14px;
+  background: #fff;
+  padding: 10px;
+  color: #6c5558;
+  text-align: left;
+  transition: transform 180ms ease, border-color 220ms ease, background-color 220ms ease, box-shadow 220ms ease;
+}
+
+.catering-booking-payment-option:hover:not(:disabled),
+.catering-booking-method-option:hover:not(:disabled) {
+  border-color: #cf858b;
+}
+
+.catering-booking-payment-option.is-selected {
+  border-color: #b32935;
+  background: #fff2f3;
+  box-shadow: inset 0 0 0 1px #b32935;
+}
+
+.catering-booking-payment-option > span:first-child {
+  color: #241c1d;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.catering-booking-payment-option > span:nth-child(2) {
+  margin-top: 4px;
+  color: #8f7376;
+  font-size: 9px;
+}
+
+.catering-booking-payment-option > span:last-child {
+  margin-top: 7px;
+  color: #a82e27;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.catering-booking-method-option {
+  display: flex;
+  min-height: 44px;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  padding: 5px 4px;
+  font-size: 9px;
+  font-weight: 800;
+  text-align: center;
+}
+
+.catering-booking-method-option svg {
+  width: 13px;
+  height: 13px;
+}
+
+.catering-booking-method-option.is-selected {
+  border-color: #b32935;
+  background: #b32935;
+  color: #fff;
+}
+
+.catering-booking-method-option.is-disabled {
+  cursor: not-allowed;
+  background: #f7f1f1;
+  color: #a69496;
+}
+
+.catering-booking-body > p.rounded-lg {
+  margin: 0;
+  border: 1px solid #f2dfbf;
+  border-radius: 14px;
+  background: #fff9ed;
+  padding: 10px 12px;
+  color: #725d3d;
+  font-size: 10px;
+}
+
+.catering-booking-actions {
+  display: grid;
+  flex: 0 0 auto;
+  gap: 8px;
+  border-top: 1px solid #f0dadd;
+  background: #fff;
+  padding: 12px 15px max(14px, env(safe-area-inset-bottom));
+}
+
+.catering-booking-price-summary {
+  display: grid;
+  gap: 5px;
+  color: #241c1d;
+  font-size: 9px;
+}
+
+.catering-booking-price-summary > h3 {
+  margin-bottom: 1px;
+}
+
+.catering-booking-price-summary > div {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  color: #8f7376;
+}
+
+.catering-booking-price-summary > div strong {
+  flex: 0 0 auto;
+  color: #241c1d;
+  font-weight: 800;
+  text-align: right;
+}
+
+.catering-booking-price-summary > .catering-booking-price-total {
+  border-top: 1px solid #f0dadd;
+  margin-top: 2px;
+  padding-top: 6px;
+  color: #241c1d;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.catering-booking-price-summary > .catering-booking-price-total strong {
+  color: #241c1d;
+}
+
+.catering-booking-ack {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  border: 1px solid #f0dadd;
+  border-radius: 13px;
+  background: #fff9f9;
+  padding: 9px 10px;
+  color: #6c5558;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1.4;
+}
+
+.catering-booking-ack input {
+  flex: 0 0 auto;
+}
+
+.catering-booking-submit {
+  position: relative;
+  display: flex;
+  width: 100%;
+  min-height: 44px;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  overflow: hidden;
+  border: 1px solid #b32935;
+  border-radius: 999px;
+  background: #b32935;
+  color: #fff;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  box-shadow: 0 8px 18px rgba(179, 41, 53, 0.2);
+  transition: transform 180ms ease, box-shadow 180ms ease, background-color 220ms ease;
+}
+
+.catering-booking-submit::after {
+  position: absolute;
+  top: var(--booking-ripple-y, 50%);
+  left: var(--booking-ripple-x, 50%);
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: rgb(255 255 255 / 35%);
+  content: "";
+  opacity: 0;
+  pointer-events: none;
+}
+
+.catering-booking-submit:active:not(:disabled)::after {
+  opacity: 1;
+  animation: catering-booking-ripple 420ms ease-out forwards;
+}
+
+.catering-booking-submit:hover:not(:disabled) {
+  transform: translateY(-2px);
+  box-shadow: 0 12px 24px rgba(179, 41, 53, 0.28);
+}
+
+.catering-booking-submit:active:not(:disabled) {
+  transform: scale(0.98);
+}
+
+.catering-booking-submit:disabled {
+  border-color: #e5c4c6;
+  background: #e8cacc;
+  color: #fff;
+  cursor: not-allowed;
+  box-shadow: none;
+}
+
+.catering-booking-submit > svg {
+  width: 15px;
+  height: 15px;
+}
+
+.catering-booking-spinner {
+  animation: catering-booking-spin 800ms linear infinite;
+}
+
+.catering-booking-actions > p {
+  color: #9b7a7e;
+  font-size: 9px;
+  line-height: 1.4;
+}
+
+.catering-booking-actions > p[role="alert"] {
+  border-radius: 9px;
+  background: #fff2f1;
+  padding: 7px 9px;
+  color: #a82e27;
+}
+
+.catering-booking-panel :is(button, input, select):focus-visible {
+  outline: 3px solid rgb(179 41 53 / 25%);
+  outline-offset: 2px;
+}
+
+@media (max-width: 1000px) {
+  .catering-booking-panel {
+    position: static;
+    margin-top: 0;
+    height: auto;
+    min-height: 0;
+    overflow: visible;
+  }
+
+  .catering-booking-body {
+    min-height: 0;
+    flex: 0 0 auto;
+    overflow: visible;
+  }
+
+  .catering-booking-actions {
+    position: static;
+  }
+}
+
+@media (min-width: 1001px) {
+  .catering-booking-panel {
+    margin-top: 12px;
+  }
+}
+
+@media (max-width: 639px) {
+  .catering-booking-panel {
+    border-radius: 22px;
+  }
+
+  .catering-booking-header {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 4px;
+    padding: 15px 16px;
+  }
+
+  .catering-booking-header p {
+    text-align: left;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .catering-booking-panel *,
+  .catering-booking-panel *::before,
+  .catering-booking-panel *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+@keyframes catering-booking-ripple {
+  to {
+    transform: translate(-50%, -50%) scale(18);
+    opacity: 0;
+  }
+}
+
+@keyframes catering-booking-spin {
+  to { transform: rotate(360deg); }
+}

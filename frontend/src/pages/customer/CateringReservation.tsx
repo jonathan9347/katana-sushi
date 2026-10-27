@@ -1,6 +1,6 @@
 import { FormEvent, ReactNode, useEffect, useId, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
-import { Banknote, Check, CheckCircle2, Landmark, Send, ShieldCheck, Smartphone, X } from "lucide-react";
+import { Banknote, Check, CheckCircle2, Landmark, LoaderCircle, Send, ShieldCheck, ShoppingBag, Smartphone, X } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { Dialog } from "../../components/ui/dialog";
 import BackToHome from "../../components/layout/BackToHome";
@@ -8,11 +8,15 @@ import { api, resolveImageUrl } from "../../lib/api";
 import { getApiErrorMessage } from "../../lib/errors";
 import {
   clearCustomerPaymentAttempt,
+  createPaymentIntent,
   getOrCreateCustomerPaymentAttempt,
+  saveCustomerPaymentIntentReference,
+  verifyPayment,
   type PaymentMethod
 } from "../../lib/payment";
 import { isFutureManilaReservationTime, todayManilaDateKey } from "../../lib/dateTime";
 import { defaultSystemSettings, fetchSystemSettings } from "../../lib/systemSettings";
+import "./CateringReservation.css";
 
 type CateringPackage = {
   id: string;
@@ -48,7 +52,7 @@ type CateringPackage = {
 type SuccessState = {
   reservationId: string;
   packageTotal: number;
-  initialPaymentDue: number;
+  paidAmount: number;
   paymentPlan: "downpayment" | "full_payment";
 };
 
@@ -246,7 +250,7 @@ function getPackageDescription(item: CateringPackage) {
     return `${item.name} add-on, 1-${maximum} kg at ${money(rate)}/kg.`;
   }
   if (stationType === "whole_tuna") {
-    return "Whole tuna sold by weight, 20-40 kg at PHP 1,200/kg. Booked as a standalone item.";
+    return "Whole tuna sold by weight, 20-40 kg at PHP 1,200/kg. Can be booked on its own or alongside other catering packages.";
   }
   return item.description ?? item.name;
 }
@@ -543,9 +547,6 @@ export default function CateringReservation() {
     }
 
     const selectedStationTypes = selectedPackages.map((item) => item ? getStationType(item) : "");
-    if (selectedStationTypes.includes("whole_tuna") && selectedStationTypes.length !== 1) {
-      return "Whole Tuna can only be booked by itself.";
-    }
     const hasBasePackage = selectedStationTypes.some((id) => id === "sushi_station" || id === "tempura_live");
     if (
       selectedStationTypes.some((id) => id === "tuna_add_on" || id === "salmon_add_on") &&
@@ -639,19 +640,47 @@ export default function CateringReservation() {
         undefined,
         form.payment_plan
       );
+      const paymentPurpose = form.payment_plan === "full_payment" ? "full_payment" : "downpayment";
+      const intent = await createPaymentIntent({
+        amount: paymentAmountTotal,
+        paymentMethod: form.payment_method,
+        bookingId: attempt.bookingId,
+        reservationType: "catering",
+        purpose: paymentPurpose,
+        idempotencyKey: attempt.idempotencyKey,
+        description: `${paymentPurpose === "full_payment" ? "Package payment" : "Package downpayment"} for catering ${attempt.bookingId}`
+      });
+      if (!intent.success) {
+        throw new Error(intent.message || "Unable to start the initial payment.");
+      }
+      saveCustomerPaymentIntentReference("catering", attempt.bookingId, intent.referenceId);
+      const verification = await verifyPayment({
+        referenceId: intent.referenceId,
+        bookingId: attempt.bookingId,
+        gatewayData: {
+          amount: paymentAmountTotal,
+          paymentMethod: form.payment_method,
+          purpose: paymentPurpose,
+          reservationType: "catering",
+          paymentPlan: paymentPurpose
+        }
+      });
+      if (!verification.success || verification.status !== "paid") {
+        throw new Error(verification.message || "Initial payment could not be verified. Your reservation was not submitted.");
+      }
 
       const response = await api.post<{
         reservation_id: string;
         paid_amount: number;
         remaining_balance: number;
         package_total: number;
-        initial_payment_due: number;
         payment_plan: "downpayment" | "full_payment";
       }>(
         "/api/catering/reservations",
         {
           ...bookingPayload,
-          reservation_id: attempt.bookingId
+          reservation_id: attempt.bookingId,
+          payment_transaction_id: verification.transactionId
         }
       );
 
@@ -659,7 +688,7 @@ export default function CateringReservation() {
       setSuccess({
         reservationId: response.data.reservation_id,
         packageTotal: response.data.package_total,
-        initialPaymentDue: response.data.initial_payment_due,
+        paidAmount: response.data.paid_amount,
         paymentPlan: response.data.payment_plan
       });
       setDetailsOpen(false);
@@ -687,11 +716,11 @@ export default function CateringReservation() {
             <div className="space-y-5 p-6 text-sm text-katana-muted">
               <p className="rounded-xl border border-emerald-500/20 bg-emerald-500/10 px-4 py-3 font-semibold text-emerald-600 dark:text-emerald-300">Reservation ID: {success.reservationId}</p>
               <p>Package total: <span className="font-semibold text-white">{money(success.packageTotal)}</span></p>
-              <p>Initial payment due ({success.paymentPlan === "full_payment" ? "full package total" : "50% of package total"}): <span className="font-semibold text-white">{money(success.initialPaymentDue)}</span></p>
-              <p>Pay the selected package amount before staff approval. Staff may add a mobilization fee after reviewing the request; any remaining package balance and added fee must be paid before the event.</p>
+              <p>Initial payment received ({success.paymentPlan === "full_payment" ? "100%" : "50%"}): <span className="font-semibold text-white">{money(success.paidAmount)}</span></p>
+              <p>Your initial payment is recorded. Staff will review the request; any remaining package balance and added mobilization fee must be paid before the event.</p>
               <div className="grid gap-3">
                 <Link className="customer-btn-primary text-center" to={`/reservation/status?bookingId=${success.reservationId}`}>
-                  Continue to Payment
+                  View reservation status
                 </Link>
               </div>
             </div>
@@ -706,7 +735,7 @@ export default function CateringReservation() {
       <section className="w-full">
         <div className="w-full">
           <form className="w-full">
-            <div className="grid w-full items-start gap-6 min-[900px]:grid-cols-[minmax(0,1fr)_400px] min-[900px]:gap-3">
+            <div className="grid w-full items-start gap-6 min-[1001px]:grid-cols-[minmax(0,1fr)_400px] min-[1001px]:gap-3">
             <div>
             <BackToHome className="mb-3" />
             <div className="space-y-6">
@@ -729,7 +758,7 @@ export default function CateringReservation() {
                     const subtitle = station.id === "sushi_station"
                       ? `${options.length} package options`
                       : station.id === "whole_tuna"
-                        ? "Whole Tuna option only"
+                        ? "20–40 kg per booking"
                         : `Fixed package${options[0]?.items?.fixedPax ? ` · ${options[0].items.fixedPax} pax` : ""}`;
 
                     return (
@@ -808,20 +837,20 @@ export default function CateringReservation() {
                                         package_quantities: quantities
                                       };
                                     })}
-                                    className="group block w-full rounded-2xl text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-katana-red"
+                                    className="group flex w-full flex-col rounded-2xl text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-katana-red"
                                   >
-                                    <div className="relative grid h-24 grid-cols-3 place-items-center gap-2 bg-katana-red/10 p-3">
+                                    <div className="relative flex h-24 w-full shrink-0 items-center justify-center gap-2 overflow-hidden bg-katana-red/10 p-3">
                                       {images.length > 0 ? images.slice(0, 2).map((image, index) => (
                                         <img
                                           key={image}
                                           src={image}
                                           alt=""
-                                          className="h-full max-w-full rounded-lg object-cover"
+                                          className="block h-full min-h-0 min-w-0 flex-1 rounded-lg object-cover"
                                           loading="lazy"
                                           decoding="async"
                                         />
                                       )) : (
-                                        <span className="col-span-3 text-xs font-semibold uppercase tracking-wide text-[var(--customer-muted)]">
+                                        <span className="text-xs font-semibold uppercase tracking-wide text-[var(--customer-muted)]">
                                           {station.name}
                                         </span>
                                       )}
@@ -831,7 +860,7 @@ export default function CateringReservation() {
                                         </span>
                                       )}
                                     </div>
-                                    <div className="grid min-h-28 content-between gap-2 p-4">
+                                    <div className="relative z-10 grid min-h-28 w-full shrink-0 content-between gap-2 bg-[var(--customer-surface)] p-4">
                                       <div>
                                         <p className="text-base font-bold text-[var(--customer-text)]">{title}</p>
                                         <p className="mt-1 text-xs uppercase tracking-wide text-[var(--customer-muted)]">{paxLabel}</p>
@@ -938,15 +967,15 @@ export default function CateringReservation() {
             </div>
             <aside
               id="catering-mobile-details"
-              className="catering-booking-panel flex flex-col overflow-visible rounded-2xl border border-[var(--customer-border)] bg-[var(--customer-surface)] min-[900px]:sticky min-[900px]:top-3 min-[900px]:h-[calc(100dvh-1.5rem)] min-[900px]:overflow-hidden"
+              className="catering-booking-panel"
             >
-              <header className="shrink-0 bg-katana-red px-5 py-4 text-white">
+              <header className="catering-booking-header">
                 <h2 className="text-lg font-bold">Event and booking details</h2>
-                <p className="mt-1 text-sm font-medium">{selectedStationCount} {selectedStationCount === 1 ? "station" : "stations"} · {money(totalPriceTotal)}</p>
+                <p>{selectedStationCount} {selectedStationCount === 1 ? "station" : "stations"} · {money(totalPriceTotal)}</p>
               </header>
-              <div className="catering-booking-body flex-1 space-y-5 p-4 min-[900px]:min-h-0 min-[900px]:overflow-y-auto min-[900px]:overscroll-contain">
-                <section className="catering-booking-event-fields space-y-3">
-                  <h3 className="text-sm font-bold text-[var(--customer-text)]">Event</h3>
+              <div className="catering-booking-body">
+                <section className="catering-booking-event-fields">
+                  <h3>Event</h3>
                   <div className="grid gap-3 sm:grid-cols-2">
                     <label className="block">
                       <span className="customer-label">Event Date *</span>
@@ -977,10 +1006,13 @@ export default function CateringReservation() {
                   </div>
                 </section>
 
-                <section className="space-y-3 border-t border-[var(--customer-border)] pt-4">
-                  <h3 className="text-sm font-bold text-[var(--customer-text)]">Your order</h3>
+                <section className="catering-booking-order">
+                  <h3>Your order</h3>
                   {selectedPackages.length === 0 ? (
-                    <p className="rounded-xl bg-[var(--customer-surface-2)] p-3 text-sm text-[var(--customer-muted)]">Select a station package to begin your order.</p>
+                    <div className="catering-booking-empty">
+                      <span aria-hidden="true"><ShoppingBag /></span>
+                      <p>Select a station package to begin your order.</p>
+                    </div>
                   ) : (
                     <div className="space-y-3">
                       {selectedPackages.map((item) => {
@@ -1003,7 +1035,7 @@ export default function CateringReservation() {
                               : item.description ?? `${item.minPax}–${item.maxPax} pax`;
 
                         return (
-                          <div key={item.id} className="flex items-start justify-between gap-3 border-b border-[var(--customer-border)] pb-3 text-sm">
+                          <div key={item.id} className="catering-booking-order-line">
                             <div className="min-w-0">
                               <p className="font-semibold text-[var(--customer-text)]">{title}</p>
                               <p className="mt-0.5 text-xs text-[var(--customer-muted)]">{detail}</p>
@@ -1026,8 +1058,8 @@ export default function CateringReservation() {
                   </p>
                 )}
 
-                <section className="border-t border-[var(--customer-border)] pt-4">
-                  <h3 className="text-sm font-bold text-[var(--customer-text)]">Payment option</h3>
+                <section className="catering-booking-payment">
+                  <h3>Payment option</h3>
                   {isZeroQuoteOnlyReservation ? (
                     <p className="mt-2 text-xs text-[var(--customer-muted)]">Custom-quote options must be arranged through a catering inquiry.</p>
                   ) : !hasPricedOptions ? (
@@ -1043,9 +1075,7 @@ export default function CateringReservation() {
                           type="button"
                           aria-pressed={option.selected}
                           onClick={() => setField("payment_plan", option.value)}
-                          className={`rounded-xl border p-3 text-left transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-katana-red ${
-                            option.selected ? "border-katana-red bg-katana-red/10" : "border-[var(--customer-border)] hover:border-katana-red/60"
-                          }`}
+                          className={`catering-booking-payment-option${option.selected ? " is-selected" : ""}`}
                         >
                           <span className="block text-sm font-bold">{option.title}</span>
                           <span className="mt-1 block text-xs text-[var(--customer-muted)]">{option.subtitle}</span>
@@ -1057,13 +1087,13 @@ export default function CateringReservation() {
                 </section>
 
                 {paymentAmountTotal > 0 && (
-                  <section className="border-t border-[var(--customer-border)] pt-4">
-                    <h3 className="text-sm font-bold text-[var(--customer-text)]">Payment method</h3>
+                  <section className="catering-booking-payment-method">
+                    <h3>Payment method</h3>
                     <div className="mt-2 grid grid-cols-3 gap-2">
                       {([
-                        { id: "cash", label: "Cash", icon: <Banknote className="h-4 w-4" />, disabled: false },
-                        { id: "gcash", label: "GCash", icon: <Smartphone className="h-4 w-4" />, disabled: true },
-                        { id: "bank_transfer", label: "BPI", icon: <Landmark className="h-4 w-4" />, disabled: true }
+                        { id: "cash", label: "Cash", icon: <Banknote className="h-4 w-4" aria-hidden="true" />, disabled: false },
+                        { id: "gcash", label: "GCash", icon: <Smartphone className="h-4 w-4" aria-hidden="true" />, disabled: true },
+                        { id: "bank_transfer", label: "BPI", icon: <Landmark className="h-4 w-4" aria-hidden="true" />, disabled: true }
                       ] as const).map((option) => (
                         <button
                           type="button"
@@ -1071,13 +1101,7 @@ export default function CateringReservation() {
                           aria-pressed={form.payment_method === option.id}
                           onClick={() => !option.disabled && setField("payment_method", option.id)}
                           disabled={option.disabled}
-                          className={`flex min-h-[42px] flex-col items-center justify-center gap-0.5 rounded-lg border px-2 py-1 text-xs font-bold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-katana-red ${
-                            form.payment_method === option.id
-                              ? "border-katana-red bg-katana-red text-white"
-                              : option.disabled
-                                ? "cursor-not-allowed border-[var(--customer-border)] bg-[var(--customer-surface-2)] text-[var(--customer-muted)]"
-                                : "border-[var(--customer-border)] text-[var(--customer-muted)]"
-                          }`}
+                          className={`catering-booking-method-option${form.payment_method === option.id ? " is-selected" : ""}${option.disabled ? " is-disabled" : ""}`}
                         >
                           <span className="flex items-center gap-1">{option.icon}{option.label}</span>
                           {option.disabled && <span className="text-[9px] uppercase tracking-wide">Coming soon</span>}
@@ -1087,21 +1111,21 @@ export default function CateringReservation() {
                   </section>
                 )}
 
-                <section className="space-y-2 border-t border-[var(--customer-border)] pt-4 text-sm">
-                  <h3 className="font-bold text-[var(--customer-text)]">Price breakdown</h3>
-                  <div className="flex justify-between gap-3 text-[var(--customer-muted)]"><span>Package subtotal</span><span>{money(packageSubtotalTotal)}</span></div>
-                  <div className="flex justify-between gap-3 text-[var(--customer-muted)]"><span>Add-ons</span><span>{money(addonSubtotalTotal)}</span></div>
-                  <div className="flex justify-between gap-3 text-[var(--customer-muted)]"><span>Initial payment after submission</span><span>{money(paymentAmountTotal)}</span></div>
+              </div>
+              <footer className="catering-booking-actions">
+                <section className="catering-booking-price-summary">
+                  <h3>Price breakdown</h3>
+                  <div><span>Package subtotal</span><strong>{money(packageSubtotalTotal)}</strong></div>
+                  <div><span>Add-ons</span><strong>{money(addonSubtotalTotal)}</strong></div>
+                  <div><span>Initial payment required to submit</span><strong>{money(paymentAmountTotal)}</strong></div>
                   {!isZeroQuoteOnlyReservation && (
-                    <div className="flex justify-between gap-3 text-[var(--customer-muted)]"><span>Balance due later before added fees</span><span>{money(remainingTotal)}</span></div>
+                    <div><span>Balance due later before added fees</span><strong>{money(remainingTotal)}</strong></div>
                   )}
-                  <div className="flex justify-between gap-3 border-t border-[var(--customer-border)] pt-2 text-base font-bold">
-                    <span>Total</span><span>{money(totalPriceTotal)}</span>
+                  <div className="catering-booking-price-total">
+                    <span>Total</span><strong>{money(totalPriceTotal)}</strong>
                   </div>
                 </section>
-              </div>
-              <footer className="catering-booking-actions shrink-0 space-y-2 border-t border-[var(--customer-border)] bg-[var(--customer-surface)] p-4">
-                <label className="catering-booking-ack flex items-start gap-3 rounded-xl border border-[var(--customer-border)] bg-[var(--customer-surface-2)] p-3 text-sm font-semibold">
+                <label className="catering-booking-ack">
                   <input checked={form.acknowledged} className="mt-1 h-4 w-4 accent-katana-red" type="checkbox" onChange={(event) => setField("acknowledged", event.target.checked)} />
                   I understand this reservation is pending staff approval.
                 </label>
@@ -1117,10 +1141,18 @@ export default function CateringReservation() {
                     setNotice("");
                     setDetailsOpen(true);
                   }}
-                  className="customer-btn-primary flex w-full gap-2 disabled:cursor-not-allowed disabled:opacity-50"
+                  onPointerDown={(event) => {
+                    const bounds = event.currentTarget.getBoundingClientRect();
+                    event.currentTarget.style.setProperty("--booking-ripple-x", `${event.clientX - bounds.left}px`);
+                    event.currentTarget.style.setProperty("--booking-ripple-y", `${event.clientY - bounds.top}px`);
+                  }}
+                  className="catering-booking-submit customer-btn-primary"
                   disabled={selectedStationCount === 0 || !form.acknowledged || isProcessingPayment}
                 >
-                  <Send className="h-4 w-4" /> {isProcessingPayment ? "Submitting..." : "Review request"}
+                  {isProcessingPayment
+                    ? <LoaderCircle className="catering-booking-spinner" aria-hidden="true" />
+                    : <Send className="h-4 w-4" aria-hidden="true" />}
+                  {isProcessingPayment ? "Submitting..." : "Review request"}
                 </button>
                 <p className="text-center text-xs text-[var(--customer-muted)]">
                   Staff may add a mobilization fee for the remaining balance.
@@ -1331,7 +1363,7 @@ export default function CateringReservation() {
                 {isZeroQuoteOnlyReservation
                   ? "A custom quote is required."
                   : paymentAmountTotal > 0
-                    ? `${isFullPayment ? "100% of package total" : "50% of package total"} due after submitting: ${money(paymentAmountTotal)}`
+                    ? `${isFullPayment ? "100% of package total" : "50% of package total"} required before submission: ${money(paymentAmountTotal)}`
                     : "Select an option to calculate payment."}
               </p>
               {!isZeroQuoteOnlyReservation && <p className="mt-1">Remaining package balance before any staff-added fee: {money(remainingTotal)}</p>}
@@ -1352,11 +1384,11 @@ export default function CateringReservation() {
                 disabled={isProcessingPayment}
               >
                 {isProcessingPayment
-                  ? "Submitting..."
+                ? "Processing payment..."
                   : isZeroQuoteOnlyReservation
                     ? "Select priced packages"
                     : paymentAmountTotal > 0
-                      ? "Submit request and continue"
+                      ? "Pay and submit request"
                       : "Choose a payment option"}
               </button>
             </div>

@@ -17,7 +17,9 @@ const products = ["Sushi", "Sashimi"].flatMap((category) =>
 );
 
 const reservationRules = {
+  MAX_PAX_PER_SLOT: 60,
   MAX_GUESTS_PER_BOOKING: 20,
+  SLOT_DURATION_MINUTES: 30,
   LATE_ALERT_MINUTES: 15,
   LATE_ACTION: "alert_staff",
   OPENING_TIME: "11:00",
@@ -241,6 +243,7 @@ async function mockApi(page: Page, packages: typeof cateringPackages = []) {
     } else if (url.pathname === "/api/reservations/table-availability") {
       body = {
         availability: url.searchParams.get("time") === "12:00" ? "full" : "available",
+        seats_left: url.searchParams.get("time") === "12:00" ? 0 : 20,
         checked_at: new Date().toISOString()
       };
     } else if (url.pathname === "/api/reservations/table" && route.request().method() === "POST") {
@@ -323,7 +326,7 @@ async function expectPanelBounds(page: Page, selector: string, height: number) {
     };
   });
 
-  expect(bounds).toEqual({ top: 12, bottomGap: 12, rightGap: 12, height: height - 24 });
+  expect(bounds).toEqual({ top: 24, bottomGap: 24, rightGap: 12, height: height - 48 });
 }
 
 test("table booking route uses the minimal Back control instead of the Home header", async ({ page }) => {
@@ -365,9 +368,99 @@ test("Catering booking summary stays full-height and keeps actions pinned at des
     (left as HTMLElement).style.minHeight = "1600px";
   });
   await page.evaluate(() => window.scrollTo(0, 200));
-  await expect.poll(() => panel.evaluate((element) => Math.round(element.getBoundingClientRect().top))).toBe(12);
+  await expect.poll(() => panel.evaluate((element) => Math.round(element.getBoundingClientRect().top))).toBe(24);
   await page.setViewportSize({ width: 800, height: 900 });
   await expect.poll(() => panel.evaluate((element) => getComputedStyle(element).position)).toBe("static");
+});
+
+test("booking summary panels show their existing empty states and action availability", async ({ page }) => {
+  await mockApi(page);
+  await page.setViewportSize({ width: 1280, height: 640 });
+  await page.goto("/reserve/book");
+
+  const reservationPanel = page.locator(".table-reservation-summary-panel");
+  await expect(reservationPanel.getByText("Choose a time to check seat availability.")).toBeVisible();
+  await expect(reservationPanel.locator(".table-reservation-summary-details")).toContainText("Date");
+  await expect(reservationPanel.locator(".table-reservation-summary-details")).toContainText("Time");
+  await expect(reservationPanel.locator(".table-reservation-summary-details")).toContainText("Guests");
+  await expect(reservationPanel.locator(".table-reservation-summary-details")).toContainText("Dining mode");
+  await expect(reservationPanel.getByRole("button", { name: "Choose a time" })).toBeDisabled();
+  const reservationBounds = await reservationPanel.evaluate((element) => {
+    const rect = element.getBoundingClientRect();
+    return {
+      top: Math.round(rect.top),
+      bottomGap: Math.round(window.innerHeight - rect.bottom),
+      height: Math.round(rect.height)
+    };
+  });
+  expect(reservationBounds).toEqual({ top: 24, bottomGap: 24, height: 592 });
+
+  await page.getByLabel("Or choose a date").fill("2099-01-01");
+  await page.getByRole("button", { name: "11:00 AM, 20 seats left" }).click();
+  await expect(reservationPanel.getByTestId("reservation-time-state")).toContainText("Seats available");
+  await expect(reservationPanel.getByRole("button", { name: "Confirm booking" })).toBeEnabled();
+
+  await page.goto("/catering/book");
+  const cateringPanel = page.locator("#catering-mobile-details");
+  await expect(cateringPanel.getByText("Select a station package to begin your order.")).toBeVisible();
+  await expect(cateringPanel.locator(".catering-booking-header")).toContainText("0 stations");
+  await expect(cateringPanel.locator(".catering-booking-price-summary")).toContainText("Total");
+  await expect(cateringPanel.getByRole("button", { name: "Review request" })).toBeDisabled();
+});
+
+test("booking summaries use 24px sticky margins at desktop sizes and stack below the main form", async ({ page }) => {
+  await mockApi(page);
+  await page.goto("/catering/book");
+
+  const cateringPanel = page.locator("#catering-mobile-details");
+  const cateringAction = cateringPanel.getByRole("button", { name: "Review request" });
+  for (const viewport of [
+    { width: 360, height: 640 },
+    { width: 768, height: 800 },
+    { width: 1000, height: 800 },
+    { width: 1280, height: 640 },
+    { width: 1920, height: 1080 }
+  ]) {
+    await page.setViewportSize(viewport);
+    if (viewport.width <= 1000) {
+      await expect.poll(() => cateringPanel.evaluate((element) => getComputedStyle(element).position)).toBe("static");
+      await expect.poll(() => cateringPanel.evaluate((element) => {
+        const grid = element.parentElement;
+        return grid ? getComputedStyle(grid).gridTemplateColumns.split(" ").length : 0;
+      })).toBe(1);
+      await cateringAction.scrollIntoViewIfNeeded();
+    } else {
+      await expectPanelBounds(page, "#catering-mobile-details", viewport.height);
+    }
+    await expect(cateringAction).toBeInViewport();
+  }
+
+  await page.goto("/reserve/book");
+  const reservationPanel = page.locator(".table-reservation-summary");
+  for (const viewport of [
+    { width: 360, height: 640 },
+    { width: 768, height: 800 },
+    { width: 1000, height: 800 },
+    { width: 1280, height: 640 },
+    { width: 1920, height: 1080 }
+  ]) {
+    await page.setViewportSize(viewport);
+    if (viewport.width <= 1000) {
+      await expect.poll(() => reservationPanel.evaluate((element) => getComputedStyle(element).position)).toBe("static");
+      await reservationPanel.getByRole("button", { name: "Choose a time" }).scrollIntoViewIfNeeded();
+    } else {
+      const bounds = await reservationPanel.evaluate((element) => {
+        const rect = element.getBoundingClientRect();
+        return {
+          top: Math.round(rect.top),
+          bottomGap: Math.round(window.innerHeight - rect.bottom),
+          height: Math.round(rect.height)
+        };
+      });
+      expect(bounds).toEqual({ top: 24, bottomGap: 24, height: viewport.height - 48 });
+    }
+    await expect(reservationPanel.getByRole("button", { name: "Choose a time" })).toBeInViewport();
+  }
 });
 
 test("Catering booking selects package cards and prices add-ons from their quantities", async ({ page }) => {
@@ -575,7 +668,7 @@ test("Catering summary panel keeps its body scrollable and footer visible", asyn
       };
     });
 
-    expect(fit.panelHeight, JSON.stringify({ viewport, fit })).toBe(viewport.height - 24);
+    expect(fit.panelHeight, JSON.stringify({ viewport, fit })).toBe(viewport.height - 48);
     expect(fit.footerInside, JSON.stringify({ viewport, fit })).toBeTruthy();
   }
 });
@@ -954,8 +1047,8 @@ test("successful dine-in reservation links to its Status page", async ({ page })
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto("/reserve/book");
 
-  await page.getByLabel("Date *").fill("2099-01-01");
-  await page.getByLabel("Reservation time").fill("12:30");
+  await page.getByLabel("Or choose a date").fill("2099-01-01");
+  await page.getByLabel("Choose another reservation time").fill("12:30");
 
   const confirmBooking = page.getByRole("button", { name: "Confirm booking" });
   await expect(confirmBooking).toBeEnabled();

@@ -24,6 +24,7 @@ const { checkDatabaseHealth } = require("../lib/database") as typeof import("../
 
 type AvailabilityResponse = {
   availability: "available" | "full";
+  seats_left: number;
   checked_at: string;
 };
 
@@ -159,7 +160,7 @@ async function setAvailableTables(tableNumbers: number[]) {
   return tables;
 }
 
-async function availability(date: string, time: string, partySize: number) {
+async function availabilityDetails(date: string, time: string, partySize: number) {
   const params = new URLSearchParams({
     date,
     time,
@@ -169,8 +170,14 @@ async function availability(date: string, time: string, partySize: number) {
   const responseText = await response.text();
   assert.equal(response.status, 200, responseText);
   const result = JSON.parse(responseText) as AvailabilityResponse;
-  assert.deepEqual(Object.keys(result).sort(), ["availability", "checked_at"]);
+  assert.deepEqual(Object.keys(result).sort(), ["availability", "checked_at", "seats_left"]);
   assert.ok(["available", "full"].includes(result.availability));
+  assert.ok(Number.isInteger(result.seats_left) && result.seats_left >= 0);
+  return result;
+}
+
+async function availability(date: string, time: string, partySize: number) {
+  const result = await availabilityDetails(date, time, partySize);
   return result.availability;
 }
 
@@ -245,10 +252,12 @@ async function updateEstimatedDuration(minutes: number) {
   return (JSON.parse(responseText) as SystemSettingsResponse).settings;
 }
 
-test("reports Available or Full from party size and supports multi-table combinations without counts", async () => {
+test("reports Available or Full with remaining seats and supports multi-table combinations", async () => {
   const [fourSeatTable] = await setAvailableTables([1]);
   assert.equal(fourSeatTable.capacity, 4);
   const date = dateAfter(3000);
+  assert.equal((await availabilityDetails(date, "18:00", 4)).seats_left, 4);
+  assert.equal((await availabilityDetails(date, "18:00", 5)).seats_left, 4);
   assert.equal(await availability(date, "18:00", 4), "available");
   assert.equal(await availability(date, "18:00", 5), "full");
 
@@ -366,13 +375,18 @@ test("active POS sessions block same-day availability until bill-out but not fut
 test("booking confirmation rejects a table taken after availability was checked", async () => {
   await setAvailableTables([4]);
   const date = dateAfter(3004);
-  assert.equal(await availability(date, "18:00", 4), "available");
+  const beforeBooking = await availabilityDetails(date, "18:00", 4);
+  assert.equal(beforeBooking.availability, "available");
+  assert.equal(beforeBooking.seats_left, 4);
 
   const occupyingBooking = await book(4, date, "18:00");
   assert.equal(occupyingBooking.response.status, 201, await occupyingBooking.response.text());
+  assert.equal((await availabilityDetails(date, "18:00", 1)).seats_left, 0);
   const competingBooking = await book(4, date, "18:00");
   assert.equal(competingBooking.response.status, 409);
-  assert.match((await competingBooking.response.json() as { message: string }).message, /No suitable tables/);
+  const conflict = await competingBooking.response.json() as { message: string; code: string };
+  assert.match(conflict.message, /No suitable tables/);
+  assert.equal(conflict.code, "TABLE_ASSIGNMENT_CONFLICT");
   assert.equal(
     await prisma.reservation.count({ where: { customer_email: competingBooking.body.customer_email } }),
     0

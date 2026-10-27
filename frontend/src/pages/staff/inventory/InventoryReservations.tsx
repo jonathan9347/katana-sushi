@@ -114,7 +114,9 @@ export default function InventoryReservations() {
                       </TableCell>
                       <TableCell>
                         <span className="font-semibold">{reservation.reference}</span>
-                        <span className="block text-xs text-slate-500">{reservation.customer_name} · {reservation.type}</span>
+                        <span className="block text-xs text-slate-500">
+                          {reservation.customer_name} · {reservation.type === "takeout" ? "pickup" : reservation.type}
+                        </span>
                       </TableCell>
                       <TableCell>{reservation.guests ?? "—"}</TableCell>
                       <TableCell><span className={`rounded-full px-2 py-1 text-xs font-semibold ${["cancelled", "canceled", "rejected", "declined"].includes(reservation.status.toLowerCase()) ? "bg-slate-100 text-slate-600" : "bg-emerald-50 text-emerald-800"}`}>{reservation.status.replace(/_/g, " ")}</span></TableCell>

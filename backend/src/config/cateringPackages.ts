@@ -49,7 +49,7 @@ export const CATERING_PACKAGE_SEEDS: Prisma.CateringPackageCreateManyInput[] = [
     pricePerPerson: 0,
     minPax: 0,
     maxPax: 0,
-    description: "Whole tuna sold by weight; 20-40 kg at PHP 1,200/kg. Booked as a standalone item.",
+    description: "Whole tuna sold by weight; 20-40 kg at PHP 1,200/kg. Can be booked on its own or alongside other catering packages.",
     imageUrl: "/images/catering-banner.jpg",
     items: {
       pricingType: "range",
@@ -151,10 +151,7 @@ export const CATERING_PACKAGE_SEEDS: Prisma.CateringPackageCreateManyInput[] = [
       stationOrder: 5,
       optionOrder: 1,
       inventoryRequirements: [
-        { materialName: "Shrimp", quantity: 5000, unit: "g" },
-        { materialName: "Tempura flour", quantity: 2000, unit: "g" },
-        { materialName: "Cooking oil", quantity: 3000, unit: "ml" },
-        { materialName: "Dipping sauce", quantity: 1500, unit: "ml" }
+        { materialName: "Shrimp", quantity: 5000, unit: "g" }
       ],
       inclusions: ["Live tempura cooking station"],
       galleryImages: ["/images/unli-dining.jpg", "/images/hero-banner.jpg", "/images/cateringf.jpg"]

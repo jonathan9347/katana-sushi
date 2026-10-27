@@ -155,8 +155,8 @@ function formatReceiptPaymentPlan(plan?: string | null, isCatering = false) {
   return plan ?? "N/A";
 }
 
-function formatReceiptPaymentStage(stage: string) {
-  if (stage === "downpayment") return "Previous payment";
+function formatReceiptPaymentStage(stage: string, isCatering: boolean) {
+  if (stage === "downpayment") return isCatering ? "Initial payment" : "Previous payment";
   if (stage === "full_payment") return "Paid in full";
   if (stage === "remaining_balance" || stage === "balance") return "Payment";
   return formatStatus(stage);
@@ -368,7 +368,7 @@ export function ReservationReceipt({ reservation, actions, paymentControls, show
                   <tbody>
                     {paymentHistory.map((payment) => (
                       <tr key={payment.id} className="border-b border-dashed border-slate-200">
-                        <td className="py-2 pr-3 font-semibold">{formatReceiptPaymentStage(payment.payment_stage)}</td>
+                        <td className="py-2 pr-3 font-semibold">{formatReceiptPaymentStage(payment.payment_stage, isCatering)}</td>
                         <td className="py-2 pr-3">{formatPaymentMethod(payment.method)}</td>
                         <td className="py-2 pr-3">{payment.reference_number ?? (payment.change_due ? `Change: ${money(payment.change_due)}` : "-")}</td>
                         <td className="py-2 text-right font-semibold">{money(payment.amount)}</td>

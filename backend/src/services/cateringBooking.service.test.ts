@@ -64,11 +64,12 @@ test("calculates the 50% and 100% initial payment plans", () => {
   assert.equal(getCateringInitialPayment(6000, "full_payment"), 6000);
 });
 
-test("validates standalone tuna and add-on combinations", () => {
+test("allows Whole Tuna with other selections and validates add-on combinations", () => {
   assert.equal(getCateringSelectionError(["whole_tuna"]), null);
-  assert.equal(getCateringSelectionError(["whole_tuna", "sushi_station"]), "Whole Tuna can only be booked by itself.");
+  assert.equal(getCateringSelectionError(["whole_tuna", "sushi_station"]), null);
   assert.equal(getCateringSelectionError(["tuna_add_on"]), "Tuna and Salmon add-ons must be added to a station package.");
   assert.equal(getCateringSelectionError(["sushi_station", "tuna_add_on", "salmon_add_on"]), null);
+  assert.equal(getCateringSelectionError(["whole_tuna", "sushi_station", "tuna_add_on"]), null);
   assert.equal(getCateringSelectionError(["sushi_station", "sushi_station"]), "Select only one option for each catering station.");
 });
 
@@ -97,7 +98,7 @@ test("normalizes legacy Sashimi Bar package records for booking validation", () 
   assert.equal(wholeTuna, "whole_tuna");
   assert.equal(tunaAddon, "tuna_add_on");
   assert.equal(salmonAddon, "salmon_add_on");
-  assert.equal(getCateringSelectionError([wholeTuna, tunaAddon]), "Whole Tuna can only be booked by itself.");
+  assert.equal(getCateringSelectionError([wholeTuna, tunaAddon]), "Tuna and Salmon add-ons must be added to a station package.");
   assert.equal(getCateringSelectionError(["sushi_station", tunaAddon, salmonAddon]), null);
 });
 
@@ -111,5 +112,7 @@ test("resolves whole tuna, add-on, and tempura stock requirements", () => {
   assert.deepEqual(getCateringInventoryRequirements("tuna_add_on", 1.5), [
     { materialName: "Tuna sashimi block", quantity: 1500, unit: "g" }
   ]);
-  assert.deepEqual(getCateringInventoryRequirements("tempura_live"), []);
+  assert.deepEqual(getCateringInventoryRequirements("tempura_live"), [
+    { materialName: "Shrimp", quantity: 5000, unit: "g" }
+  ]);
 });

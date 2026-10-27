@@ -23,7 +23,6 @@ import Dashboard from "./pages/staff/Dashboard";
 import SettingsPage from "./pages/staff/Settings";
 import Login from "./pages/staff/Login";
 import PosPage from "./pages/staff/pos";
-import DiningService from "./pages/staff/pos/DiningService";
 import PosHistory from "./pages/staff/pos/PosHistory";
 import DineInReservations from "./pages/staff/reservations/DineInReservations";
 import CateringReservations from "./pages/staff/catering/CateringReservations";
@@ -87,7 +86,7 @@ export default function App() {
       <Route path="/staff/inventory/read-only" element={<StaffPage roles={["admin", "inventory_manager", "chef"]}><InventoryPage readOnly /></StaffPage>} />
       <Route path="/staff/pos" element={<StaffPage roles={["admin", "cashier"]}><PosPage /></StaffPage>} />
       <Route path="/staff/pos/dining" element={<Navigate to="/staff/pos" replace />} />
-      <Route path="/staff/kitchen" element={<StaffPage roles={["admin", "cashier", "chef"]}><DiningService mode="kitchen" /></StaffPage>} />
+      <Route path="/staff/kitchen" element={<Navigate to="/staff/pos" replace />} />
       <Route path="/staff/takeout" element={<Navigate to="/staff/reservations?view=pickup" replace />} />
       <Route path="/staff/pos/history" element={<StaffPage roles={["admin", "cashier"]}><PosHistory /></StaffPage>} />
       <Route path="/staff/pos/unlimited-settings" element={<StaffPage roles={["admin", "cashier"]}><UnlimitedSettings /></StaffPage>} />

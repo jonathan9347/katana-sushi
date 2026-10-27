@@ -114,10 +114,6 @@ export function getCateringSelectionError(stationTypes: string[]): string | null
     return "Select only one option for each catering station.";
   }
 
-  if (stationTypes.includes("whole_tuna") && stationTypes.length !== 1) {
-    return "Whole Tuna can only be booked by itself.";
-  }
-
   const hasBasePackage = stationTypes.includes("sushi_station") || stationTypes.includes("tempura_live");
   if (
     (stationTypes.includes("tuna_add_on") || stationTypes.includes("salmon_add_on")) &&
@@ -177,6 +173,9 @@ export function getCateringInventoryRequirements(
       throw new Error("A valid kilogram quantity is required for the salmon add-on.");
     }
     return [{ materialName: "Salmon sashimi block", quantity: quantityKg * 1000, unit: "g" }];
+  }
+  if (stationType === "tempura_live") {
+    return [{ materialName: "Shrimp", quantity: 5000, unit: "g" }];
   }
   return [];
 }

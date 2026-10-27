@@ -380,6 +380,45 @@ test("catering booking verifies 50% downpayments and 100% full payments", async 
   }
 });
 
+test("customers can create repeated catering bookings for the same event details", async () => {
+  const eventDate = manilaDateAfter(4);
+  const fixtureId = nextFixtureId();
+  const customer = {
+    customer_name: `Catering repeat ${fixtureId}`,
+    customer_phone: `09${String(100000000 + fixtureSequence).slice(-9)}`,
+    customer_email: `${fixtureId}@example.invalid`,
+    event_date: eventDate,
+    event_time: "12:00",
+    venue_address: "Integration Test Venue",
+    event_type: "Birthday",
+    package_id: "pkg_whole_tuna",
+    package_ids: ["pkg_whole_tuna"],
+    package_quantities: { pkg_whole_tuna: 20 },
+    payment_plan: "downpayment" as const,
+    payment_method: "gcash" as const
+  };
+
+  const bookingIds = [`CAT-${fixtureId}-first`, `CAT-${fixtureId}-second`];
+  const responses = await Promise.all(bookingIds.map(async (reservationId) => {
+    createdReservationReferences.push(reservationId);
+    const paymentTransactionId = await createVerifiedPaymentIntent({
+      reservationId,
+      amount: 12000,
+      purpose: "downpayment"
+    });
+    return request("/api/catering/reservations", {
+      method: "POST",
+      authorized: false,
+      body: { ...customer, reservation_id: reservationId, payment_transaction_id: paymentTransactionId }
+    });
+  }));
+
+  assert.deepEqual(responses.map((response) => response.status), [201, 201]);
+  await Promise.all(bookingIds.map((reservationId) =>
+    prisma.cateringReservation.findUniqueOrThrow({ where: { reservation_id: reservationId } })
+  ));
+});
+
 test("cancelling before preparation releases locks without consuming stock", async () => {
   const reservation = await createReservation({ status: "confirmed"   });
 

@@ -79,6 +79,20 @@ test("cashier searches by order ID and completes preparing or ready pickups with
             total: 200,
             ready_at: null,
             items: []
+          },
+          transaction: {
+            id: "transaction-1",
+            transaction_number: "POS-PICKUP-001",
+            customer_name: "Pickup Customer",
+            transaction_type: "takeout",
+            subtotal: 200,
+            tax: 0,
+            total: 200,
+            payment_method: "cash",
+            cash_received: 250,
+            change_due: 50,
+            created_at: "2026-10-27T00:00:00.000Z",
+            items: [{ quantity: 2, unit_price: 100, total_price: 200, selling_product: { name: "California Roll" } }]
           }
         }
       });
@@ -89,15 +103,16 @@ test("cashier searches by order ID and completes preparing or ready pickups with
 
   await page.goto("/staff/pos");
   await page.getByRole("button", { name: "New Customer" }).click();
-  await page.getByRole("dialog", { name: "New Customer" }).getByRole("button", { name: "Take-out" }).click();
-  await page.getByRole("dialog", { name: "Take-out" }).getByRole("button", { name: "Pickup" }).click();
-  const searchInput = page.getByLabel("Search by Order ID or customer name");
+  await page.getByRole("dialog", { name: "New Customer" }).getByRole("button", { name: /Take-out/ }).click();
+  await page.getByRole("dialog", { name: "Take-out" }).getByRole("button", { name: /Pickup/ }).click();
+  const searchInput = page.getByLabel("Search pickup orders by customer or reference");
 
   for (const [orderId, status] of [["KTO-PREP-001", "Preparing"], ["KTO-READY-001", "Ready for pickup"]] as const) {
     await searchInput.fill(orderId);
-    const result = page.getByRole("button", { name: new RegExp(orderId) });
+    const result = page.getByRole("dialog", { name: "Select pickup order" }).getByRole("button", { name: new RegExp(orderId) });
     await expect(result).toBeVisible();
     await result.click();
+    await page.getByRole("dialog", { name: "Ready to order" }).getByRole("button", { name: "Start ordering" }).click();
     await expect(page.getByRole("region", { name: "POS order builder" })).toContainText(status);
     if (orderId.includes("READY")) {
       await expect(page.getByRole("region", { name: "POS order builder" }).getByText(/Pickup Time:/)).toBeVisible();
@@ -111,8 +126,8 @@ test("cashier searches by order ID and completes preparing or ready pickups with
     await expect(page.getByRole("button", { name: "New Customer" })).toBeVisible();
     if (orderId.includes("PREP")) {
       await page.getByRole("button", { name: "New Customer" }).click();
-      await page.getByRole("dialog", { name: "New Customer" }).getByRole("button", { name: "Take-out" }).click();
-      await page.getByRole("dialog", { name: "Take-out" }).getByRole("button", { name: "Pickup" }).click();
+      await page.getByRole("dialog", { name: "New Customer" }).getByRole("button", { name: /Take-out/ }).click();
+      await page.getByRole("dialog", { name: "Take-out" }).getByRole("button", { name: /Pickup/ }).click();
     }
   }
 
@@ -157,9 +172,9 @@ test("cashier can find a pickup order by customer name", async ({ page }) => {
 
   await page.goto("/staff/pos");
   await page.getByRole("button", { name: "New Customer" }).click();
-  await page.getByRole("dialog", { name: "New Customer" }).getByRole("button", { name: "Take-out" }).click();
-  await page.getByRole("dialog", { name: "Take-out" }).getByRole("button", { name: "Pickup" }).click();
-  await page.getByLabel("Search by Order ID or customer name").fill("preparing Customer");
+  await page.getByRole("dialog", { name: "New Customer" }).getByRole("button", { name: /Take-out/ }).click();
+  await page.getByRole("dialog", { name: "Take-out" }).getByRole("button", { name: /Pickup/ }).click();
+  await page.getByLabel("Search pickup orders by customer or reference").fill("preparing Customer");
 
-  await expect(page.getByRole("button", { name: /KTO-PREP-001/ })).toBeVisible();
+  await expect(page.getByRole("dialog", { name: "Select pickup order" }).getByRole("button", { name: /KTO-PREP-001/ })).toBeVisible();
 });

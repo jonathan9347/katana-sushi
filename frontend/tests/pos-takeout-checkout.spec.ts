@@ -70,8 +70,9 @@ test("takeout checkout creates one immediate sale and receipt without entering d
 
   await page.goto("/staff/pos");
   await page.getByRole("button", { name: "New Customer" }).click();
-  await page.getByRole("dialog", { name: "New Customer" }).getByRole("button", { name: "Take-out" }).click();
-  await page.getByRole("dialog", { name: "Take-out" }).getByRole("button", { name: "Walk-in" }).click();
+  await page.getByRole("dialog", { name: "New Customer" }).getByRole("button", { name: /Take-out/ }).click();
+  await page.getByRole("dialog", { name: "Take-out" }).getByRole("button", { name: /Walk-in/ }).click();
+  await page.getByRole("dialog", { name: "Ready to order" }).getByRole("button", { name: "Start ordering" }).click();
   await expect(page.getByRole("region", { name: "POS order builder" })).toContainText("Menu");
   const menuProduct = page.getByRole("region", { name: "POS order builder" }).getByRole("button", { name: /California Roll Sushi/ });
   await menuProduct.click();

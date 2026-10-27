@@ -159,8 +159,9 @@ test("walk-in board is a pure status grid and stages free-table choice without s
   await openPosWithTableMocks(page, "cashier", undefined, () => { sessionCreationCount += 1; });
 
   await page.getByRole("button", { name: "New Customer" }).click();
-  await page.getByRole("dialog", { name: "New Customer" }).getByRole("button", { name: "Dine-in" }).click();
-  await page.getByRole("dialog", { name: "Dine-in" }).getByRole("button", { name: "Walk-in" }).click();
+  await page.getByRole("dialog", { name: "New Customer" }).getByRole("button", { name: /Dine-in/ }).click();
+  await page.getByRole("dialog", { name: "Dine-in" }).getByRole("button", { name: /Walk-in/ }).click();
+  await page.getByRole("dialog", { name: "Ready to order" }).getByRole("button", { name: "Start ordering" }).click();
   await page.getByRole("button", { name: /California Roll/ }).click();
   await page.getByRole("button", { name: "Proceed" }).click();
 
@@ -201,6 +202,19 @@ test("existing-table board only selects occupied tables with a live session", as
   await expect(orderBuilder.getByRole("button", { name: "Bill out" })).toBeVisible();
   await expect(orderBuilder.getByRole("button", { name: "Checkout" })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Open table session tools" })).toHaveCount(0);
+});
+
+test("table board is presented as a dialog and Escape follows the existing Back behavior", async ({ page }) => {
+  await openPosWithTableMocks(page);
+  await page.getByRole("button", { name: "Existing Table" }).click();
+
+  const boardDialog = page.getByRole("dialog", { name: "Table board" });
+  await expect(boardDialog).toBeVisible();
+  await expect(boardDialog).toHaveAttribute("aria-modal", "true");
+  await page.keyboard.press("Escape");
+  await expect(boardDialog).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Existing Table" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "New Customer" })).toBeVisible();
 });
 
 test("opens Manage tables from the main POS and preserves table creation and link controls", async ({ page }) => {
