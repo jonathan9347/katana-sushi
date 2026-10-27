@@ -459,6 +459,92 @@ test("cash checkout deducts approved stock exactly once from Preparing and Ready
   }
 });
 
+test("pickup checkout previews and saves the discount without consuming its approved hold early", async () => {
+  const fixture = await createOrder({
+    name: `Discount Pickup ${testRunKey}`,
+    status: "pending_approval",
+    paymentStatus: "unpaid"
+  });
+  const statusPath = `/api/admin/takeout/orders/${encodeURIComponent(fixture.orderNumber)}/status`;
+  const approval = await request(statusPath, {
+    method: "PATCH",
+    body: { status: "preparing" },
+    token: cashierToken
+  });
+  assert.equal(approval.status, 200, await approval.clone().text());
+
+  const path = `/api/pos/pickup-orders/${encodeURIComponent(fixture.orderNumber)}/complete`;
+  const discountInput = { applyDiscount: true, guestCount: 10, seniorPwdCount: 3 };
+  const previewResponse = await request(path, {
+    body: { ...discountInput, previewOnly: true },
+    token: cashierToken
+  });
+  const previewText = await previewResponse.text();
+  assert.equal(previewResponse.status, 200, previewText);
+  const preview = JSON.parse(previewText) as {
+    subtotal: number;
+    discount_base_snapshot: number;
+    discount_amount: number;
+    total: number;
+  };
+  assert.equal(preview.subtotal, 20);
+  assert.equal(preview.discount_base_snapshot, 20);
+  assert.equal(preview.discount_amount, 1.2);
+  assert.equal(preview.total, 18.8);
+  assert.equal((await prisma.takeoutOrder.findUniqueOrThrow({
+    where: { order_number: fixture.orderNumber }
+  })).payment_status, "unpaid");
+  assert.equal(Number((await prisma.rawMaterial.findUniqueOrThrow({
+    where: { id: fixture.materialId },
+    select: { current_stock: true }
+  })).current_stock), fixture.stockBefore);
+  assert.equal(await prisma.posTransaction.count({
+    where: { transaction_type: "takeout", items: { some: { selling_product_id: fixture.productId } } }
+  }), 0);
+
+  const completeResponse = await request(path, {
+    body: {
+      paymentMethod: "cash",
+      cashReceived: 25,
+      ...discountInput
+    },
+    token: cashierToken
+  });
+  const completeText = await completeResponse.text();
+  assert.equal(completeResponse.status, 200, completeText);
+  const completed = JSON.parse(completeText) as {
+    transaction: {
+      total: number;
+      discount_amount: number;
+      discount_base_snapshot: number;
+      discount_rate_snapshot: number;
+      guest_count: number;
+      discount_guest_count: number;
+      change_due: number;
+    };
+  };
+  assert.equal(completed.transaction.discount_amount, 1.2);
+  assert.equal(completed.transaction.discount_base_snapshot, 20);
+  assert.equal(completed.transaction.discount_rate_snapshot, 0.2);
+  assert.equal(completed.transaction.guest_count, 10);
+  assert.equal(completed.transaction.discount_guest_count, 3);
+  assert.equal(completed.transaction.total, 18.8);
+  assert.equal(completed.transaction.change_due, 6.2);
+  assert.equal(Number((await prisma.rawMaterial.findUniqueOrThrow({
+    where: { id: fixture.materialId },
+    select: { current_stock: true }
+  })).current_stock), fixture.stockBefore - 4);
+  assert.equal(await prisma.inventoryMovement.count({
+    where: { source_reference: fixture.orderNumber, source_type: "POS", action: "Used" }
+  }), 0);
+  assert.equal(await prisma.inventoryMovement.count({
+    where: { source_reference: (await prisma.posTransaction.findFirstOrThrow({
+      where: { transaction_type: "takeout", items: { some: { selling_product_id: fixture.productId } } },
+      select: { transaction_number: true }
+    })).transaction_number, source_type: "POS", action: "Used" }
+  }), 1);
+});
+
 test("staff approval starts preparation and staff cannot complete pickup handover", async () => {
   const fixture = await createOrder({
     name: `Approval Pickup ${testRunKey}`,

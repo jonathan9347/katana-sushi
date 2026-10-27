@@ -64,9 +64,25 @@ test("cashier searches by order ID and completes preparing or ready pickups with
       return;
     }
     if (url.pathname.startsWith("/api/pos/pickup-orders/") && route.request().method() === "POST") {
+      const body = (route.request().postDataJSON() ?? {}) as Record<string, unknown>;
+      const discountAmount = body.applyDiscount
+        ? Math.round((200 * Number(body.seniorPwdCount) / Number(body.guestCount) * 0.2) * 100) / 100
+        : 0;
+      if (body.previewOnly) {
+        await route.fulfill({ json: {
+          subtotal: 200,
+          tax: 0,
+          discount_base_snapshot: 200,
+          discount_rate_snapshot: 0.2,
+          discounted_guest_count: body.applyDiscount ? body.seniorPwdCount : 0,
+          discount_amount: discountAmount,
+          total: 200 - discountAmount
+        } });
+        return;
+      }
       completionRequests.push({
         orderNumber: decodeURIComponent(url.pathname.split("/").slice(-2, -1)[0] ?? ""),
-        body: (route.request().postDataJSON() ?? {}) as Record<string, unknown>
+        body
       });
       await route.fulfill({
         json: {
@@ -87,10 +103,15 @@ test("cashier searches by order ID and completes preparing or ready pickups with
             transaction_type: "takeout",
             subtotal: 200,
             tax: 0,
-            total: 200,
+            discount_amount: discountAmount,
+            discount_base_snapshot: 200,
+            discount_rate_snapshot: 0.2,
+            guest_count: body.guestCount ?? 1,
+            discount_guest_count: body.applyDiscount ? body.seniorPwdCount : 0,
+            total: 200 - discountAmount,
             payment_method: "cash",
             cash_received: 250,
-            change_due: 50,
+            change_due: 250 - (200 - discountAmount),
             created_at: "2026-10-27T00:00:00.000Z",
             items: [{ quantity: 2, unit_price: 100, total_price: 200, selling_product: { name: "California Roll" } }]
           }
@@ -119,9 +140,24 @@ test("cashier searches by order ID and completes preparing or ready pickups with
     }
     await page.getByRole("button", { name: "Checkout" }).click();
     const payment = page.getByRole("dialog", { name: "Payment" });
+    if (orderId.includes("READY")) {
+      await payment.getByRole("button", { name: "Apply Discount" }).click();
+      await payment.getByLabel("Checkout guest count").fill("10");
+      await payment.getByLabel("Senior/PWD guest count").fill("3");
+      await expect(payment.getByText("PHP 188.00")).toBeVisible();
+    }
     await payment.getByRole("button", { name: "Cash", exact: true }).click();
     await payment.getByLabel("Enter Amount Received").fill("250");
+    if (orderId.includes("READY")) {
+      await expect(payment.getByText("Change: PHP 62.00")).toBeVisible();
+    }
+    const receiptPopupPromise = page.waitForEvent("popup");
     await payment.getByRole("button", { name: "Confirm" }).click();
+    const receipt = await receiptPopupPromise;
+    if (orderId.includes("READY")) {
+      await expect(receipt.locator("body")).toContainText("Senior/PWD discount");
+      await expect(receipt.locator("body")).toContainText("PHP 12.00");
+    }
     await expect(page.getByRole("region", { name: "POS order builder" })).toBeVisible();
     await expect(page.getByRole("button", { name: "New Customer" })).toBeVisible();
     if (orderId.includes("PREP")) {
@@ -134,8 +170,14 @@ test("cashier searches by order ID and completes preparing or ready pickups with
   expect(searches).toContain("KTO-PREP-001");
   expect(searches).toContain("KTO-READY-001");
   expect(completionRequests).toEqual([
-    { orderNumber: "KTO-PREP-001", body: { paymentMethod: "cash", cashReceived: 250 } },
-    { orderNumber: "KTO-READY-001", body: { paymentMethod: "cash", cashReceived: 250 } }
+    {
+      orderNumber: "KTO-PREP-001",
+      body: { paymentMethod: "cash", cashReceived: 250, applyDiscount: false, guestCount: 1, seniorPwdCount: 0 }
+    },
+    {
+      orderNumber: "KTO-READY-001",
+      body: { paymentMethod: "cash", cashReceived: 250, applyDiscount: true, guestCount: 10, seniorPwdCount: 3 }
+    }
   ]);
 });
 

@@ -19,6 +19,8 @@ import { seedDemoData } from "./services/demoSeed.service";
 import { assertDevelopmentDatabase } from "./lib/seedSafety";
 import { getBeverageStockMaterialName } from "./lib/beverageStock";
 import { getProductCartCompatibility } from "./services/productCartCompatibility.service";
+import { calculateSeniorPwdDiscount } from "./services/seniorPwdDiscount.service";
+import { SENIOR_PWD_DISCOUNT_RATE } from "./config/seniorPwdSettings";
 import {
   getDashboardCalendar,
   getDashboardFeedback,
@@ -7984,8 +7986,9 @@ app.post("/api/pos/pickup-orders/:orderNumber/complete", async (req, res, next) 
     if (!user) return;
     const body = z.object({
       paymentMethod: z.literal("cash").optional(),
-      cashReceived: z.number().finite().nonnegative().optional()
-    }).strict().parse(req.body);
+      cashReceived: z.number().finite().nonnegative().optional(),
+      ...posDiscountFields
+    }).strict().superRefine(validatePosDiscountFields).parse(req.body);
     const orderNumber = z.string().min(1).parse(req.params.orderNumber);
     const transactionNumber = await createUniqueTransactionNumber();
     const order = await prisma.$transaction(async (tx) => {
@@ -8015,6 +8018,42 @@ app.post("/api/pos/pickup-orders/:orderNumber/complete", async (req, res, next) 
       }
 
       const alreadyPaid = current.payment_status === "paid";
+      if (alreadyPaid && (
+        body.paymentMethod !== undefined
+        || body.cashReceived !== undefined
+        || body.applyDiscount
+        || body.guestCount !== undefined
+        || body.seniorPwdCount !== undefined
+        || body.previewOnly
+      )) {
+        throw new InventoryError("This pickup order is already paid.", "ALREADY_PAID", 409);
+      }
+      const discountBase = current.items.reduce((total, item) =>
+        item.selling_product_id ? total + Number(item.total_price) : total, 0);
+      const discount = calculateSeniorPwdDiscount({
+        aLaCarteTotal: discountBase,
+        guestCount: body.guestCount ?? 1,
+        seniorPwdCount: body.applyDiscount ? body.seniorPwdCount ?? 0 : 0,
+        discountRate: SENIOR_PWD_DISCOUNT_RATE
+      });
+      const discountAmount = body.applyDiscount ? discount.discountAmount : 0;
+      const subtotal = Number(current.subtotal);
+      const tax = Number((Number(current.total) - subtotal).toFixed(2));
+      const total = Number(Math.max(0, Number(current.total) - discountAmount).toFixed(2));
+      if (body.previewOnly) {
+        return {
+          preview: {
+            subtotal,
+            tax,
+            discount_base_snapshot: discount.discountBase,
+            discount_rate_snapshot: discount.discountRate,
+            guest_count: discount.guestCount,
+            discounted_guest_count: discount.seniorPwdCount,
+            discount_amount: discountAmount,
+            total
+          }
+        };
+      }
       let paymentMethod: string;
       if (alreadyPaid) {
         if (!current.payment_method) {
@@ -8028,15 +8067,12 @@ app.post("/api/pos/pickup-orders/:orderNumber/complete", async (req, res, next) 
       } else {
         paymentMethod = "cash";
       }
-      if (alreadyPaid && (body.paymentMethod !== undefined || body.cashReceived !== undefined)) {
-        throw new InventoryError("This pickup order is already paid.", "ALREADY_PAID", 409);
-      }
       const cashReceived = body.cashReceived ?? 0;
       if (!alreadyPaid) {
         if (current.payment_plan !== "pay_at_pickup" || body.paymentMethod !== "cash") {
           throw new InventoryError("Collect cash payment at the POS before completing this pickup order.", "PAYMENT_REQUIRED", 400);
         }
-        if (cashReceived < current.total) {
+        if (cashReceived < total) {
           throw new InventoryError("Cash received must be at least the order total.", "INSUFFICIENT_CASH", 400);
         }
       }
@@ -8091,14 +8127,19 @@ app.post("/api/pos/pickup-orders/:orderNumber/complete", async (req, res, next) 
           transaction_number: transactionNumber,
           customer_name: current.customer_name,
           transaction_type: "takeout",
-          subtotal: current.subtotal,
-          tax: Number((current.total - current.subtotal).toFixed(2)),
-          total: current.total,
+          subtotal,
+          tax,
+          discount_amount: discountAmount,
+          discount_base_snapshot: discount.discountBase,
+          discount_rate_snapshot: discount.discountRate,
+          guest_count: discount.guestCount,
+          discount_guest_count: discount.seniorPwdCount,
+          total,
           payment_method: paymentMethod,
           cash_received: alreadyPaid ? null : cashReceived,
           change_due: alreadyPaid
             ? null
-            : Number((cashReceived - current.total).toFixed(2)),
+            : Number((cashReceived - total).toFixed(2)),
           status: "paid",
           cashier_id: user.sub,
           items: {
@@ -8144,6 +8185,11 @@ app.post("/api/pos/pickup-orders/:orderNumber/complete", async (req, res, next) 
           transaction_type: transaction.transaction_type,
           subtotal: Number(transaction.subtotal),
           tax: Number(transaction.tax),
+          discount_amount: Number(transaction.discount_amount),
+          discount_base_snapshot: transaction.discount_base_snapshot === null ? null : Number(transaction.discount_base_snapshot),
+          discount_rate_snapshot: transaction.discount_rate_snapshot === null ? null : Number(transaction.discount_rate_snapshot),
+          guest_count: transaction.guest_count,
+          discount_guest_count: transaction.discount_guest_count,
           total: Number(transaction.total),
           payment_method: transaction.payment_method,
           cash_received: transaction.cash_received === null ? null : Number(transaction.cash_received),
@@ -8158,6 +8204,9 @@ app.post("/api/pos/pickup-orders/:orderNumber/complete", async (req, res, next) 
         }
       };
     });
+    if ("preview" in order) {
+      return res.json(order.preview);
+    }
     return res.json({ order: takeoutOrderSummary(order.order), transaction: order.transaction });
   } catch (error) {
     if (error instanceof z.ZodError) {
@@ -9064,6 +9113,37 @@ const posItemSchema = z.object({
   quantity: z.coerce.number().int().positive(),
   unitPrice: z.coerce.number().nonnegative().optional()
 });
+const posDiscountFields = {
+  applyDiscount: z.boolean().optional(),
+  guestCount: z.coerce.number().int().min(1).max(1000).optional(),
+  seniorPwdCount: z.coerce.number().int().min(0).max(1000).optional(),
+  previewOnly: z.boolean().optional()
+};
+
+function validatePosDiscountFields(
+  value: { applyDiscount?: boolean; guestCount?: number; seniorPwdCount?: number },
+  context: z.RefinementCtx
+) {
+  if ((value.guestCount === undefined) !== (value.seniorPwdCount === undefined)) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "Total guest count and Senior/PWD guest count must be provided together."
+    });
+  }
+  if (value.applyDiscount && (value.guestCount === undefined || value.seniorPwdCount === undefined)) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "Guest counts are required when applying a Senior/PWD discount."
+    });
+  }
+  if (value.guestCount !== undefined && value.seniorPwdCount !== undefined && value.seniorPwdCount > value.guestCount) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "Senior/PWD guest count cannot exceed total guest count.",
+      path: ["seniorPwdCount"]
+    });
+  }
+}
 
 class InsufficientPosStockError extends Error {}
 
@@ -9097,8 +9177,10 @@ app.post("/api/pos/transaction", async (req, res, next) => {
         transactionType: z.enum(["dine_in", "takeout", "unlimited"]),
         paymentMethod: z.enum(["cash", "gcash", "bank_transfer"]),
         cashReceived: z.coerce.number().nonnegative().optional(),
-        items: z.array(posItemSchema).min(1)
+        items: z.array(posItemSchema).min(1),
+        ...posDiscountFields
       })
+      .superRefine(validatePosDiscountFields)
       .parse(req.body);
     if (body.transactionType !== "takeout") {
       return res.status(409).json({
@@ -9135,13 +9217,39 @@ app.post("/api/pos/transaction", async (req, res, next) => {
       return res.status(409).json({ message: `${productsById.get(unavailableItem.productId)?.name} is unavailable.` });
     }
 
-    const subtotal = body.items.reduce((total, item) => {
+    const subtotal = Number(body.items.reduce((total, item) => {
       const product = productsById.get(item.productId);
       const unitPrice = item.unitPrice ?? Number(product?.price ?? 0);
       return total + unitPrice * item.quantity;
-    }, 0);
+    }, 0).toFixed(2));
+    const discountBase = Number(body.items.reduce((total, item) => {
+      const product = productsById.get(item.productId);
+      return total + (product?.is_sold_a_la_carte
+        ? (item.unitPrice ?? Number(product.price)) * item.quantity
+        : 0);
+    }, 0).toFixed(2));
     const tax = calculateTax(subtotal, systemSettings.tax_rate_percent);
-    const total = Number((subtotal + tax).toFixed(2));
+    const discount = calculateSeniorPwdDiscount({
+      aLaCarteTotal: discountBase,
+      guestCount: body.guestCount ?? 1,
+      seniorPwdCount: body.applyDiscount ? body.seniorPwdCount ?? 0 : 0,
+      discountRate: SENIOR_PWD_DISCOUNT_RATE
+    });
+    const discountAmount = body.applyDiscount ? discount.discountAmount : 0;
+    const total = Number(Math.max(0, subtotal + tax - discountAmount).toFixed(2));
+
+    if (body.previewOnly) {
+      return res.json({
+        subtotal,
+        tax,
+        discount_base_snapshot: discount.discountBase,
+        discount_rate_snapshot: discount.discountRate,
+        guest_count: discount.guestCount,
+        discounted_guest_count: discount.seniorPwdCount,
+        discount_amount: discountAmount,
+        total
+      });
+    }
 
     if (body.paymentMethod === "cash" && Number(body.cashReceived ?? 0) < total) {
       return res.status(400).json({ message: "Cash received must be at least the total amount" });
@@ -9238,6 +9346,11 @@ app.post("/api/pos/transaction", async (req, res, next) => {
           transaction_type: body.transactionType,
           subtotal,
           tax,
+          discount_amount: discountAmount,
+          discount_base_snapshot: discount.discountBase,
+          discount_rate_snapshot: discount.discountRate,
+          guest_count: discount.guestCount,
+          discount_guest_count: discount.seniorPwdCount,
           total,
           payment_method: body.paymentMethod,
           cash_received: body.paymentMethod === "cash" ? body.cashReceived ?? 0 : null,

@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { Banknote, Landmark, LoaderCircle, Printer, Smartphone } from "lucide-react";
-import PaymentModal from "./PaymentModal";
+import PaymentModal, { SeniorPwdDiscountFields } from "./PaymentModal";
 import { PosCartKey, PosProduct, usePosCart } from "./store";
 import { api } from "../../../lib/api";
 import { defaultSystemSettings, fetchSystemSettings, type SystemSettings } from "../../../lib/systemSettings";
@@ -31,6 +31,11 @@ type PosTransaction = {
   transaction_type: string;
   subtotal: number;
   tax: number;
+  discount_amount?: number;
+  discount_base_snapshot?: number | null;
+  discount_rate_snapshot?: number | null;
+  guest_count?: number | null;
+  discount_guest_count?: number | null;
   total: number;
   payment_method: string;
   cash_received?: number | null;
@@ -277,7 +282,13 @@ export default function PosPage() {
   }
 
   const checkoutMutation = useMutation({
-    mutationFn: async (payment: { paymentMethod: "cash" | "gcash" | "bank_transfer"; cashReceived?: number }) => {
+    mutationFn: async (payment: {
+      paymentMethod: "cash" | "gcash" | "bank_transfer";
+      cashReceived?: number;
+      applyDiscount: boolean;
+      guestCount: number;
+      seniorPwdCount: number;
+    }) => {
       console.debug("Checkout submit", {
         itemCount: takeoutItems.length,
         hasToken: Boolean(localStorage.getItem("katana_token"))
@@ -287,6 +298,9 @@ export default function PosPage() {
         transactionType: "takeout",
         paymentMethod: payment.paymentMethod,
         cashReceived: payment.cashReceived,
+        applyDiscount: payment.applyDiscount,
+        guestCount: payment.guestCount,
+        seniorPwdCount: payment.seniorPwdCount,
         items: takeoutItems.map((item) => ({
           productId: item.product.id,
           quantity: item.quantity,
@@ -408,7 +422,13 @@ export default function PosPage() {
 
   const pickupCompletionMutation = useMutation({
     mutationFn: async (input: {
-      payment: { paymentMethod?: "cash"; cashReceived?: number };
+      payment: {
+        paymentMethod?: "cash";
+        cashReceived?: number;
+        applyDiscount?: boolean;
+        guestCount?: number;
+        seniorPwdCount?: number;
+      };
       printWindow: Window | null;
     }) => {
       if (!selectedPickupOrder) {
@@ -1067,6 +1087,24 @@ export default function PosPage() {
         open={paymentOpen}
         pending={isPickupCustomer ? pickupCompletionMutation.isPending : checkoutMutation.isPending}
         total={isPickupCustomer ? selectedPickupOrder?.total ?? 0 : totals.total}
+        previewRequest={isPickupCustomer && selectedPickupOrder
+          ? {
+            url: `/api/pos/pickup-orders/${encodeURIComponent(selectedPickupOrder.order_number)}/complete`,
+            body: {}
+          }
+          : {
+            url: "/api/pos/transaction",
+            body: {
+              customerName,
+              transactionType: "takeout",
+              paymentMethod: "cash",
+              items: takeoutItems.map((item) => ({
+                productId: item.product.id,
+                quantity: item.quantity,
+                unitPrice: Number(item.product.price)
+              }))
+            }
+          }}
         onClose={() => setPaymentOpen(false)}
         onConfirm={(payment) => {
           if (isPickupCustomer) {
@@ -1078,7 +1116,10 @@ export default function PosPage() {
             pickupCompletionMutation.mutate({
               payment: {
                 paymentMethod: "cash",
-                cashReceived: payment.cashReceived
+                cashReceived: payment.cashReceived,
+                applyDiscount: payment.applyDiscount,
+                guestCount: payment.guestCount,
+                seniorPwdCount: payment.seniorPwdCount
               },
               printWindow
             });
@@ -1094,38 +1135,17 @@ export default function PosPage() {
         panelClassName="max-w-xl"
       >
         <div className="grid gap-4">
-          {billOutHasDiscountableItems && !billOutApplyDiscount && (
-            <Button variant="outline" onClick={() => setBillOutApplyDiscount(true)}>
-              Apply Discount
-            </Button>
-          )}
-          {billOutHasDiscountableItems && billOutApplyDiscount && (
-            <div className="grid gap-3 sm:grid-cols-2">
-              <label className="grid gap-1 text-sm font-medium text-slate-700">
-                Total guests
-                <input
-                  aria-label="Bill-out guest count"
-                  className="h-10 rounded-md border border-slate-300 px-3"
-                  type="number"
-                  min={1}
-                  max={1000}
-                  value={billOutGuestCount}
-                  onChange={(event) => setBillOutGuestCount(event.target.value)}
-                />
-              </label>
-              <label className="grid gap-1 text-sm font-medium text-slate-700">
-                Senior/PWD guests
-                <input
-                  aria-label="Senior/PWD guest count"
-                  className="h-10 rounded-md border border-slate-300 px-3"
-                  type="number"
-                  min={0}
-                  max={1000}
-                  value={billOutSeniorPwdCount}
-                  onChange={(event) => setBillOutSeniorPwdCount(event.target.value)}
-                />
-              </label>
-            </div>
+          {billOutHasDiscountableItems && (
+            <SeniorPwdDiscountFields
+              applyDiscount={billOutApplyDiscount}
+              guestCount={billOutGuestCount}
+              seniorPwdCount={billOutSeniorPwdCount}
+              onApply={() => setBillOutApplyDiscount(true)}
+              onGuestCountChange={setBillOutGuestCount}
+              onSeniorPwdCountChange={setBillOutSeniorPwdCount}
+              guestCountLabel="Total guests"
+              guestCountAriaLabel="Bill-out guest count"
+            />
           )}
           {billOutPreviewQuery.isLoading && <p className="text-sm text-slate-500">Calculating bill...</p>}
           {billOutPreviewQuery.isError && <p role="alert" className="text-sm text-red-700">Unable to calculate the bill. Check the guest counts and retry.</p>}
@@ -1263,6 +1283,7 @@ function printReceipt(transaction: PosTransaction, settings: SystemSettings, rec
         <div class="line"></div>
         <p class="right">Subtotal: ${money(transaction.subtotal)}</p>
         ${transaction.tax > 0 ? `<p class="right">Tax: ${money(transaction.tax)}</p>` : ""}
+        ${transaction.discount_amount ? `<p class="right">Senior/PWD discount: −${money(Number(transaction.discount_amount))}</p>` : ""}
         <p class="right total">Total: ${money(transaction.total)}</p>
         ${
           transaction.payment_method === "cash"

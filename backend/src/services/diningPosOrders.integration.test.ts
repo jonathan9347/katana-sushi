@@ -534,6 +534,71 @@ test("takeout checkout deducts ingredient stock once when the sale is created", 
   }), 1);
 });
 
+test("takeout checkout previews and saves the configured Senior/PWD discount", async () => {
+  const fixture = await createFixture({ price: 1000 });
+  const stockBefore = await readStock(fixture);
+  const salesBefore = await prisma.posTransaction.count({ where: { transaction_type: "takeout" } });
+  const items = [{ productId: fixture.productId!, quantity: 1, unitPrice: 1000 }];
+  const previewResponse = await request("/api/pos/transaction", {
+    transactionType: "takeout",
+    paymentMethod: "cash",
+    applyDiscount: true,
+    guestCount: 10,
+    seniorPwdCount: 3,
+    previewOnly: true,
+    items
+  });
+  const previewText = await previewResponse.text();
+  assert.equal(previewResponse.status, 200, previewText);
+  const preview = JSON.parse(previewText) as {
+    subtotal: number;
+    discount_base_snapshot: number;
+    discount_amount: number;
+    total: number;
+  };
+  assert.equal(preview.subtotal, 1000);
+  assert.equal(preview.discount_base_snapshot, 1000);
+  assert.equal(preview.discount_amount, 60);
+  assert.equal(await prisma.posTransaction.count({ where: { transaction_type: "takeout" } }), salesBefore);
+  assert.deepEqual(await readStock(fixture), stockBefore);
+
+  const response = await request("/api/pos/transaction", {
+    transactionType: "takeout",
+    paymentMethod: "cash",
+    cashReceived: 2000,
+    applyDiscount: true,
+    guestCount: 10,
+    seniorPwdCount: 3,
+    items
+  });
+  const responseText = await response.text();
+  assert.equal(response.status, 201, responseText);
+  const result = JSON.parse(responseText) as {
+    transaction: {
+      id: string;
+      total: number;
+      tax: number;
+      discount_amount: number;
+      discount_base_snapshot: number;
+      discount_rate_snapshot: number;
+      guest_count: number;
+      discount_guest_count: number;
+      change_due: number;
+    };
+  };
+  assert.equal(result.transaction.discount_amount, 60);
+  assert.equal(result.transaction.discount_base_snapshot, 1000);
+  assert.equal(result.transaction.discount_rate_snapshot, 0.2);
+  assert.equal(result.transaction.guest_count, 10);
+  assert.equal(result.transaction.discount_guest_count, 3);
+  assert.equal(result.transaction.total, 1000 + result.transaction.tax - 60);
+  assert.equal(result.transaction.change_due, 2000 - result.transaction.total);
+  assert.deepEqual(await readStock(fixture), {
+    onHand: stockBefore.onHand - 2,
+    batchRemaining: stockBefore.batchRemaining - 2
+  });
+});
+
 test("concurrent orders at separate tables cannot oversell the same locked material", async () => {
   const fixture = await createFixture({ stock: 4 });
   const secondSessionId = await createAdditionalSession();
