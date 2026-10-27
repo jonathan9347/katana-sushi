@@ -187,6 +187,120 @@ test("existing table order can be committed, previewed with Senior/PWD discount,
   await expect(orderBuilder.getByRole("button", { name: "Bill out" })).toHaveCount(0);
 });
 
+test("Unlimited-only table bill out does not offer a discount", async ({ page }) => {
+  const session = activeSession([{
+    id: "unlimited-1",
+    status: "active",
+    pax_count: 10,
+    price_per_pax: 700
+  }]);
+
+  await signIn(page);
+  await page.route("**/api/**", async (route) => {
+    const url = new URL(route.request().url());
+    if (url.pathname === "/api/pos/dining/tables") {
+      await route.fulfill({ json: { tables: [{
+        id: "table-4",
+        table_number: 4,
+        capacity: 10,
+        status: "occupied",
+        linked_to_table_id: null,
+        unavailable_reason: null,
+        active_session: { id: "session-1", guests: session.guests }
+      }] } });
+      return;
+    }
+    if (url.pathname === "/api/pos/dining/sessions" && route.request().method() === "GET") {
+      await route.fulfill({ json: { sessions: [session] } });
+      return;
+    }
+    if (url.pathname === "/api/pos/dining/sessions/session-1/checkout-preview") {
+      await route.fulfill({ json: {
+        session_id: "session-1",
+        table_number: 4,
+        guest_count: 10,
+        subtotal: 7000,
+        discount_base_snapshot: 0,
+        discount_rate_snapshot: 0.2,
+        discounted_guest_count: 0,
+        discount_amount: 0,
+        total: 7000
+      } });
+      return;
+    }
+    await route.fulfill({ json: {} });
+  });
+
+  await page.goto("/staff/pos");
+  await page.getByRole("button", { name: "Existing Table" }).click();
+  await page.getByRole("button", { name: "Select Table 4, Occupied" }).click();
+  await page.getByRole("button", { name: "Bill out" }).click();
+
+  const billOut = page.getByRole("dialog", { name: "Bill out Table 4" });
+  await expect(billOut.getByText("PHP 7,000.00").first()).toBeVisible();
+  await expect(billOut.getByRole("button", { name: "Apply Discount" })).toHaveCount(0);
+  await expect(billOut.getByLabel("Bill-out guest count")).toHaveCount(0);
+  await expect(billOut.getByLabel("Senior/PWD guest count")).toHaveCount(0);
+});
+
+test("Mixed Unlimited and a-la-carte table bill out offers a discount on the a-la-carte portion", async ({ page }) => {
+  const session = activeSession([{
+    id: "unlimited-1",
+    status: "active",
+    pax_count: 10,
+    price_per_pax: 700
+  }]);
+
+  await signIn(page);
+  await page.route("**/api/**", async (route) => {
+    const url = new URL(route.request().url());
+    if (url.pathname === "/api/pos/dining/tables") {
+      await route.fulfill({ json: { tables: [{
+        id: "table-4",
+        table_number: 4,
+        capacity: 10,
+        status: "occupied",
+        linked_to_table_id: null,
+        unavailable_reason: null,
+        active_session: { id: "session-1", guests: session.guests }
+      }] } });
+      return;
+    }
+    if (url.pathname === "/api/pos/dining/sessions" && route.request().method() === "GET") {
+      await route.fulfill({ json: { sessions: [session] } });
+      return;
+    }
+    if (url.pathname === "/api/pos/dining/sessions/session-1/checkout-preview") {
+      const seniorPwdCount = Number(url.searchParams.get("seniorPwdCount"));
+      const discountAmount = seniorPwdCount * 20;
+      await route.fulfill({ json: {
+        session_id: "session-1",
+        table_number: 4,
+        guest_count: 10,
+        subtotal: 8000,
+        discount_base_snapshot: 1000,
+        discount_rate_snapshot: 0.2,
+        discounted_guest_count: seniorPwdCount,
+        discount_amount: discountAmount,
+        total: 8000 - discountAmount
+      } });
+      return;
+    }
+    await route.fulfill({ json: {} });
+  });
+
+  await page.goto("/staff/pos");
+  await page.getByRole("button", { name: "Existing Table" }).click();
+  await page.getByRole("button", { name: "Select Table 4, Occupied" }).click();
+  await page.getByRole("button", { name: "Bill out" }).click();
+
+  const billOut = page.getByRole("dialog", { name: "Bill out Table 4" });
+  await billOut.getByRole("button", { name: "Apply Discount" }).click();
+  await billOut.getByLabel("Senior/PWD guest count").fill("3");
+  await expect(billOut).toContainText("Senior/PWD discount (3 guests × 20% of PHP 1,000.00 a-la-carte total)");
+  await expect(billOut).toContainText("PHP 7,940.00");
+});
+
 test("Unlimited cart mode does not start a timer until staff starts the existing table session", async ({ page }) => {
   let unlimitedSession: Record<string, unknown> | null = null;
   let startRequestBody: Record<string, unknown> | null = null;

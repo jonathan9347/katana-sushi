@@ -372,6 +372,7 @@ export default function PosPage() {
       && Number(billOutSeniorPwdCount) >= 0
       && Number(billOutSeniorPwdCount) <= Number(billOutGuestCount)
   });
+  const billOutHasDiscountableItems = (billOutPreviewQuery.data?.discount_base_snapshot ?? 0) > 0;
 
   const billOutMutation = useMutation({
     mutationFn: async () => {
@@ -1087,12 +1088,12 @@ export default function PosPage() {
         panelClassName="max-w-xl"
       >
         <div className="grid gap-4">
-          {!billOutApplyDiscount && (
+          {billOutHasDiscountableItems && !billOutApplyDiscount && (
             <Button variant="outline" onClick={() => setBillOutApplyDiscount(true)}>
               Apply Discount
             </Button>
           )}
-          {billOutApplyDiscount && (
+          {billOutHasDiscountableItems && billOutApplyDiscount && (
             <div className="grid gap-3 sm:grid-cols-2">
               <label className="grid gap-1 text-sm font-medium text-slate-700">
                 Total guests
