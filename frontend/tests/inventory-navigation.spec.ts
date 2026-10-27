@@ -289,6 +289,49 @@ test("Stock Reserved column uses the Pickup and Catering quantity", async ({ pag
   await expect(row.getByRole("cell").nth(4)).toHaveText("10");
 });
 
+test("Waste Disposal records stock without asking for or sending a booking link", async ({ page }) => {
+  await setStaffRole(page, "admin");
+  await page.route("**/api/inventory/materials", async (route) => {
+    await route.fulfill({
+      json: {
+        materials: [{
+          id: "material-waste",
+          name: "Waste Fixture Rice",
+          category: "Raw Material",
+          unit: "g",
+          current_stock: 100,
+          available_quantity: 100,
+          reorder_level: 5,
+          cost_per_unit: 1
+        }]
+      }
+    });
+  });
+
+  let submittedBody: Record<string, unknown> | undefined;
+  await page.route("**/api/inventory/waste", async (route) => {
+    submittedBody = route.request().postDataJSON() as Record<string, unknown>;
+    await route.fulfill({ json: { success: true } });
+  });
+
+  await page.goto("/staff/inventory");
+  await page.getByRole("button", { name: "Waste Disposal" }).click();
+  await expect(page.getByText("Link to booking (optional)")).toHaveCount(0);
+  await page.getByLabel("Material").selectOption("material-waste");
+  await page.getByLabel("Quantity to dispose").fill("3");
+  await page.getByLabel("Notes").fill("Expired stock");
+  await page.getByRole("button", { name: "Record Disposal" }).click();
+
+  await expect.poll(() => submittedBody).toMatchObject({
+    raw_material_id: "material-waste",
+    quantity: 3,
+    reason: "spoilage",
+    notes: "Expired stock"
+  });
+  expect(submittedBody).not.toHaveProperty("booking_type");
+  expect(submittedBody).not.toHaveProperty("booking_reference");
+});
+
 test("Stock uses PAR level wording while retaining the reorder API field", async ({ page }) => {
   await setStaffRole(page, "admin");
   await page.route("**/api/inventory/materials", async (route) => {

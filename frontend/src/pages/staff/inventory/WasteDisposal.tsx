@@ -15,8 +15,6 @@ type WasteForm = {
   quantity: string;
   reason: "spoilage" | "expired" | "prep_waste" | "damaged" | "other";
   notes: string;
-  booking_type: "" | "catering";
-  booking_reference: string;
 };
 
 const emptyWasteForm: WasteForm = {
@@ -24,9 +22,7 @@ const emptyWasteForm: WasteForm = {
   batch_id: "",
   quantity: "",
   reason: "spoilage",
-  notes: "",
-  booking_type: "",
-  booking_reference: ""
+  notes: ""
 };
 
 const reasonLabels: Record<WasteForm["reason"], string> = {
@@ -80,9 +76,7 @@ export default function WasteDisposal() {
         quantity: Number(wasteForm.quantity),
         reason: wasteForm.reason,
         notes: wasteForm.notes,
-        batch_id: wasteForm.batch_id || undefined,
-        booking_type: wasteForm.booking_reference ? wasteForm.booking_type || undefined : undefined,
-        booking_reference: wasteForm.booking_reference || undefined
+        batch_id: wasteForm.batch_id || undefined
       }),
     onSuccess: () => {
       setWasteForm(emptyWasteForm);
@@ -151,35 +145,6 @@ export default function WasteDisposal() {
                     </option>
                   ))}
                 </Select>
-              </label>
-            )}
-
-            <label className="grid gap-1 text-sm">
-              Link to booking (optional)
-              <Select
-                value={wasteForm.booking_type}
-                onChange={(event) =>
-                  setWasteForm((current) => ({
-                    ...current,
-                    booking_type: event.target.value as WasteForm["booking_type"],
-                    booking_reference: ""
-                  }))
-                }
-              >
-                <option value="">No booking — use batch/FEFO</option>
-                <option value="catering">Catering booking</option>
-              </Select>
-            </label>
-            {wasteForm.booking_type && (
-              <label className="grid gap-1 text-sm">
-                Catering booking number
-                <input
-                  required
-                  className="h-10 rounded-md border border-slate-300 px-3"
-                  placeholder="Enter reservation number"
-                  value={wasteForm.booking_reference}
-                  onChange={(event) => setWasteForm((current) => ({ ...current, booking_reference: event.target.value }))}
-                />
               </label>
             )}
 
