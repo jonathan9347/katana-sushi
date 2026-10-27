@@ -301,6 +301,113 @@ test("Mixed Unlimited and a-la-carte table bill out offers a discount on the a-l
   await expect(billOut).toContainText("PHP 7,940.00");
 });
 
+test("active Unlimited session filters to included products and allows the full menu toggle", async ({ page }) => {
+  const products = [
+    {
+      id: "included-roll",
+      name: "Included Roll",
+      category: "Rolls",
+      price: 250,
+      is_available: true,
+      cart_compatibility: {
+        a_la_carte: { allowed: true, classification: "included_in_unlimited" },
+        unlimited: { allowed: true, classification: "included_in_unlimited" }
+      }
+    },
+    {
+      id: "unlimited-only",
+      name: "Unlimited-only Roll",
+      category: "Rolls",
+      price: 300,
+      is_available: true,
+      cart_compatibility: {
+        a_la_carte: { allowed: false, classification: "unlimited_only" },
+        unlimited: { allowed: true, classification: "unlimited_only" }
+      }
+    },
+    {
+      id: "beverage",
+      name: "Iced Tea",
+      category: "Beverage",
+      price: 100,
+      is_available: true,
+      cart_compatibility: {
+        a_la_carte: { allowed: true, classification: "beverage_add_on" },
+        unlimited: { allowed: true, classification: "beverage_add_on" }
+      }
+    },
+    {
+      id: "ala-carte-only",
+      name: "A la carte Maki",
+      category: "Maki",
+      price: 250,
+      is_available: true,
+      cart_compatibility: {
+        a_la_carte: { allowed: true, classification: "a_la_carte_only" },
+        unlimited: { allowed: false, classification: "a_la_carte_only" }
+      }
+    }
+  ];
+  const session = {
+    ...activeSession([{
+      id: "unlimited-1",
+      status: "active",
+      pax_count: 2,
+      price_per_pax: 700,
+      ends_at: "2026-10-28T12:00:00.000Z",
+      first_round_at: null,
+      extensions: []
+    }]),
+    table: { table_number: 4 }
+  };
+
+  await signIn(page);
+  await page.route("**/api/**", async (route) => {
+    const url = new URL(route.request().url());
+    if (url.pathname === "/api/products") {
+      await route.fulfill({ json: { products } });
+      return;
+    }
+    if (url.pathname === "/api/pos/dining/tables") {
+      await route.fulfill({ json: { tables: [{
+        id: "table-4",
+        table_number: 4,
+        capacity: 10,
+        status: "occupied",
+        linked_to_table_id: null,
+        unavailable_reason: null,
+        active_session: { id: "session-1", guests: session.guests }
+      }] } });
+      return;
+    }
+    if (url.pathname === "/api/pos/dining/sessions" && route.request().method() === "GET") {
+      await route.fulfill({ json: { sessions: [session] } });
+      return;
+    }
+    if (url.pathname === "/api/admin/unlimited/settings") {
+      await route.fulfill({ json: { settings: { price_per_person: 700, extension_minutes: 30 } } });
+      return;
+    }
+    await route.fulfill({ json: {} });
+  });
+
+  await page.goto("/staff/pos");
+  await page.getByRole("button", { name: "Existing Table" }).click();
+  await page.getByRole("button", { name: "Select Table 4, Occupied" }).click();
+  const builder = page.getByRole("region", { name: "POS order builder" });
+  await expect(builder.getByText("Showing Unlimited items only")).toBeVisible();
+  await expect(builder.getByRole("button", { name: /Included Roll/ })).toBeVisible();
+  await expect(builder.getByRole("button", { name: /Unlimited-only Roll/ })).toBeVisible();
+  await expect(builder.getByRole("button", { name: /Iced Tea/ })).toHaveCount(0);
+  await expect(builder.getByRole("button", { name: /A la carte Maki/ })).toHaveCount(0);
+
+  await builder.getByLabel("Show all items").check();
+  await expect(builder.getByText("Showing all menu items")).toBeVisible();
+  await expect(builder.getByRole("button", { name: /Iced Tea/ })).toBeVisible();
+  await builder.getByRole("button", { name: /A la carte Maki/ }).click();
+  await expect(builder).toContainText("1 × A la carte Maki");
+});
+
 test("Unlimited cart mode does not start a timer until staff starts the existing table session", async ({ page }) => {
   let unlimitedSession: Record<string, unknown> | null = null;
   let startRequestBody: Record<string, unknown> | null = null;

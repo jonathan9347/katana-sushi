@@ -30,6 +30,8 @@ type Props = {
   unlimitedPricePerPerson: number | null;
   activeUnlimitedPaxCount?: number | null;
   activeUnlimitedPricePerPerson?: number | null;
+  unlimitedMenuActive: boolean;
+  unlimitedMenuScope: string | null;
   products: PosProduct[];
   productsLoading: boolean;
   productsError: boolean;
@@ -106,6 +108,8 @@ export default function PosOrderBuilder({
   unlimitedPricePerPerson,
   activeUnlimitedPaxCount = null,
   activeUnlimitedPricePerPerson = null,
+  unlimitedMenuActive,
+  unlimitedMenuScope,
   products,
   productsLoading,
   productsError,
@@ -126,21 +130,32 @@ export default function PosOrderBuilder({
 }: Props) {
   const [menuSearch, setMenuSearch] = useState("");
   const [selectedCategory, setSelectedCategory] = useState("All");
+  const [showAllUnlimitedMenuItems, setShowAllUnlimitedMenuItems] = useState(false);
   const [cartPulse, setCartPulse] = useState(0);
   const [flyDot, setFlyDot] = useState(0);
   const [flyDotProductId, setFlyDotProductId] = useState<string | null>(null);
   const [showActionSuccess, setShowActionSuccess] = useState(false);
   const cartBadgeRef = useRef<HTMLSpanElement>(null);
   const normalizedSearch = menuSearch.trim().toLocaleLowerCase();
+  const menuProducts = useMemo(
+    () => unlimitedMenuActive && !showAllUnlimitedMenuItems
+      ? products.filter((product) => {
+        const classification = product.cart_compatibility?.unlimited.classification;
+        return product.cart_compatibility?.unlimited.allowed
+          && (classification === "included_in_unlimited" || classification === "unlimited_only");
+      })
+      : products,
+    [products, showAllUnlimitedMenuItems, unlimitedMenuActive]
+  );
   const categories = useMemo(() => {
     const counts = new Map<string, number>();
-    products.filter((product) => canAddToCart(product, cartKey)).forEach((product) => {
+    menuProducts.filter((product) => canAddToCart(product, cartKey)).forEach((product) => {
       counts.set(product.category, (counts.get(product.category) ?? 0) + 1);
     });
     return [{ name: "All", count: [...counts.values()].reduce((total, count) => total + count, 0) },
       ...[...counts].map(([name, count]) => ({ name, count }))];
-  }, [cartKey, products]);
-  const visibleProducts = products.filter((product) =>
+  }, [cartKey, menuProducts]);
+  const visibleProducts = menuProducts.filter((product) =>
     canAddToCart(product, cartKey)
     && (selectedCategory === "All" || product.category === selectedCategory)
     && (!normalizedSearch
@@ -172,6 +187,10 @@ export default function PosOrderBuilder({
     const timer = window.setTimeout(() => setShowActionSuccess(false), 650);
     return () => window.clearTimeout(timer);
   }, [actionSucceeded]);
+
+  useEffect(() => {
+    setShowAllUnlimitedMenuItems(false);
+  }, [unlimitedMenuScope]);
 
   function addProduct(product: PosProduct, diningOrderType?: CartItem["diningOrderType"]) {
     onAddItem(product, diningOrderType);
@@ -235,6 +254,22 @@ export default function PosOrderBuilder({
                 />
               </label>
             </div>
+            {unlimitedMenuActive && (
+              <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2">
+                <p className="text-sm font-semibold text-amber-950">
+                  {showAllUnlimitedMenuItems ? "Showing all menu items" : "Showing Unlimited items only"}
+                </p>
+                <label className="flex cursor-pointer items-center gap-2 text-sm font-semibold text-amber-950">
+                  <input
+                    type="checkbox"
+                    aria-label="Show all items"
+                    checked={showAllUnlimitedMenuItems}
+                    onChange={(event) => setShowAllUnlimitedMenuItems(event.target.checked)}
+                  />
+                  Show all items
+                </label>
+              </div>
+            )}
             <div className="pos-category-filters" role="group" aria-label="Filter menu by category">
               {categories.map(({ name, count }) => (
                 <button

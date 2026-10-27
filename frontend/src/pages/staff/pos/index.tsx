@@ -233,6 +233,10 @@ export default function PosPage() {
     : "takeout";
   const items = carts[cartKey];
   const hasUnlimitedItems = items.some((item) => item.diningOrderType === "unlimited");
+  const unlimitedMenuActive = isDineIn && (hasUnlimitedItems || Boolean(activeUnlimitedSession));
+  const unlimitedMenuScope = activeUnlimitedSession
+    ? `session:${activeUnlimitedSession.id}`
+    : hasUnlimitedItems ? `cart:${draftKeys[cartKey]}` : null;
   const selectedReservationSeats = reservationTableSelection.reduce((total, table) => total + table.capacity, 0);
   const reservationTablesReady = reservationTableSelection.length > 0
     && Boolean(selectedReservation)
@@ -980,6 +984,8 @@ export default function PosPage() {
           unlimitedPricePerPerson={unlimitedSettingsQuery.data?.price_per_person ?? null}
           activeUnlimitedPaxCount={activeUnlimitedSession?.pax_count ?? null}
           activeUnlimitedPricePerPerson={activeUnlimitedSession?.price_per_pax ?? null}
+          unlimitedMenuActive={unlimitedMenuActive}
+          unlimitedMenuScope={unlimitedMenuScope}
           onAddItem={(product, itemOrderType) => {
             if (!isPickupCustomer) addOrderBuilderItem(product, itemOrderType);
           }}
