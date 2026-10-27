@@ -347,39 +347,41 @@ export default function PosOrderBuilder({
                     </button>
                   ))}
                 </div>
-                <label className="pos-headcount-control grid gap-1 text-sm font-medium text-slate-700">
-                  {orderType === "unlimited" ? "Unlimited headcount" : "Headcount"}
-                  <span className="pos-headcount-stepper">
-                    <button
-                      type="button"
-                      aria-label="Decrease headcount"
-                      disabled={activeUnlimitedPaxCount !== null || headcount <= 1}
-                      onClick={() => onHeadcountChange(headcount - 1)}
-                    ><Minus /></button>
-                    <input
-                      aria-label={orderType === "unlimited" ? "Unlimited headcount" : "Headcount"}
-                      type="number"
-                      min={1}
-                      max={100}
-                      step={1}
-                      value={headcount}
-                      disabled={activeUnlimitedPaxCount !== null}
-                      onChange={(event) => onHeadcountChange(Number(event.target.value))}
-                    />
-                    <button
-                      type="button"
-                      aria-label="Increase headcount"
-                      disabled={activeUnlimitedPaxCount !== null || headcount >= 100}
-                      onClick={() => onHeadcountChange(headcount + 1)}
-                    ><Plus /></button>
-                  </span>
-                </label>
                 {orderType === "unlimited" && (
-                  <div className="rounded-md bg-amber-50 p-3 text-sm text-amber-950">
-                    {unlimitedPackageEstimate === null
-                      ? "Unlimited package pricing is unavailable."
-                      : `Unlimited package: ${packagePaxCount} × ${money(Number(packagePricePerPerson))} = ${money(unlimitedPackageEstimate)}${activeUnlimitedPaxCount !== null ? " (active session)" : " (estimated; due at bill-out)"}`}
-                  </div>
+                  <>
+                    <label className="pos-headcount-control grid gap-1 text-sm font-medium text-slate-700">
+                      Unlimited headcount
+                      <span className="pos-headcount-stepper">
+                        <button
+                          type="button"
+                          aria-label="Decrease headcount"
+                          disabled={activeUnlimitedPaxCount !== null || headcount <= 1}
+                          onClick={() => onHeadcountChange(headcount - 1)}
+                        ><Minus /></button>
+                        <input
+                          aria-label="Unlimited headcount"
+                          type="number"
+                          min={1}
+                          max={100}
+                          step={1}
+                          value={headcount}
+                          disabled={activeUnlimitedPaxCount !== null}
+                          onChange={(event) => onHeadcountChange(Number(event.target.value))}
+                        />
+                        <button
+                          type="button"
+                          aria-label="Increase headcount"
+                          disabled={activeUnlimitedPaxCount !== null || headcount >= 100}
+                          onClick={() => onHeadcountChange(headcount + 1)}
+                        ><Plus /></button>
+                      </span>
+                    </label>
+                    <div className="rounded-md bg-amber-50 p-3 text-sm text-amber-950">
+                      {unlimitedPackageEstimate === null
+                        ? "Unlimited package pricing is unavailable."
+                        : `Unlimited package: ${packagePaxCount} × ${money(Number(packagePricePerPerson))} = ${money(unlimitedPackageEstimate)}${activeUnlimitedPaxCount !== null ? " (active session)" : " (estimated; due at bill-out)"}`}
+                    </div>
+                  </>
                 )}
               </>
             )}

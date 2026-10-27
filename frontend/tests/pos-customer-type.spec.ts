@@ -238,6 +238,7 @@ test("confirms a walk-in dine-in order atomically after table selection and rese
   await page.getByRole("dialog", { name: "New Customer" }).getByRole("button", { name: /Dine-in/ }).click();
   await page.getByRole("dialog", { name: "Dine-in" }).getByRole("button", { name: /Walk-in/ }).click();
   await page.getByRole("dialog", { name: "Ready to order" }).getByRole("button", { name: "Start ordering" }).click();
+  await expect(builder.getByLabel("Headcount")).toHaveCount(0);
   await builder.getByRole("button", { name: /California Roll/ }).click();
   await expect(builder).toContainText("1 × California Roll");
   await page.getByRole("button", { name: "Proceed" }).click();
@@ -263,5 +264,6 @@ test("confirms a walk-in dine-in order atomically after table selection and rese
     orderType: "ala_carte",
     items: [{ productId: "product-1", quantity: 1, expectedUnitPrice: 100 }]
   });
+  expect(confirmationBody).not.toHaveProperty("paxCount");
   expect(confirmationBody?.idempotencyKey).toEqual(expect.any(String));
 });
