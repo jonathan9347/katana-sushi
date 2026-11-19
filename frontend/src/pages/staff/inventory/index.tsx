@@ -37,7 +37,7 @@ export default function InventoryPage({ readOnly = false }: { readOnly?: boolean
   const [wastePreload, setWastePreload] = useState<{
     raw_material_id: string;
     batch_id?: string;
-    quantity?: number;
+    quantity?: string;
     reason?: "spoilage" | "expired" | "prep_waste" | "damaged" | "other";
     notes?: string;
   } | null>(null);
@@ -51,7 +51,7 @@ export default function InventoryPage({ readOnly = false }: { readOnly?: boolean
     setWastePreload({
       raw_material_id: batch.raw_material.id,
       batch_id: batch.id,
-      quantity: Number(batch.remaining_quantity) || 0,
+      quantity: String(Number(batch.remaining_quantity) || 0),
       reason: "expired",
       notes: `Expired batch ${batch.batch_number} was disposed after review.`
     });
