@@ -8,7 +8,6 @@ import {
   LogOut,
   Package,
   Settings,
-  Shield,
   User,
   Users
 } from "lucide-react";
@@ -30,7 +29,7 @@ const menuItems: MenuItem[] = [
   { label: "POS", to: "/staff/pos", icon: CreditCard, roles: ["admin", "cashier"] },
   { label: "Reservations", to: "/staff/reservations", icon: CalendarDays, roles: ["admin", "cashier", "receptionist", "event_coordinator", "chef"] },
   { label: "Analytics", to: "/staff/analytics", icon: BarChart3, roles: ["admin", "inventory_manager"] },
-  { label: "Settings", to: "/staff/settings", icon: Settings, roles: ["admin", "inventory_manager", "cashier", "receptionist", "event_coordinator", "chef"] }
+  { label: "Settings", to: "/staff/settings", icon: Settings, roles: ["admin"] }
 ];
 
 const mobileItems = menuItems.slice(0, 5);
@@ -116,12 +115,6 @@ export default function StaffSidebar() {
                     <p className="truncate text-sm font-black text-slate-950">{user.name ?? "Staff User"}</p>
                     <p className="truncate text-xs text-slate-500">{role.replace("_", " ")}</p>
                   </div>
-                  <button className="mt-2 flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm font-semibold text-slate-700 hover:bg-slate-100">
-                    <User className="h-4 w-4" /> My Profile
-                  </button>
-                  <button className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm font-semibold text-slate-700 hover:bg-slate-100">
-                    <Shield className="h-4 w-4" /> Change Password
-                  </button>
                   <button onClick={logout} className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm font-semibold text-red-700 hover:bg-red-50">
                     <LogOut className="h-4 w-4" /> Logout
                   </button>

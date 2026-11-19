@@ -91,7 +91,7 @@ export default function App() {
       <Route path="/staff/pos/history" element={<StaffPage roles={["admin", "cashier"]}><PosHistory /></StaffPage>} />
       <Route path="/staff/pos/unlimited-settings" element={<StaffPage roles={["admin", "cashier"]}><UnlimitedSettings /></StaffPage>} />
       <Route path="/admin/unlimited-settings" element={<Navigate to="/staff/pos/unlimited-settings" replace />} />
-      <Route path="/staff/settings" element={<StaffPage roles={["admin", "inventory_manager", "cashier", "receptionist", "event_coordinator", "chef"]}><SettingsPage /></StaffPage>} />
+      <Route path="/staff/settings" element={<StaffPage roles={["admin"]}><SettingsPage /></StaffPage>} />
       <Route path="/staff/analytics" element={<StaffPage roles={["admin", "inventory_manager"]}><AnalyticsPage /></StaffPage>} />
       <Route
         path="/staff/reservations"

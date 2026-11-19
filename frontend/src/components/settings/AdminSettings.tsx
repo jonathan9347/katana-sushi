@@ -1,71 +1,464 @@
-import { FormEvent, useEffect, useState } from "react";
-import { useSystemSettings } from "../../hooks/useSystemSettings";
+import { useMemo, useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { PencilLine, Plus, Power, Search, X } from "lucide-react";
+import { useToast } from "../../hooks/useToast";
+import { fetchActivityLogs, type ActivityLogItem } from "../../lib/activityLogs";
+import {
+  createStaffUser,
+  deactivateStaffUser,
+  fetchStaffUsers,
+  updateStaffUser,
+  type StaffUser
+} from "../../lib/adminUsers";
 import { Button } from "../ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "../ui/card";
 
-export default function AdminSettings() {
-  const { settings, saveSettings, isSaving } = useSystemSettings();
+const staffRoles = ["admin", "inventory_manager", "cashier", "receptionist", "event_coordinator", "chef", "staff"];
+
+function formatRole(role: string) {
+  return role
+    .split("_")
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+}
+
+function formatDateTime(value: string | null | undefined) {
+  if (!value) {
+    return "Never";
+  }
+
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return "Never";
+  }
+
+  return date.toLocaleString([], {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit"
+  });
+}
+
+function getInitials(name: string) {
+  return name
+    .split(" ")
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part.charAt(0).toUpperCase())
+    .join("") || "S";
+}
+
+function ActivityLogTable({ logs }: { logs: ActivityLogItem[] }) {
+  return (
+    <div className="overflow-hidden rounded-2xl border border-slate-200">
+      <table className="min-w-full divide-y divide-slate-200 text-left">
+        <thead className="bg-slate-50">
+          <tr>
+            <th className="px-4 py-3 text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Actor</th>
+            <th className="px-4 py-3 text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Action</th>
+            <th className="px-4 py-3 text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">When</th>
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-slate-200 bg-white">
+          {logs.length === 0 ? (
+            <tr>
+              <td className="px-4 py-8 text-center text-sm text-slate-500" colSpan={3}>
+                No activity recorded yet.
+              </td>
+            </tr>
+          ) : (
+            logs.map((log) => (
+              <tr key={log.id} className="align-top">
+                <td className="px-4 py-3">
+                  <div className="flex items-center gap-3">
+                    <div className="flex h-9 w-9 items-center justify-center rounded-full bg-red-50 text-xs font-bold text-red-700">
+                      {getInitials(log.actor_name ?? "System")}
+                    </div>
+                    <div>
+                      <p className="text-sm font-semibold text-slate-900">{log.actor_name ?? "System"}</p>
+                      <p className="text-xs text-slate-500">{log.actor_role ? formatRole(log.actor_role) : "System"}</p>
+                    </div>
+                  </div>
+                </td>
+                <td className="px-4 py-3 text-sm text-slate-700">
+                  <span className="inline-flex rounded-full bg-slate-100 px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.2em] text-slate-600">
+                    {log.entity}
+                  </span>
+                  <p className="mt-2 max-w-xl break-words">{log.message}</p>
+                </td>
+                <td className="px-4 py-3 text-sm text-slate-500">{formatDateTime(log.created_at)}</td>
+              </tr>
+            ))
+          )}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+export default function AdminSettings({ activeTab }: { activeTab: "users" | "activity" }) {
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
+  const [searchTerm, setSearchTerm] = useState("");
+  const [activityPage, setActivityPage] = useState(1);
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [editingUserId, setEditingUserId] = useState<string | null>(null);
   const [form, setForm] = useState({
-    restaurant_name: settings.restaurant_name,
-    timezone: settings.timezone,
-    currency: settings.currency
+    name: "",
+    email: "",
+    role: "staff",
+    password: ""
   });
 
-  useEffect(() => {
-    setForm({
-      restaurant_name: settings.restaurant_name,
-      timezone: settings.timezone,
-      currency: settings.currency
-    });
-  }, [settings]);
+  const usersQuery = useQuery({
+    queryKey: ["admin", "users"],
+    queryFn: () => fetchStaffUsers(1, 50),
+    staleTime: 30_000
+  });
 
-  function submit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    saveSettings({ ...settings, ...form });
-  }
+  const activityQuery = useQuery({
+    queryKey: ["admin", "activity-logs", activityPage],
+    queryFn: () => fetchActivityLogs(activityPage, 10),
+    staleTime: 30_000,
+    enabled: activeTab === "activity"
+  });
+
+  const users = useMemo(() => usersQuery.data?.users ?? [], [usersQuery.data]);
+  const logs = useMemo(() => activityQuery.data?.logs ?? [], [activityQuery.data]);
+  const totalLogPages = activityQuery.data?.totalPages ?? 1;
+
+  const filteredUsers = useMemo(() => {
+    const normalizedQuery = searchTerm.trim().toLowerCase();
+    if (!normalizedQuery) {
+      return users;
+    }
+
+    return users.filter((user) => {
+      const nameMatch = user.name.toLowerCase().includes(normalizedQuery);
+      const emailMatch = user.email.toLowerCase().includes(normalizedQuery);
+      return nameMatch || emailMatch;
+    });
+  }, [searchTerm, users]);
+
+  const openAddDrawer = () => {
+    setEditingUserId(null);
+    setForm({ name: "", email: "", role: "staff", password: "" });
+    setDrawerOpen(true);
+  };
+
+  const closeDrawer = () => {
+    setDrawerOpen(false);
+    setEditingUserId(null);
+    setForm({ name: "", email: "", role: "staff", password: "" });
+  };
+
+  const upsertUserMutation = useMutation({
+    mutationFn: async () => {
+      const payload = {
+        name: form.name.trim(),
+        email: form.email.trim(),
+        role: form.role,
+        ...(editingUserId
+          ? form.password.trim()
+            ? { password: form.password.trim() }
+            : {}
+          : { password: form.password.trim() })
+      };
+
+      if (editingUserId) {
+        return updateStaffUser(editingUserId, payload);
+      }
+
+      return createStaffUser(payload);
+    },
+    onSuccess: () => {
+      toast(editingUserId ? "Staff user updated successfully." : "Staff user added successfully.");
+      closeDrawer();
+      queryClient.invalidateQueries({ queryKey: ["admin", "users"] });
+      queryClient.invalidateQueries({ queryKey: ["admin", "activity-logs"] });
+    },
+    onError: (error: any) => {
+      toast(error?.response?.data?.message ?? `Unable to ${editingUserId ? "update" : "add"} staff user.`);
+    }
+  });
+
+  const deactivateUserMutation = useMutation({
+    mutationFn: (userId: string) => deactivateStaffUser(userId),
+    onSuccess: () => {
+      toast("Staff user deactivated.");
+      queryClient.invalidateQueries({ queryKey: ["admin", "users"] });
+      queryClient.invalidateQueries({ queryKey: ["admin", "activity-logs"] });
+    },
+    onError: (error: any) => {
+      toast(error?.response?.data?.message ?? "Unable to deactivate staff user.");
+    }
+  });
+
+  const canSubmitUser =
+    form.name.trim() &&
+    form.email.trim() &&
+    (!editingUserId ? form.password.trim().length >= 8 : true) &&
+    !upsertUserMutation.isPending;
 
   return (
     <Card>
-      <CardHeader>
-        <div className="flex items-center gap-3 text-red-700">
-          <span aria-hidden="true">Settings</span>
-          <CardTitle className="ml-2">Admin Settings</CardTitle>
+      {activeTab === "users" && <CardHeader>
+        <div className="flex items-center justify-between gap-3">
+          <div className="flex items-center gap-3 text-red-700">
+            <span aria-hidden="true">Staff</span>
+            <CardTitle className="ml-2">User Management</CardTitle>
+          </div>
+          <Button type="button" variant="default" onClick={openAddDrawer}>
+            <Plus className="mr-2 h-4 w-4" />
+            Add Staff User
+          </Button>
         </div>
-      </CardHeader>
-      <CardContent>
-        <form onSubmit={submit}>
-          <div className="grid gap-6 lg:grid-cols-2">
+      </CardHeader>}
+      <CardContent className="space-y-8 pt-6">
+        {activeTab === "users" && <section>
+          <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div>
-              <p className="text-sm font-semibold text-slate-900">User Management</p>
-              <div className="mt-3 grid gap-3 sm:grid-cols-3">
-                <Button type="button" variant="outline">View All Users</Button>
-                <Button type="button" variant="outline">Add New User</Button>
-                <Button type="button" variant="outline">Manage Roles</Button>
-              </div>
+              <h3 className="text-lg font-semibold text-slate-900">Staff Users</h3>
+              <p className="text-sm text-slate-500">Manage active staff accounts and role assignments.</p>
             </div>
-            <div>
-              <p className="text-sm font-semibold text-slate-900">System Settings</p>
-              <div className="mt-3 grid gap-4">
-                <label className="space-y-2 text-sm text-slate-700">
-                  <span>Restaurant Name</span>
-                  <input className="w-full rounded-2xl border border-slate-300 bg-slate-50 px-4 py-3" value={form.restaurant_name} onChange={(event) => setForm((current) => ({ ...current, restaurant_name: event.target.value }))} />
-                </label>
-                <label className="space-y-2 text-sm text-slate-700">
-                  <span>Timezone</span>
-                  <input className="w-full rounded-2xl border border-slate-300 bg-slate-50 px-4 py-3" value={form.timezone} onChange={(event) => setForm((current) => ({ ...current, timezone: event.target.value }))} />
-                </label>
-                <label className="space-y-2 text-sm text-slate-700">
-                  <span>Currency</span>
-                  <input className="w-full rounded-2xl border border-slate-300 bg-slate-50 px-4 py-3 uppercase" maxLength={8} value={form.currency} onChange={(event) => setForm((current) => ({ ...current, currency: event.target.value.toUpperCase() }))} />
-                </label>
-              </div>
+            <div className="relative w-full max-w-sm">
+              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+              <input
+                value={searchTerm}
+                onChange={(event) => setSearchTerm(event.target.value)}
+                className="w-full rounded-2xl border border-slate-300 bg-slate-50 py-2.5 pl-10 pr-4 text-sm text-slate-700 outline-none transition focus:border-red-300 focus:bg-white"
+                placeholder="Search by name or email"
+              />
             </div>
           </div>
-          <div className="mt-6">
-            <Button disabled={isSaving}>Save Admin Settings</Button>
+
+          <div className="overflow-hidden rounded-2xl border border-slate-200">
+            <table className="min-w-full divide-y divide-slate-200 text-left">
+              <thead className="bg-slate-50">
+                <tr>
+                  <th className="px-4 py-3 text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Name</th>
+                  <th className="px-4 py-3 text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Email</th>
+                  <th className="px-4 py-3 text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Role</th>
+                  <th className="px-4 py-3 text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Status</th>
+                  <th className="px-4 py-3 text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Actions</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-200 bg-white">
+                {usersQuery.isLoading ? (
+                  <tr>
+                    <td className="px-4 py-8 text-center text-sm text-slate-500" colSpan={5}>
+                      Loading staff users...
+                    </td>
+                  </tr>
+                ) : filteredUsers.length === 0 ? (
+                  <tr>
+                    <td className="px-4 py-8 text-center text-sm text-slate-500" colSpan={5}>
+                      No matching staff users found.
+                    </td>
+                  </tr>
+                ) : (
+                  filteredUsers.map((user: StaffUser) => (
+                    <tr key={user.id}>
+                      <td className="px-4 py-3">
+                        <div className="flex items-center gap-3">
+                          <div className="flex h-9 w-9 items-center justify-center rounded-full bg-slate-100 text-xs font-bold text-slate-700">
+                            {getInitials(user.name)}
+                          </div>
+                          <div>
+                            <p className="text-sm font-semibold text-slate-900">{user.name}</p>
+                            <p className="text-xs text-slate-500">{formatDateTime(user.last_login)}</p>
+                          </div>
+                        </div>
+                      </td>
+                      <td className="px-4 py-3 text-sm text-slate-700">{user.email}</td>
+                      <td className="px-4 py-3 text-sm">
+                        <span className="inline-flex rounded-full bg-red-50 px-2.5 py-1 text-xs font-semibold text-red-700 ring-1 ring-red-100">
+                          {formatRole(user.role)}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3">
+                        <span
+                          className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${
+                            user.is_active ? "bg-emerald-100 text-emerald-700" : "bg-slate-200 text-slate-600"
+                          }`}
+                        >
+                          {user.is_active ? "Active" : "Inactive"}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3">
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            aria-label={`Edit ${user.name}`}
+                            onClick={() => {
+                              setEditingUserId(user.id);
+                              setForm({
+                                name: user.name,
+                                email: user.email,
+                                role: user.role,
+                                password: ""
+                              });
+                              setDrawerOpen(true);
+                            }}
+                            className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-600 transition hover:border-red-200 hover:bg-red-50 hover:text-red-700"
+                          >
+                            <PencilLine className="h-4 w-4" />
+                          </button>
+                          <button
+                            type="button"
+                            aria-label={`Deactivate ${user.name}`}
+                            onClick={() => deactivateUserMutation.mutate(user.id)}
+                            disabled={deactivateUserMutation.isPending}
+                            className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-600 transition hover:border-red-200 hover:bg-red-50 hover:text-red-700 disabled:cursor-not-allowed disabled:opacity-60"
+                          >
+                            <Power className="h-4 w-4" />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
           </div>
-        </form>
+        </section>}
+
+        {activeTab === "activity" && <section>
+          <div className="mb-4 flex items-center justify-between gap-3">
+            <div>
+              <h3 className="text-lg font-semibold text-slate-900">User Activity Log</h3>
+              <p className="text-sm text-slate-500">Latest staff actions and system events.</p>
+            </div>
+          </div>
+
+          <div className="space-y-4">
+            {activityQuery.isLoading ? (
+              <div className="rounded-2xl border border-slate-200 bg-slate-50 p-6 text-sm text-slate-500">
+                Loading recent activity...
+              </div>
+            ) : (
+              <>
+                <ActivityLogTable logs={logs} />
+                <div className="flex items-center justify-between gap-3">
+                  <span className="text-sm text-slate-500">
+                    Page {activityQuery.data?.page ?? 1} of {totalLogPages}
+                  </span>
+                  <div className="flex items-center gap-2">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      disabled={activityPage <= 1}
+                      onClick={() => setActivityPage((current) => Math.max(1, current - 1))}
+                    >
+                      Previous
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      disabled={activityPage >= totalLogPages}
+                      onClick={() => setActivityPage((current) => Math.min(totalLogPages, current + 1))}
+                    >
+                      Next
+                    </Button>
+                  </div>
+                </div>
+              </>
+            )}
+          </div>
+        </section>}
       </CardContent>
+
+      {drawerOpen && (
+        <div className="fixed inset-0 z-50 flex justify-end bg-slate-950/30" onClick={closeDrawer}>
+          <div
+            className="h-full w-full max-w-md overflow-y-auto bg-white p-6 shadow-2xl"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-[0.25em] text-red-700">Staff</p>
+                <h3 className="mt-2 text-2xl font-black text-slate-950">
+                  {editingUserId ? "Edit Staff User" : "Add Staff User"}
+                </h3>
+              </div>
+              <button
+                type="button"
+                onClick={closeDrawer}
+                className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:text-slate-900"
+                aria-label="Close drawer"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <div className="mt-8 space-y-5">
+              <label className="block space-y-2 text-sm text-slate-700">
+                <span>Full name</span>
+                <input
+                  value={form.name}
+                  onChange={(event) => setForm((current) => ({ ...current, name: event.target.value }))}
+                  className="w-full rounded-2xl border border-slate-300 bg-slate-50 px-4 py-3 outline-none transition focus:border-red-300 focus:bg-white"
+                  placeholder="Maria Santos"
+                />
+              </label>
+
+              <label className="block space-y-2 text-sm text-slate-700">
+                <span>Email address</span>
+                <input
+                  type="email"
+                  value={form.email}
+                  onChange={(event) => setForm((current) => ({ ...current, email: event.target.value }))}
+                  className="w-full rounded-2xl border border-slate-300 bg-slate-50 px-4 py-3 outline-none transition focus:border-red-300 focus:bg-white"
+                  placeholder="maria@katana.com"
+                />
+              </label>
+
+              <label className="block space-y-2 text-sm text-slate-700">
+                <span>Role</span>
+                <select
+                  value={form.role}
+                  onChange={(event) => setForm((current) => ({ ...current, role: event.target.value }))}
+                  className="w-full rounded-2xl border border-slate-300 bg-slate-50 px-4 py-3 outline-none transition focus:border-red-300 focus:bg-white"
+                >
+                  {staffRoles.map((role) => (
+                    <option key={role} value={role}>
+                      {formatRole(role)}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <label className="block space-y-2 text-sm text-slate-700">
+                <span>{editingUserId ? "Password (optional)" : "Password"}</span>
+                <input
+                  type="password"
+                  value={form.password}
+                  onChange={(event) => setForm((current) => ({ ...current, password: event.target.value }))}
+                  className="w-full rounded-2xl border border-slate-300 bg-slate-50 px-4 py-3 outline-none transition focus:border-red-300 focus:bg-white"
+                  placeholder={editingUserId ? "Leave blank to keep current password" : "Minimum 8 characters"}
+                />
+              </label>
+            </div>
+
+            <div className="mt-8 flex items-center justify-end gap-3">
+              <Button type="button" variant="outline" onClick={closeDrawer}>
+                Cancel
+              </Button>
+              <Button
+                type="button"
+                disabled={!canSubmitUser || upsertUserMutation.isPending}
+                onClick={() => upsertUserMutation.mutate()}
+              >
+                {upsertUserMutation.isPending ? "Saving..." : editingUserId ? "Update Staff User" : "Save Staff User"}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
     </Card>
   );
 }
