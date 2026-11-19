@@ -1,22 +1,3 @@
-CREATE TABLE IF NOT EXISTS "payment_intents" (
-    "reference_id" TEXT NOT NULL,
-    "booking_id" TEXT NOT NULL,
-    "purpose" TEXT NOT NULL DEFAULT 'downpayment',
-    "idempotency_key" TEXT,
-    "gateway_reference" TEXT,
-    "amount" DOUBLE PRECISION NOT NULL,
-    "payment_method" TEXT NOT NULL,
-    "reservation_type" TEXT NOT NULL,
-    "status" TEXT NOT NULL DEFAULT 'pending',
-    "transaction_id" TEXT,
-    "paid_at" TIMESTAMP(3),
-    "expires_at" TIMESTAMP(3),
-    "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updated_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-
-    CONSTRAINT "payment_intents_pkey" PRIMARY KEY ("reference_id")
-);
-
 ALTER TABLE "payment_intents"
 ADD COLUMN IF NOT EXISTS "purpose" TEXT NOT NULL DEFAULT 'downpayment';
 
