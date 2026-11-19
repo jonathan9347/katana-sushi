@@ -13,3 +13,5 @@ backend/backups/
 *.sql.gz
 *.bak
 *.tar.gz
+
+supabase-backup-before-deploy.sql
