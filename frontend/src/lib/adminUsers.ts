@@ -5,7 +5,6 @@ export type StaffUser = {
   email: string;
   name: string;
   role: string;
-  is_active: boolean;
   last_login: string | null;
   created_at: string;
   updated_at: string;
@@ -23,7 +22,10 @@ export type StaffUserPayload = {
   name: string;
   email: string;
   role: string;
-  password?: string;
+};
+
+export type NewStaffUserPayload = StaffUserPayload & {
+  password: string;
 };
 
 export async function fetchStaffUsers(page = 1, limit = 20) {
@@ -33,7 +35,7 @@ export async function fetchStaffUsers(page = 1, limit = 20) {
   return response.data;
 }
 
-export async function createStaffUser(payload: StaffUserPayload) {
+export async function createStaffUser(payload: NewStaffUserPayload) {
   const response = await api.post<{ user: StaffUser }>("/api/admin/users", payload);
   return response.data.user;
 }
@@ -43,7 +45,10 @@ export async function updateStaffUser(userId: string, payload: StaffUserPayload)
   return response.data.user;
 }
 
-export async function deactivateStaffUser(userId: string) {
-  const response = await api.delete<{ user: StaffUser }>(`/api/admin/users/${userId}`);
+export async function resetStaffUserPassword(userId: string, password: string) {
+  const response = await api.post<{ message: string; user: Pick<StaffUser, "id" | "name" | "email" | "role"> }>(
+    `/api/admin/users/${userId}/reset-password`,
+    { password }
+  );
   return response.data.user;
 }

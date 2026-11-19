@@ -25,15 +25,32 @@ async function mockSettingsApi(page: import("@playwright/test").Page) {
             name: "Alex Staff",
             email: "alex@example.test",
             role: "cashier",
-            is_active: true,
+            last_login: null,
+            created_at: "2026-11-19T00:00:00.000Z",
+            updated_at: "2026-11-19T00:00:00.000Z"
+          }, {
+            id: "manager-1",
+            name: "Jordan Manager",
+            email: "jordan@example.test",
+            role: "inventory_manager",
             last_login: null,
             created_at: "2026-11-19T00:00:00.000Z",
             updated_at: "2026-11-19T00:00:00.000Z"
           }],
-          total: 1,
+          total: 2,
           page: 1,
           limit: 50,
           totalPages: 1
+        }
+      });
+      return;
+    }
+
+    if (url.pathname === "/api/admin/users/staff-1/reset-password" && route.request().method() === "POST") {
+      await route.fulfill({
+        json: {
+          message: "Password reset.",
+          user: { id: "staff-1", name: "Alex Staff", email: "alex@example.test", role: "cashier" }
         }
       });
       return;
@@ -91,4 +108,42 @@ test("account menu no longer offers profile or password actions", async ({ page 
   await expect(page.getByRole("button", { name: "My Profile" })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Change Password" })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Logout" })).toBeVisible();
+});
+
+test("Users filters by role and has no status or deactivation controls", async ({ page }) => {
+  await setUser(page, "admin");
+  await mockSettingsApi(page);
+  await page.goto("/staff/settings");
+
+  await page.getByLabel("Filter by role").selectOption("inventory_manager");
+  await expect(page.getByText("Jordan Manager")).toBeVisible();
+  await expect(page.getByText("Alex Staff")).toHaveCount(0);
+  await expect(page.getByRole("columnheader", { name: "Status" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: /Deactivate/ })).toHaveCount(0);
+});
+
+test("admin reset-password action submits the new password but never displays it in the response", async ({ page }) => {
+  await setUser(page, "admin");
+  await mockSettingsApi(page);
+  await page.goto("/staff/settings");
+  await page.getByRole("button", { name: "Edit Alex Staff" }).click();
+
+  const resetRequest = page.waitForRequest((request) =>
+    request.url().includes("/api/admin/users/staff-1/reset-password") && request.method() === "POST"
+  );
+  const resetResponse = page.waitForResponse((response) =>
+    response.url().includes("/api/admin/users/staff-1/reset-password")
+  );
+
+  await page.getByLabel("New password").fill("NewStaffPassword123!");
+  await page.getByRole("button", { name: "Reset password" }).click();
+
+  expect((await resetRequest).postDataJSON()).toEqual({ password: "NewStaffPassword123!" });
+  const responseBody = await (await resetResponse).json();
+  expect(responseBody).toEqual({
+    message: "Password reset.",
+    user: { id: "staff-1", name: "Alex Staff", email: "alex@example.test", role: "cashier" }
+  });
+  expect(JSON.stringify(responseBody)).not.toContain("NewStaffPassword123!");
+  await expect(page.getByLabel("New password")).toHaveValue("");
 });

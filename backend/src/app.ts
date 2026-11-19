@@ -63,6 +63,7 @@ import { getInventoryMovementFilters } from "./services/inventoryMovementCategor
 import { paymentIntentStore } from "./services/payment/paymentIntentStore";
 import { PaymentService } from "./services/payment.service";
 import { prisma } from "./lib/prisma";
+import { createPasswordResetAuditLog, formatPasswordResetAuditMessage } from "./lib/userPasswordResetAudit";
 import { jwtExpirationSeconds } from "./lib/jwtExpiration";
 import { checkDatabaseHealth, getDatabaseStatus, markDatabaseDown } from "./lib/database";
 import { getJwtSecret } from "./lib/jwt";
@@ -2619,6 +2620,306 @@ app.put("/api/admin/settings/system", async (req, res, next) => {
     const settings = await updateSystemSettings(body);
 
     return res.json({ settings });
+  } catch (error) {
+    return next(error);
+  }
+});
+
+const supportedStaffRoles = ["admin", "inventory_manager", "cashier", "receptionist", "event_coordinator", "chef", "staff"] as const;
+
+function humanizeEntityName(entity: string) {
+  const id = entity.replace(/[_-]+/g, " ").trim();
+  return id ? id.charAt(0).toUpperCase() + id.slice(1) : "Record";
+}
+
+function formatAuditMessage(log: {
+  actor_name: string | null;
+  actor_role: string | null;
+  action: string;
+  entity: string;
+  entity_id?: string | null;
+  old_value?: unknown;
+  new_value?: unknown;
+}) {
+  const actor = log.actor_name || "System";
+  const actionText = log.action?.toLowerCase() || "updated";
+  const entityLabel = humanizeEntityName(log.entity || "record");
+  const entityId = log.entity_id ? ` #${String(log.entity_id).slice(0, 8)}` : "";
+
+  if (log.entity === "user" && actionText === "create") {
+    const createdName = typeof log.new_value === "object" && log.new_value && "name" in (log.new_value as Record<string, unknown>)
+      ? String((log.new_value as Record<string, unknown>).name ?? "new user")
+      : "new user";
+    return `${actor} added new user ${createdName}.`;
+  }
+
+  if (log.entity === "user" && actionText === "password_reset") {
+    const targetName = typeof log.new_value === "object" && log.new_value && "name" in (log.new_value as Record<string, unknown>)
+      ? String((log.new_value as Record<string, unknown>).name ?? "staff user")
+      : "staff user";
+    return formatPasswordResetAuditMessage(targetName);
+  }
+
+  if (log.entity === "product" && actionText === "update") {
+    const productName = typeof log.new_value === "object" && log.new_value && "name" in (log.new_value as Record<string, unknown>)
+      ? String((log.new_value as Record<string, unknown>).name ?? "product")
+      : "product";
+    const priceChanged = typeof log.old_value === "object" && log.old_value && "price" in (log.old_value as Record<string, unknown>)
+      && typeof log.new_value === "object" && log.new_value && "price" in (log.new_value as Record<string, unknown>);
+
+    if (priceChanged) {
+      return `${actor} updated the price of ${productName}.`;
+    }
+
+    return `${actor} updated ${productName}.`;
+  }
+
+  if (actionText === "login") {
+    return `${actor} signed in.`;
+  }
+
+  if (actionText === "create") {
+    return `${actor} created ${entityLabel}${entityId}.`;
+  }
+
+  if (actionText === "delete") {
+    return `${actor} deleted ${entityLabel}${entityId}.`;
+  }
+
+  if (actionText === "update") {
+    return `${actor} updated ${entityLabel}${entityId}.`;
+  }
+
+  return `${actor} ${actionText} ${entityLabel}${entityId}.`;
+}
+
+app.get("/api/admin/users", async (req, res, next) => {
+  try {
+    const user = requireRole(req, res, ["admin"]);
+    if (!user) {
+      return;
+    }
+
+    const parsedQuery = z.object({
+      page: z.coerce.number().int().min(1).default(1),
+      limit: z.coerce.number().int().min(1).max(100).default(20)
+    }).parse(req.query);
+
+    const skip = (parsedQuery.page - 1) * parsedQuery.limit;
+    const [total, users] = await Promise.all([
+      prisma.user.count(),
+      prisma.user.findMany({
+        orderBy: [{ created_at: "desc" }, { id: "desc" }],
+        skip,
+        take: parsedQuery.limit,
+        select: {
+          id: true,
+          email: true,
+          name: true,
+          role: true,
+          last_login: true,
+          created_at: true,
+          updated_at: true
+        }
+      })
+    ]);
+
+    return res.json({
+      users: users.map((staffUser) => ({
+        ...staffUser,
+        last_login: staffUser.last_login ? staffUser.last_login.toISOString() : null,
+        created_at: staffUser.created_at.toISOString(),
+        updated_at: staffUser.updated_at.toISOString()
+      })),
+      total,
+      page: parsedQuery.page,
+      limit: parsedQuery.limit,
+      totalPages: Math.max(1, Math.ceil(total / parsedQuery.limit))
+    });
+  } catch (error) {
+    return next(error);
+  }
+});
+
+app.post("/api/admin/users", async (req, res, next) => {
+  try {
+    const currentUser = requireRole(req, res, ["admin"]);
+    if (!currentUser) {
+      return;
+    }
+
+    const body = z.object({
+      name: z.string().trim().min(2).max(120),
+      email: z.string().trim().email(),
+      role: z.enum(supportedStaffRoles),
+      password: z.string().min(8).max(128)
+    }).parse(req.body);
+
+    const existingUser = await prisma.user.findUnique({ where: { email: body.email.toLowerCase() } });
+    if (existingUser) {
+      return res.status(409).json({ message: "A staff account with that email already exists." });
+    }
+
+    const actor = await prisma.user.findUnique({ where: { id: currentUser.sub } });
+
+    const user = await prisma.user.create({
+      data: {
+        name: body.name.trim(),
+        email: body.email.trim().toLowerCase(),
+        role: body.role,
+        password_hash: await bcrypt.hash(body.password, 10),
+        is_active: true
+      },
+      select: {
+        id: true,
+        email: true,
+        name: true,
+        role: true,
+        last_login: true,
+        created_at: true,
+        updated_at: true
+      }
+    });
+
+    await prisma.auditLog.create({
+      data: {
+        user_id: actor?.id ?? currentUser.sub,
+        action: "create",
+        entity: "user",
+        entity_id: user.id,
+        new_value: {
+          name: user.name,
+          email: user.email,
+          role: user.role
+        }
+      }
+    });
+
+    return res.status(201).json({
+      user: {
+        ...user,
+        last_login: user.last_login ? user.last_login.toISOString() : null,
+        created_at: user.created_at.toISOString(),
+        updated_at: user.updated_at.toISOString()
+      }
+    });
+  } catch (error) {
+    return next(error);
+  }
+});
+
+app.put("/api/admin/users/:id", async (req, res, next) => {
+  try {
+    const currentUser = requireRole(req, res, ["admin"]);
+    if (!currentUser) {
+      return;
+    }
+
+    const userId = req.params.id;
+    const payload = z
+      .object({
+        name: z.string().trim().min(2).max(120).optional(),
+        email: z.string().trim().email().optional(),
+        role: z.enum(supportedStaffRoles).optional()
+      })
+      .refine((data) => Object.keys(data).length > 0, {
+        message: "Provide at least one field to update.",
+        path: []
+      })
+      .parse(req.body);
+
+    const existingUser = await prisma.user.findUnique({ where: { id: userId } });
+    if (!existingUser) {
+      return res.status(404).json({ message: "Staff user not found." });
+    }
+
+    if (payload.email && payload.email.toLowerCase() !== existingUser.email) {
+      const emailTaken = await prisma.user.findUnique({ where: { email: payload.email.toLowerCase() } });
+      if (emailTaken) {
+        return res.status(409).json({ message: "A staff account with that email already exists." });
+      }
+    }
+
+    const updatedUser = await prisma.user.update({
+      where: { id: userId },
+      data: {
+        name: payload.name?.trim(),
+        email: payload.email?.trim().toLowerCase(),
+        role: payload.role
+      },
+      select: {
+        id: true,
+        email: true,
+        name: true,
+        role: true,
+        last_login: true,
+        created_at: true,
+        updated_at: true
+      }
+    });
+
+    await prisma.auditLog.create({
+      data: {
+        user_id: currentUser.sub,
+        action: "update",
+        entity: "user",
+        entity_id: updatedUser.id,
+        old_value: {
+          name: existingUser.name,
+          email: existingUser.email,
+          role: existingUser.role
+        },
+        new_value: {
+          name: updatedUser.name,
+          email: updatedUser.email,
+          role: updatedUser.role
+        }
+      }
+    });
+
+    return res.json({
+      user: {
+        ...updatedUser,
+        last_login: updatedUser.last_login ? updatedUser.last_login.toISOString() : null,
+        created_at: updatedUser.created_at.toISOString(),
+        updated_at: updatedUser.updated_at.toISOString()
+      }
+    });
+  } catch (error) {
+    return next(error);
+  }
+});
+
+app.post("/api/admin/users/:id/reset-password", async (req, res, next) => {
+  try {
+    const currentUser = requireRole(req, res, ["admin"]);
+    if (!currentUser) {
+      return;
+    }
+
+    const { password } = z.object({ password: z.string().min(8).max(128) }).parse(req.body);
+    const targetUser = await prisma.user.findUnique({
+      where: { id: req.params.id },
+      select: { id: true, name: true, email: true, role: true }
+    });
+    if (!targetUser) {
+      return res.status(404).json({ message: "Staff user not found." });
+    }
+
+    await prisma.user.update({
+      where: { id: targetUser.id },
+      data: { password_hash: await bcrypt.hash(password, 10) },
+      select: { id: true }
+    });
+
+    await prisma.auditLog.create({
+      data: createPasswordResetAuditLog(currentUser.sub, targetUser.id, targetUser.name)
+    });
+
+    return res.json({
+      message: "Password reset.",
+      user: targetUser
+    });
   } catch (error) {
     return next(error);
   }

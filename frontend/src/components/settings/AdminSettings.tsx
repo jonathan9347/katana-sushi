@@ -1,12 +1,12 @@
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { PencilLine, Plus, Power, Search, X } from "lucide-react";
+import { KeyRound, PencilLine, Plus, Search, X } from "lucide-react";
 import { useToast } from "../../hooks/useToast";
 import { fetchActivityLogs, type ActivityLogItem } from "../../lib/activityLogs";
 import {
   createStaffUser,
-  deactivateStaffUser,
   fetchStaffUsers,
+  resetStaffUserPassword,
   updateStaffUser,
   type StaffUser
 } from "../../lib/adminUsers";
@@ -102,9 +102,11 @@ export default function AdminSettings({ activeTab }: { activeTab: "users" | "act
   const queryClient = useQueryClient();
   const { toast } = useToast();
   const [searchTerm, setSearchTerm] = useState("");
+  const [roleFilter, setRoleFilter] = useState("all");
   const [activityPage, setActivityPage] = useState(1);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [editingUserId, setEditingUserId] = useState<string | null>(null);
+  const [resetPassword, setResetPassword] = useState("");
   const [form, setForm] = useState({
     name: "",
     email: "",
@@ -131,20 +133,18 @@ export default function AdminSettings({ activeTab }: { activeTab: "users" | "act
 
   const filteredUsers = useMemo(() => {
     const normalizedQuery = searchTerm.trim().toLowerCase();
-    if (!normalizedQuery) {
-      return users;
-    }
-
     return users.filter((user) => {
-      const nameMatch = user.name.toLowerCase().includes(normalizedQuery);
-      const emailMatch = user.email.toLowerCase().includes(normalizedQuery);
-      return nameMatch || emailMatch;
+      const nameMatch = !normalizedQuery || user.name.toLowerCase().includes(normalizedQuery);
+      const emailMatch = !normalizedQuery || user.email.toLowerCase().includes(normalizedQuery);
+      const roleMatch = roleFilter === "all" || user.role === roleFilter;
+      return roleMatch && (nameMatch || emailMatch);
     });
-  }, [searchTerm, users]);
+  }, [roleFilter, searchTerm, users]);
 
   const openAddDrawer = () => {
     setEditingUserId(null);
     setForm({ name: "", email: "", role: "staff", password: "" });
+    setResetPassword("");
     setDrawerOpen(true);
   };
 
@@ -152,6 +152,7 @@ export default function AdminSettings({ activeTab }: { activeTab: "users" | "act
     setDrawerOpen(false);
     setEditingUserId(null);
     setForm({ name: "", email: "", role: "staff", password: "" });
+    setResetPassword("");
   };
 
   const upsertUserMutation = useMutation({
@@ -159,19 +160,14 @@ export default function AdminSettings({ activeTab }: { activeTab: "users" | "act
       const payload = {
         name: form.name.trim(),
         email: form.email.trim(),
-        role: form.role,
-        ...(editingUserId
-          ? form.password.trim()
-            ? { password: form.password.trim() }
-            : {}
-          : { password: form.password.trim() })
+        role: form.role
       };
 
       if (editingUserId) {
         return updateStaffUser(editingUserId, payload);
       }
 
-      return createStaffUser(payload);
+      return createStaffUser({ ...payload, password: form.password.trim() });
     },
     onSuccess: () => {
       toast(editingUserId ? "Staff user updated successfully." : "Staff user added successfully.");
@@ -184,15 +180,18 @@ export default function AdminSettings({ activeTab }: { activeTab: "users" | "act
     }
   });
 
-  const deactivateUserMutation = useMutation({
-    mutationFn: (userId: string) => deactivateStaffUser(userId),
-    onSuccess: () => {
-      toast("Staff user deactivated.");
+  const resetPasswordMutation = useMutation({
+    mutationFn: ({ userId, password }: { userId: string; password: string }) =>
+      resetStaffUserPassword(userId, password),
+    onSuccess: (_user, variables) => {
+      const target = users.find((user) => user.id === variables.userId);
+      toast(`Password reset for ${target?.name ?? "staff user"}.`);
+      setResetPassword("");
       queryClient.invalidateQueries({ queryKey: ["admin", "users"] });
       queryClient.invalidateQueries({ queryKey: ["admin", "activity-logs"] });
     },
     onError: (error: any) => {
-      toast(error?.response?.data?.message ?? "Unable to deactivate staff user.");
+      toast(error?.response?.data?.message ?? "Unable to reset password.");
     }
   });
 
@@ -221,16 +220,30 @@ export default function AdminSettings({ activeTab }: { activeTab: "users" | "act
           <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div>
               <h3 className="text-lg font-semibold text-slate-900">Staff Users</h3>
-              <p className="text-sm text-slate-500">Manage active staff accounts and role assignments.</p>
+              <p className="text-sm text-slate-500">Manage staff accounts and role assignments.</p>
             </div>
-            <div className="relative w-full max-w-sm">
-              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-              <input
-                value={searchTerm}
-                onChange={(event) => setSearchTerm(event.target.value)}
-                className="w-full rounded-2xl border border-slate-300 bg-slate-50 py-2.5 pl-10 pr-4 text-sm text-slate-700 outline-none transition focus:border-red-300 focus:bg-white"
-                placeholder="Search by name or email"
-              />
+            <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row">
+              <div className="relative w-full sm:w-64">
+                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                <input
+                  value={searchTerm}
+                  onChange={(event) => setSearchTerm(event.target.value)}
+                  className="w-full rounded-md border border-slate-300 bg-white py-2.5 pl-10 pr-4 text-sm text-slate-700 outline-none focus:border-red-300"
+                  placeholder="Search by name or email"
+                  aria-label="Search staff users"
+                />
+              </div>
+              <select
+                aria-label="Filter by role"
+                value={roleFilter}
+                onChange={(event) => setRoleFilter(event.target.value)}
+                className="rounded-md border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-700 outline-none focus:border-red-300"
+              >
+                <option value="all">All roles</option>
+                {staffRoles.map((role) => (
+                  <option key={role} value={role}>{formatRole(role)}</option>
+                ))}
+              </select>
             </div>
           </div>
 
@@ -241,20 +254,19 @@ export default function AdminSettings({ activeTab }: { activeTab: "users" | "act
                   <th className="px-4 py-3 text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Name</th>
                   <th className="px-4 py-3 text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Email</th>
                   <th className="px-4 py-3 text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Role</th>
-                  <th className="px-4 py-3 text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Status</th>
                   <th className="px-4 py-3 text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-200 bg-white">
                 {usersQuery.isLoading ? (
                   <tr>
-                    <td className="px-4 py-8 text-center text-sm text-slate-500" colSpan={5}>
+                    <td className="px-4 py-8 text-center text-sm text-slate-500" colSpan={4}>
                       Loading staff users...
                     </td>
                   </tr>
                 ) : filteredUsers.length === 0 ? (
                   <tr>
-                    <td className="px-4 py-8 text-center text-sm text-slate-500" colSpan={5}>
+                    <td className="px-4 py-8 text-center text-sm text-slate-500" colSpan={4}>
                       No matching staff users found.
                     </td>
                   </tr>
@@ -279,15 +291,6 @@ export default function AdminSettings({ activeTab }: { activeTab: "users" | "act
                         </span>
                       </td>
                       <td className="px-4 py-3">
-                        <span
-                          className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${
-                            user.is_active ? "bg-emerald-100 text-emerald-700" : "bg-slate-200 text-slate-600"
-                          }`}
-                        >
-                          {user.is_active ? "Active" : "Inactive"}
-                        </span>
-                      </td>
-                      <td className="px-4 py-3">
                         <div className="flex items-center gap-2">
                           <button
                             type="button"
@@ -305,15 +308,6 @@ export default function AdminSettings({ activeTab }: { activeTab: "users" | "act
                             className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-600 transition hover:border-red-200 hover:bg-red-50 hover:text-red-700"
                           >
                             <PencilLine className="h-4 w-4" />
-                          </button>
-                          <button
-                            type="button"
-                            aria-label={`Deactivate ${user.name}`}
-                            onClick={() => deactivateUserMutation.mutate(user.id)}
-                            disabled={deactivateUserMutation.isPending}
-                            className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-600 transition hover:border-red-200 hover:bg-red-50 hover:text-red-700 disabled:cursor-not-allowed disabled:opacity-60"
-                          >
-                            <Power className="h-4 w-4" />
                           </button>
                         </div>
                       </td>
@@ -432,17 +426,43 @@ export default function AdminSettings({ activeTab }: { activeTab: "users" | "act
                 </select>
               </label>
 
-              <label className="block space-y-2 text-sm text-slate-700">
-                <span>{editingUserId ? "Password (optional)" : "Password"}</span>
+              {!editingUserId && <label className="block space-y-2 text-sm text-slate-700">
+                <span>Password</span>
                 <input
                   type="password"
                   value={form.password}
                   onChange={(event) => setForm((current) => ({ ...current, password: event.target.value }))}
                   className="w-full rounded-2xl border border-slate-300 bg-slate-50 px-4 py-3 outline-none transition focus:border-red-300 focus:bg-white"
-                  placeholder={editingUserId ? "Leave blank to keep current password" : "Minimum 8 characters"}
+                  placeholder="Minimum 8 characters"
                 />
-              </label>
+              </label>}
             </div>
+
+            {editingUserId && (
+              <section className="mt-8 border-t border-slate-200 pt-6" aria-labelledby="reset-password-title">
+                <h4 id="reset-password-title" className="text-base font-semibold text-slate-900">Reset password</h4>
+                <label className="mt-4 block space-y-2 text-sm text-slate-700">
+                  <span>New password</span>
+                  <input
+                    type="password"
+                    autoComplete="new-password"
+                    value={resetPassword}
+                    onChange={(event) => setResetPassword(event.target.value)}
+                    className="w-full rounded-md border border-slate-300 bg-white px-3 py-2.5 outline-none focus:border-red-300"
+                    placeholder="Minimum 8 characters"
+                  />
+                </label>
+                <Button
+                  type="button"
+                  className="mt-4"
+                  disabled={resetPassword.trim().length < 8 || resetPasswordMutation.isPending}
+                  onClick={() => resetPasswordMutation.mutate({ userId: editingUserId, password: resetPassword.trim() })}
+                >
+                  <KeyRound className="mr-2 h-4 w-4" />
+                  {resetPasswordMutation.isPending ? "Resetting..." : "Reset password"}
+                </Button>
+              </section>
+            )}
 
             <div className="mt-8 flex items-center justify-end gap-3">
               <Button type="button" variant="outline" onClick={closeDrawer}>
