@@ -109,7 +109,7 @@ export async function updateDashboardBooking(
       await api.put(`/api/staff/reservations/${encodeURIComponent(notification.id)}/approve`, {});
     } else {
       await api.put(`/api/staff/reservations/${encodeURIComponent(notification.id)}/reject`, {
-        rejected_reason: "Declined from staff dashboard."
+        rejected_reason: "Declined from dashboard."
       });
     }
     return;
@@ -122,7 +122,7 @@ export async function updateDashboardBooking(
       });
     } else {
       await api.put(`/api/staff/catering/reservations/${encodeURIComponent(notification.id)}/decline`, {
-        reason: "Declined from staff dashboard."
+        reason: "Declined from dashboard."
       });
     }
     return;

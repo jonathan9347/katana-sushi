@@ -195,6 +195,7 @@ export default function StaffDashboard() {
   const notifications = notificationsQuery.data?.notifications ?? [];
   const approvedDates = new Set(calendarQuery.data ?? []);
   const role = user?.role ?? "staff";
+  const displayRole = role === "staff" ? "TEAM MEMBER" : role.replace(/_/g, " ").toUpperCase();
 
   return (
     <main className="staff-dashboard min-h-screen w-full bg-[#f8f5f7] p-4 pb-24 md:p-6 lg:p-8 min-[1100px]:h-screen min-[1100px]:overflow-hidden">
@@ -202,9 +203,9 @@ export default function StaffDashboard() {
         <div className="min-w-0 space-y-5 min-[1100px]:min-h-0 min-[1100px]:overflow-y-auto min-[1100px]:pb-8 min-[1100px]:pr-1">
           <header className="flex flex-col justify-between gap-4 sm:flex-row sm:items-end">
             <div className="min-w-0">
-              <p className="text-xs font-bold uppercase tracking-[0.18em] text-red-800">Staff portal</p>
+              <p className="text-xs font-bold uppercase tracking-[0.18em] text-red-800">Operations</p>
               <h1 className="mt-1 text-3xl font-black tracking-tight text-slate-950 sm:text-4xl">
-                Welcome back, {user?.name ?? "Staff"}
+                Welcome back, {user?.name ?? "Team member"}
               </h1>
               <p className="mt-2 text-xs text-slate-500" aria-live="polite">
                 {updatedAt ? `Last updated ${new Intl.DateTimeFormat("en-PH", { hour: "numeric", minute: "2-digit" }).format(updatedAt)}` : "Loading dashboard data"}
@@ -212,7 +213,7 @@ export default function StaffDashboard() {
             </div>
             <div className="flex items-center gap-3">
               <span className="rounded-full bg-amber-100 px-3 py-2 text-xs font-bold text-amber-900">
-                Role · {role.replace(/_/g, " ").toUpperCase()}
+                Role · {displayRole}
               </span>
               <Link
                 to="/staff/settings"
@@ -372,7 +373,7 @@ export default function StaffDashboard() {
             <header className="flex shrink-0 items-center justify-between gap-3 border-b border-slate-100 px-5 py-4">
               <div>
                 <h2 className="text-lg font-bold text-slate-950">Notifications</h2>
-                <p className="text-sm text-slate-500">Staff updates</p>
+                <p className="text-sm text-slate-500">Updates</p>
               </div>
               <span className="rounded-full bg-amber-100 px-3 py-2 text-xs font-bold text-amber-900">
                 {notificationsQuery.isError ? "—" : notificationsQuery.data?.total ?? "…"} pending

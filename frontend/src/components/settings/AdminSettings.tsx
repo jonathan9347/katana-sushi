@@ -16,6 +16,10 @@ import { Card, CardContent, CardHeader, CardTitle } from "../ui/card";
 const staffRoles = ["admin", "inventory_manager", "cashier", "receptionist", "event_coordinator", "chef", "staff"];
 
 function formatRole(role: string) {
+  if (role === "staff") {
+    return "Team member";
+  }
+
   return role
     .split("_")
     .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
@@ -170,13 +174,13 @@ export default function AdminSettings({ activeTab }: { activeTab: "users" | "act
       return createStaffUser({ ...payload, password: form.password.trim() });
     },
     onSuccess: () => {
-      toast(editingUserId ? "Staff user updated successfully." : "Staff user added successfully.");
+      toast(editingUserId ? "User updated successfully." : "User added successfully.");
       closeDrawer();
       queryClient.invalidateQueries({ queryKey: ["admin", "users"] });
       queryClient.invalidateQueries({ queryKey: ["admin", "activity-logs"] });
     },
     onError: (error: any) => {
-      toast(error?.response?.data?.message ?? `Unable to ${editingUserId ? "update" : "add"} staff user.`);
+      toast(error?.response?.data?.message ?? `Unable to ${editingUserId ? "update" : "add"} user.`);
     }
   });
 
@@ -185,7 +189,7 @@ export default function AdminSettings({ activeTab }: { activeTab: "users" | "act
       resetStaffUserPassword(userId, password),
     onSuccess: (_user, variables) => {
       const target = users.find((user) => user.id === variables.userId);
-      toast(`Password reset for ${target?.name ?? "staff user"}.`);
+      toast(`Password reset for ${target?.name ?? "user"}.`);
       setResetPassword("");
       queryClient.invalidateQueries({ queryKey: ["admin", "users"] });
       queryClient.invalidateQueries({ queryKey: ["admin", "activity-logs"] });
@@ -206,12 +210,12 @@ export default function AdminSettings({ activeTab }: { activeTab: "users" | "act
       {activeTab === "users" && <CardHeader>
         <div className="flex items-center justify-between gap-3">
           <div className="flex items-center gap-3 text-red-700">
-            <span aria-hidden="true">Staff</span>
+            <span aria-hidden="true">Users</span>
             <CardTitle className="ml-2">User Management</CardTitle>
           </div>
           <Button type="button" variant="default" onClick={openAddDrawer}>
             <Plus className="mr-2 h-4 w-4" />
-            Add Staff User
+            Add user
           </Button>
         </div>
       </CardHeader>}
@@ -219,8 +223,8 @@ export default function AdminSettings({ activeTab }: { activeTab: "users" | "act
         {activeTab === "users" && <section>
           <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div>
-              <h3 className="text-lg font-semibold text-slate-900">Staff Users</h3>
-              <p className="text-sm text-slate-500">Manage staff accounts and role assignments.</p>
+              <h3 className="text-lg font-semibold text-slate-900">Users</h3>
+              <p className="text-sm text-slate-500">Manage accounts and role assignments.</p>
             </div>
             <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row">
               <div className="relative w-full sm:w-64">
@@ -230,7 +234,7 @@ export default function AdminSettings({ activeTab }: { activeTab: "users" | "act
                   onChange={(event) => setSearchTerm(event.target.value)}
                   className="w-full rounded-md border border-slate-300 bg-white py-2.5 pl-10 pr-4 text-sm text-slate-700 outline-none focus:border-red-300"
                   placeholder="Search by name or email"
-                  aria-label="Search staff users"
+                  aria-label="Search users"
                 />
               </div>
               <select
@@ -261,13 +265,13 @@ export default function AdminSettings({ activeTab }: { activeTab: "users" | "act
                 {usersQuery.isLoading ? (
                   <tr>
                     <td className="px-4 py-8 text-center text-sm text-slate-500" colSpan={4}>
-                      Loading staff users...
+                      Loading users...
                     </td>
                   </tr>
                 ) : filteredUsers.length === 0 ? (
                   <tr>
                     <td className="px-4 py-8 text-center text-sm text-slate-500" colSpan={4}>
-                      No matching staff users found.
+                      No matching users found.
                     </td>
                   </tr>
                 ) : (
@@ -323,7 +327,7 @@ export default function AdminSettings({ activeTab }: { activeTab: "users" | "act
           <div className="mb-4 flex items-center justify-between gap-3">
             <div>
               <h3 className="text-lg font-semibold text-slate-900">User Activity Log</h3>
-              <p className="text-sm text-slate-500">Latest staff actions and system events.</p>
+              <p className="text-sm text-slate-500">Recent activity and system events.</p>
             </div>
           </div>
 
@@ -374,9 +378,9 @@ export default function AdminSettings({ activeTab }: { activeTab: "users" | "act
           >
             <div className="flex items-center justify-between gap-3">
               <div>
-                <p className="text-xs font-semibold uppercase tracking-[0.25em] text-red-700">Staff</p>
+                <p className="text-xs font-semibold uppercase tracking-[0.25em] text-red-700">Users</p>
                 <h3 className="mt-2 text-2xl font-black text-slate-950">
-                  {editingUserId ? "Edit Staff User" : "Add Staff User"}
+                  {editingUserId ? "Edit user" : "Add user"}
                 </h3>
               </div>
               <button
@@ -473,7 +477,7 @@ export default function AdminSettings({ activeTab }: { activeTab: "users" | "act
                 disabled={!canSubmitUser || upsertUserMutation.isPending}
                 onClick={() => upsertUserMutation.mutate()}
               >
-                {upsertUserMutation.isPending ? "Saving..." : editingUserId ? "Update Staff User" : "Save Staff User"}
+                {upsertUserMutation.isPending ? "Saving..." : editingUserId ? "Update user" : "Save user"}
               </Button>
             </div>
           </div>

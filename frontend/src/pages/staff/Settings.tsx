@@ -7,7 +7,7 @@ type SettingsTab = "users" | "activity";
 export default function Settings() {
   const { user } = useAuth();
   const role = user?.role ?? "staff";
-  const displayRole = role.replace("_", " ").toUpperCase();
+  const displayRole = role === "staff" ? "TEAM MEMBER" : role.replace("_", " ").toUpperCase();
   const [activeTab, setActiveTab] = useState<SettingsTab>("users");
 
   return (

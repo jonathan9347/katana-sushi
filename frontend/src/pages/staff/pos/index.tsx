@@ -840,7 +840,7 @@ export default function PosPage() {
         <h1 className="text-2xl font-semibold text-slate-950">POS access required</h1>
         <p className="max-w-md text-slate-600">Sign in with an admin or cashier account to use the POS.</p>
         <Link className="text-red-700 underline" to="/staff/login">
-          Go to staff login
+          Sign in
         </Link>
       </main>
     );

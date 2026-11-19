@@ -40,6 +40,7 @@ async function setStaffRole(page: Page, role: string) {
 test("inventory has three primary tabs and keeps stock tools under Stock", async ({ page }) => {
   await setStaffRole(page, "admin");
   await page.goto("/staff/inventory");
+  await expect(page.locator("body")).not.toContainText(/\bstaff\b/i);
 
   const navigation = page.getByRole("navigation", { name: "Section navigation" });
   await expect(navigation.getByRole("button")).toHaveCount(3);
@@ -230,7 +231,7 @@ test("Movements shows only approved categories and maps legacy action names", as
           note: null,
           raw_material: { id: "material-1", name: "Rice", unit: "g" },
           batch: null,
-          actor: { name: "Staff" }
+          actor: { name: "Alex Rivera" }
         })),
         pagination: { page: 1, limit: 100, total: 5, pages: 1 }
       }

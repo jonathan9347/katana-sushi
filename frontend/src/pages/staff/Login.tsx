@@ -127,7 +127,7 @@ export default function Login() {
 
   return (
     <main className="staff-login-page">
-      <section className="staff-login-brand" aria-label="Katana Sushi staff portal">
+      <section className="staff-login-brand" aria-label="Katana Sushi sign-in">
         <div className="staff-login-sun" aria-hidden="true" />
         <div className="staff-login-waves" aria-hidden="true" />
         <div className="staff-login-brand-inner">
@@ -145,7 +145,7 @@ export default function Login() {
             )}
             <div>
               <p className="staff-login-brand-name">Katana Sushi</p>
-              <p className="staff-login-brand-subtitle">Staff portal</p>
+              <p className="staff-login-brand-subtitle">Team sign-in</p>
             </div>
           </div>
 
@@ -170,7 +170,7 @@ export default function Login() {
           <div className="staff-login-card-heading">
             <span className="staff-login-card-kicker">Welcome back</span>
             <h2>Sign in to your account</h2>
-            <p>Use your staff credentials to continue.</p>
+            <p>Use your account credentials to continue.</p>
           </div>
 
           <form onSubmit={handleSubmit} noValidate>

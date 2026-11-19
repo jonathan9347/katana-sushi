@@ -283,7 +283,7 @@ export default function CateringReservations() {
     setActionLoading((current) => ({ ...current, [reservation.id]: true }));
     try {
       await api.put(`/api/staff/catering/reservations/${reservation.id}/cancel`, {
-        reason: cancelReason || "Staff cancelled the catering reservation."
+        reason: cancelReason || "Cancelled from the dashboard."
       });
       setCancelTarget(null);
       setCancelReason("");
@@ -391,7 +391,7 @@ export default function CateringReservations() {
                 label: "Cancel event",
                 onClick: () => {
                   setCancelTarget(activeReservation);
-                  setCancelReason("Staff cancelled the catering reservation.");
+                  setCancelReason("Cancelled from the dashboard.");
                 },
                 variant: "danger" as const,
                 disabled: actionLoading[activeReservation.id]

@@ -202,7 +202,7 @@ export default function DineInReservations() {
       <section className="mx-auto w-full max-w-5xl">
         <header className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-xl bg-white px-5 py-4 shadow-sm">
           <div>
-            <p className="text-xs font-semibold uppercase tracking-wide text-red-700">Staff Reservations</p>
+            <p className="text-xs font-semibold uppercase tracking-wide text-red-700">Reservations</p>
             <h1 className="mt-1 text-2xl font-black text-slate-950">Upcoming {currentView}</h1>
           </div>
           <Button type="button" variant="outline" onClick={() => setCalendarOpen(true)}>

@@ -2757,7 +2757,7 @@ app.post("/api/admin/users", async (req, res, next) => {
 
     const existingUser = await prisma.user.findUnique({ where: { email: body.email.toLowerCase() } });
     if (existingUser) {
-      return res.status(409).json({ message: "A staff account with that email already exists." });
+      return res.status(409).json({ message: "A user account with that email already exists." });
     }
 
     const actor = await prisma.user.findUnique({ where: { id: currentUser.sub } });
@@ -2830,13 +2830,13 @@ app.put("/api/admin/users/:id", async (req, res, next) => {
 
     const existingUser = await prisma.user.findUnique({ where: { id: userId } });
     if (!existingUser) {
-      return res.status(404).json({ message: "Staff user not found." });
+      return res.status(404).json({ message: "User not found." });
     }
 
     if (payload.email && payload.email.toLowerCase() !== existingUser.email) {
       const emailTaken = await prisma.user.findUnique({ where: { email: payload.email.toLowerCase() } });
       if (emailTaken) {
-        return res.status(409).json({ message: "A staff account with that email already exists." });
+        return res.status(409).json({ message: "A user account with that email already exists." });
       }
     }
 
@@ -2903,7 +2903,7 @@ app.post("/api/admin/users/:id/reset-password", async (req, res, next) => {
       select: { id: true, name: true, email: true, role: true }
     });
     if (!targetUser) {
-      return res.status(404).json({ message: "Staff user not found." });
+      return res.status(404).json({ message: "User not found." });
     }
 
     await prisma.user.update({

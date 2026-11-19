@@ -44,7 +44,7 @@ export default function InventoryPage({ readOnly = false }: { readOnly?: boolean
         <h1 className="text-2xl font-semibold text-slate-950">Inventory access required</h1>
         <p className="max-w-md text-slate-600">Sign in with an admin or inventory manager account to manage stock.</p>
         <Link className="text-red-700 underline" to="/staff/login">
-          Go to staff login
+          Sign in
         </Link>
       </main>
     );
@@ -55,7 +55,7 @@ export default function InventoryPage({ readOnly = false }: { readOnly?: boolean
       <div className="grid w-full gap-5">
         <div className="flex flex-col gap-2 md:flex-row md:items-end md:justify-between">
           <div>
-            <p className="text-sm font-medium uppercase text-red-700">Staff</p>
+            <p className="text-sm font-medium uppercase text-red-700">Inventory</p>
             <h1 className="text-3xl font-semibold text-slate-950">Inventory Management</h1>
           </div>
           <p className="text-sm text-slate-500">Signed in as {role.replace("_", " ")}</p>

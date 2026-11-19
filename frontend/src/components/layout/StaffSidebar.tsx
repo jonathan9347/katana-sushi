@@ -61,6 +61,7 @@ export default function StaffSidebar() {
   const navigate = useNavigate();
   const role = (localStorage.getItem("katana_role") ?? "staff").toLowerCase();
   const user = getStoredUser();
+  const displayRole = role === "staff" ? "Team member" : role.replace("_", " ");
   const visibleItems = menuItems.filter((item) => canSee(item, role));
   const topItems = visibleItems.filter((item) => item.label !== "Settings");
   const bottomItems = visibleItems.filter((item) => item.label === "Settings");
@@ -112,8 +113,8 @@ export default function StaffSidebar() {
               {profileOpen && (
                 <div className="absolute left-full bottom-0 z-[120] ml-3 w-56 rounded-lg border border-slate-200 bg-white p-2 shadow-xl">
                   <div className="border-b border-slate-200 px-3 py-2">
-                    <p className="truncate text-sm font-black text-slate-950">{user.name ?? "Staff User"}</p>
-                    <p className="truncate text-xs text-slate-500">{role.replace("_", " ")}</p>
+                    <p className="truncate text-sm font-black text-slate-950">{user.name ?? "User"}</p>
+                    <p className="truncate text-xs text-slate-500">{displayRole}</p>
                   </div>
                   <button onClick={logout} className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm font-semibold text-red-700 hover:bg-red-50">
                     <LogOut className="h-4 w-4" /> Logout
@@ -147,7 +148,7 @@ export function PlaceholderStaffPage({ title, icon: Icon = Lock }: { title: stri
       <section className="mx-auto max-w-5xl rounded-lg border border-slate-200 bg-white p-8 shadow-sm">
         <Icon className="h-8 w-8 text-red-700" />
         <h1 className="mt-4 text-2xl font-black text-slate-950">{title}</h1>
-        <p className="mt-2 text-sm text-slate-600">This category is reachable from the minimalist staff sidebar.</p>
+        <p className="mt-2 text-sm text-slate-600">This category is reachable from the navigation.</p>
       </section>
     </main>
   );

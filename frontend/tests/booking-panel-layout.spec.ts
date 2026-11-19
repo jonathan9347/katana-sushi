@@ -1104,7 +1104,10 @@ test("table booking checks manual time changes and keeps the configured guest li
 test("staff login remains outside the customer navigation layout", async ({ page }) => {
   await page.goto("/staff/login");
 
-  await expect(page.getByText("Staff portal")).toBeVisible();
+  await expect(page.getByText("Team sign-in")).toBeVisible();
+  await expect(page.getByRole("region", { name: "Katana Sushi sign-in" })).toBeVisible();
+  await expect(page.getByRole("region", { name: /staff/i })).toHaveCount(0);
+  await expect(page.locator("body")).not.toContainText(/\bstaff\b/i);
   await expect(page.getByRole("img", { name: "Katana Sushi logo" })).toHaveAttribute("src", "/images/katana-logo.jpg");
   await expect(page.getByTestId("staff-login-card")).toHaveCSS("border-radius", "0px");
   await expect(page.locator(".customer-app")).toHaveCount(0);

@@ -90,7 +90,7 @@ export default function InventoryMovements() {
 
   const csv = useMemo(() => {
     const rows = [
-      ["Date", "Material", "Batch", "Booking/reference", "Source", "Action", "Quantity", "On hand before", "On hand after", "Staff", "Note"],
+      ["Date", "Material", "Batch", "Booking/reference", "Source", "Action", "Quantity", "On hand before", "On hand after", "Handled by", "Note"],
       ...visibleMovements.map(({ movement, category }) => [
         new Date(movement.created_at).toLocaleString(),
         movement.raw_material.name,

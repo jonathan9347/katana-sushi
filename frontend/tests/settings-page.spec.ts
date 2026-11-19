@@ -22,7 +22,7 @@ async function mockSettingsApi(page: import("@playwright/test").Page) {
         json: {
           users: [{
             id: "staff-1",
-            name: "Alex Staff",
+            name: "Alex Rivera",
             email: "alex@example.test",
             role: "cashier",
             last_login: null,
@@ -50,7 +50,7 @@ async function mockSettingsApi(page: import("@playwright/test").Page) {
       await route.fulfill({
         json: {
           message: "Password reset.",
-          user: { id: "staff-1", name: "Alex Staff", email: "alex@example.test", role: "cashier" }
+          user: { id: "staff-1", name: "Alex Rivera", email: "alex@example.test", role: "cashier" }
         }
       });
       return;
@@ -81,6 +81,7 @@ test("admin Settings has Users and Activity log tabs with one view at a time", a
   await expect(page.getByRole("heading", { name: "Settings", exact: true })).toBeVisible();
   await expect(page.getByText("ADMIN", { exact: true })).toBeVisible();
   await expect(page.getByRole("tab", { name: "Users" })).toHaveAttribute("aria-selected", "true");
+  await expect(page.locator("body")).not.toContainText(/\bstaff\b/i);
   await expect(page.getByRole("heading", { name: "User Management" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "User Activity Log" })).toHaveCount(0);
 
@@ -117,16 +118,26 @@ test("Users filters by role and has no status or deactivation controls", async (
 
   await page.getByLabel("Filter by role").selectOption("inventory_manager");
   await expect(page.getByText("Jordan Manager")).toBeVisible();
-  await expect(page.getByText("Alex Staff")).toHaveCount(0);
+  await expect(page.getByText("Alex Rivera")).toHaveCount(0);
   await expect(page.getByRole("columnheader", { name: "Status" })).toHaveCount(0);
   await expect(page.getByRole("button", { name: /Deactivate/ })).toHaveCount(0);
+});
+
+test("the legacy staff role is displayed as Team member", async ({ page }) => {
+  await setUser(page, "admin");
+  await mockSettingsApi(page);
+  await page.goto("/staff/settings");
+  await page.getByRole("button", { name: "Add user" }).click();
+
+  await expect(page.getByRole("option", { name: "Team member" })).toHaveCount(2);
+  await expect(page.locator("body")).not.toContainText(/\bstaff\b/i);
 });
 
 test("admin reset-password action submits the new password but never displays it in the response", async ({ page }) => {
   await setUser(page, "admin");
   await mockSettingsApi(page);
   await page.goto("/staff/settings");
-  await page.getByRole("button", { name: "Edit Alex Staff" }).click();
+  await page.getByRole("button", { name: "Edit Alex Rivera" }).click();
 
   const resetRequest = page.waitForRequest((request) =>
     request.url().includes("/api/admin/users/staff-1/reset-password") && request.method() === "POST"
@@ -142,7 +153,7 @@ test("admin reset-password action submits the new password but never displays it
   const responseBody = await (await resetResponse).json();
   expect(responseBody).toEqual({
     message: "Password reset.",
-    user: { id: "staff-1", name: "Alex Staff", email: "alex@example.test", role: "cashier" }
+    user: { id: "staff-1", name: "Alex Rivera", email: "alex@example.test", role: "cashier" }
   });
   expect(JSON.stringify(responseBody)).not.toContain("NewStaffPassword123!");
   await expect(page.getByLabel("New password")).toHaveValue("");

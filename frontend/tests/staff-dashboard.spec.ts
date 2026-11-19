@@ -114,6 +114,7 @@ test("dashboard renders database-backed cards and notification actions", async (
   await page.goto("/staff/dashboard");
 
   await expect(page.getByRole("heading", { name: "Welcome back, Dashboard Tester" })).toBeVisible();
+  await expect(page.locator("body")).not.toContainText(/\bstaff\b/i);
   await expect(page.getByText("₱1,590.00")).toBeVisible();
   await expect(page.getByText("#KTN-006")).toBeVisible();
   await expect(page.getByText("Rice")).toBeVisible();

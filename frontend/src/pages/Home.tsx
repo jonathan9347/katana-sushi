@@ -19,7 +19,7 @@ export default function Home() {
           Catering Inquiry
         </Link>
         <Link to="/staff/login" className="rounded-md border border-red-200 bg-red-50 px-4 py-2 font-medium text-red-700 hover:bg-red-100">
-          Staff Login
+          Team Sign In
         </Link>
       </div>
     </main>
