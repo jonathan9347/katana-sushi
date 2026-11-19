@@ -110,6 +110,7 @@ async function createOrder(input: {
       customer_phone: "09123456789",
       status: input.status,
       payment_plan: "pay_at_pickup",
+      pickup_time: "2030-10-28T05:00:00.000Z",
       payment_status: input.paymentStatus,
       payment_method: null,
       subtotal: 20,
@@ -196,12 +197,14 @@ test("new pickup orders do not lock stock and online payment is rejected", async
   });
   assert.equal(accepted.status, 201, await accepted.clone().text());
   const acceptedBody = await accepted.json() as {
-    order: { order_number: string; status: string; payment_status: string; ready_at: string | null };
+    order: { order_number: string; status: string; payment_status: string; ready_at: string | null; pickup_time: string };
     payment: unknown;
   };
   assert.equal(acceptedBody.order.status, "pending_approval");
   assert.equal(acceptedBody.order.payment_status, "unpaid");
   assert.equal(acceptedBody.order.ready_at, null);
+  assert.equal(acceptedBody.order.pickup_time, "2030-10-28T05:00:00.000Z");
+  assert.equal((await prisma.takeoutOrder.findUniqueOrThrow({ where: { order_number: acceptedBody.order.order_number } })).pickup_time?.toISOString(), "2030-10-28T05:00:00.000Z");
   assert.equal(acceptedBody.payment, null);
   assert.equal(await prisma.takeoutIngredientLock.count({
     where: { order: { order_number: acceptedBody.order.order_number }, is_released: false }

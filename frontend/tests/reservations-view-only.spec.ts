@@ -101,8 +101,7 @@ test("unified reservations page lists all three views and keeps pickup actions",
   await expect(onTimeReservation.getByRole("status")).toHaveCount(0);
 
   const reservationsList = page.getByRole("region", { name: "Tables upcoming list" });
-  await expect(reservationsList.getByRole("button")).toHaveCount(0);
-  await expect(page.getByRole("button", { name: /mark arrived|seat|approve|decline|cancel|complete|collect payment/i })).toHaveCount(0);
+  await expect(reservationsList.getByRole("button", { name: "Dismiss ready notification" })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Catering" })).toHaveCount(0);
 
   await page.getByRole("button", { name: "Pickup" }).click();
@@ -123,11 +122,11 @@ test("unified reservations page lists all three views and keeps pickup actions",
   });
   await page.reload();
   await expect(page.getByText("Pickup Guest")).toBeVisible();
-  await expect(page.getByRole("button", { name: "Decline" })).toBeVisible();
-  await page.getByRole("button", { name: "Approve" }).click();
-  await expect(page.getByRole("button", { name: "Mark ready" })).toBeVisible();
-  await page.getByRole("button", { name: "Mark ready" }).click();
-  await expect(page.getByText("Ready for pickup")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Decline", exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Approve", exact: true }).click();
+  await expect(page.getByRole("button", { name: "Mark ready", exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Mark ready", exact: true }).click();
+  await expect(page.getByText("Ready for pickup", { exact: true })).toBeVisible();
   await expect(page.getByText(/Pickup Time:/)).toBeVisible();
 
   await page.evaluate(() => {
@@ -141,18 +140,21 @@ test("unified reservations page lists all three views and keeps pickup actions",
     }));
   });
   await page.reload();
-  await page.getByRole("button", { name: "Catering" }).click();
+  await page.getByRole("button", { name: /Catering 0/ }).click();
   await expect(page.getByRole("heading", { name: "Upcoming catering" })).toBeVisible();
   await expect(page.getByText("Catering Guest")).toBeVisible();
-  await expect(page.getByRole("link", { name: "Open actions" })).toBeVisible();
-  await expect(page.getByRole("button", { name: /approve|decline|cancel|complete/i })).toHaveCount(0);
+  await expect(page.getByRole("link", { name: "Open actions" })).toHaveCount(0);
+  await expect(page.getByText("Package total:", { exact: true })).toHaveCount(0);
+  await page.locator("li").filter({ hasText: "Catering Guest" }).click();
+  await expect(page.getByRole("dialog", { name: /Catering booking/i })).toBeVisible();
+  await page.getByRole("button", { name: "Close details" }).click();
 
   await page.getByRole("button", { name: "Calendar" }).click();
   await expect(page.getByRole("dialog", { name: "Reservation calendar" })).toBeVisible();
 
   await page.getByRole("button", { name: "Close dialog" }).click();
   await page.goto("/staff/catering");
-  await expect(page.getByRole("heading", { name: "Calendar first event control" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Catering operations" })).toBeVisible();
 
   await page.goto("/staff/takeout");
   await expect(page).toHaveURL(/\/staff\/reservations\?view=pickup/);

@@ -1,6 +1,6 @@
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
-import { Check, MapPin, Phone, Search, ShoppingBag, X } from "lucide-react";
-import { useNavigate } from "react-router-dom";
+import { Clock3, Copy, MapPin, Phone, Search, ShoppingBag, X } from "lucide-react";
+import { Link } from "react-router-dom";
 import BackToHome from "../../components/layout/BackToHome";
 import { api, resolveImageUrl } from "../../lib/api";
 import { formatTime12 } from "../../lib/dateTime";
@@ -29,6 +29,7 @@ type TakeoutOrderSummary = {
   payment_plan: "pay_now" | "pay_at_pickup";
   payment_status: string;
   ready_at?: string | null;
+  pickup_time?: string | null;
   subtotal: number;
   total: number;
   items: Array<{ name: string; quantity: number; unit_price: number; total_price: number }>;
@@ -52,6 +53,23 @@ function formatMoney(value: number) {
     currency: "PHP",
     maximumFractionDigits: 2
   }).format(value);
+}
+
+function isValidPickupTime(value: string) {
+  return /^([01]\d|2[0-3]):([0-5]\d)$/.test(value) && value >= "13:00" && value <= "21:00";
+}
+
+function pickupDateTime(value: string) {
+  const [hour, minute] = value.split(":").map(Number);
+  const parts = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Manila", year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(new Date());
+  const part = (name: string) => parts.find((entry) => entry.type === name)?.value ?? "";
+  return new Date(`${part("year")}-${part("month")}-${part("day")}T${value}:00+08:00`).toISOString();
+}
+
+function formatPickupDate(value: string) {
+  return new Intl.DateTimeFormat("en-PH", {
+    weekday: "long", hour: "numeric", minute: "2-digit", timeZone: "Asia/Manila"
+  }).format(new Date(value));
 }
 
 function getErrorMessage(error: unknown) {
@@ -83,7 +101,6 @@ function getCheckoutKey(signature: string) {
 }
 
 export default function TakeoutOrder() {
-  const navigate = useNavigate();
   const [products, setProducts] = useState<TakeoutProduct[]>([]);
   const [quantities, setQuantities] = useState<Record<string, number>>({});
   const [customerName, setCustomerName] = useState("");
@@ -98,6 +115,12 @@ export default function TakeoutOrder() {
   const [reservationRules, setReservationRules] = useState<ReservationRulesResponse | null>(null);
   const [reservationHoursError, setReservationHoursError] = useState("");
   const [pickupScrollActive, setPickupScrollActive] = useState(false);
+  const [pickupTime, setPickupTime] = useState("");
+  const [pickupTimeError, setPickupTimeError] = useState("");
+  const [successOrder, setSuccessOrder] = useState<{ order: TakeoutOrderSummary; phone: string } | null>(null);
+  const [referenceCopied, setReferenceCopied] = useState(false);
+  const successDialogRef = useRef<HTMLElement | null>(null);
+  const confirmButtonRef = useRef<HTMLButtonElement | null>(null);
   const pickupScrollTimer = useRef<number | null>(null);
 
   useEffect(() => {
@@ -140,6 +163,16 @@ export default function TakeoutOrder() {
     document.addEventListener("keydown", closeOnEscape);
     return () => document.removeEventListener("keydown", closeOnEscape);
   }, [contactDialogOpen]);
+
+  useEffect(() => {
+    if (!successOrder) return;
+    successDialogRef.current?.focus();
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") closeSuccess();
+    };
+    document.addEventListener("keydown", closeOnEscape);
+    return () => document.removeEventListener("keydown", closeOnEscape);
+  }, [successOrder]);
 
   useEffect(() => () => {
     if (pickupScrollTimer.current !== null) {
@@ -195,7 +228,8 @@ export default function TakeoutOrder() {
   }
 
   function openContactDialog() {
-    if (cart.length === 0 || submitting) return;
+    if (cart.length === 0 || !pickupTime || submitting) return;
+    confirmButtonRef.current = document.activeElement instanceof HTMLButtonElement ? document.activeElement : null;
     setContactErrors({});
     setCheckoutError("");
     setContactDialogOpen(true);
@@ -205,7 +239,7 @@ export default function TakeoutOrder() {
     event.preventDefault();
     setContactErrors({});
     setCheckoutError("");
-    if (cart.length === 0) {
+    if (cart.length === 0 || !pickupTime) {
       setContactDialogOpen(false);
       return;
     }
@@ -223,6 +257,7 @@ export default function TakeoutOrder() {
       customer_name: name,
       customer_phone: customerPhone,
       payment_plan: "pay_at_pickup",
+      pickup_time: pickupDateTime(pickupTime),
       items
     });
 
@@ -231,19 +266,39 @@ export default function TakeoutOrder() {
         customer_name: name,
         customer_phone: customerPhone,
         payment_plan: "pay_at_pickup",
+        pickup_time: pickupDateTime(pickupTime),
         idempotency_key: getCheckoutKey(signature),
         items
       });
       sessionStorage.removeItem("katana:takeout-checkout");
       setContactDialogOpen(false);
-      navigate(`/reservation/status?bookingId=${encodeURIComponent(response.data.order.order_number)}`, {
-        state: { pickupPhone: customerPhone }
-      });
+      setSuccessOrder({ order: response.data.order, phone: customerPhone });
     } catch (error) {
       setCheckoutError(getErrorMessage(error));
     } finally {
       setSubmitting(false);
     }
+  }
+
+  function selectPickupTime(value: string) {
+    if (!isValidPickupTime(value)) {
+      setPickupTime("");
+      setPickupTimeError("Pickup time must be between 1:00 PM and 9:00 PM.");
+      return;
+    }
+    setPickupTime(value);
+    setPickupTimeError("");
+  }
+
+  function closeSuccess() {
+    setSuccessOrder(null);
+    window.requestAnimationFrame(() => confirmButtonRef.current?.focus());
+  }
+
+  async function copyReference(reference: string) {
+    await navigator.clipboard.writeText(reference);
+    setReferenceCopied(true);
+    window.setTimeout(() => setReferenceCopied(false), 1800);
   }
 
   return (
@@ -380,7 +435,7 @@ export default function TakeoutOrder() {
                         : null}
                       hoursError={reservationHoursError}
                     />
-                    <PickupGoodToKnow empty />
+                    <PickupTimeCard value={pickupTime} error={pickupTimeError} onChange={selectPickupTime} />
                   </>
                 ) : (
                   <>
@@ -410,7 +465,7 @@ export default function TakeoutOrder() {
                         : null}
                       hoursError={reservationHoursError}
                     />
-                    <PickupGoodToKnow />
+                    <PickupTimeCard value={pickupTime} error={pickupTimeError} onChange={selectPickupTime} />
                     <p className="customer-pickup-note">
                       No payment is needed now. Please wait for staff approval before preparation begins.
                     </p>
@@ -423,10 +478,11 @@ export default function TakeoutOrder() {
                 <button
                   type="button"
                   className="customer-btn-primary w-full"
-                  disabled={submitting || cart.length === 0}
+                  ref={confirmButtonRef}
+                  disabled={submitting || cart.length === 0 || !pickupTime}
                   onClick={openContactDialog}
                 >
-                  Confirm pickup order
+                  {pickupTime ? "Confirm pickup order" : "Choose a pickup time"}
                 </button>
                 <p>You will be asked for your contact details next.</p>
                 {message && <p className="reservation-checkout-alert" role="alert">{message}</p>}
@@ -495,6 +551,7 @@ export default function TakeoutOrder() {
               <span>{cartItemCount} {cartItemCount === 1 ? "item" : "items"}, pay at counter</span>
               <strong>{formatMoney(total)}</strong>
             </div>
+            <p className="customer-pickup-contact-time">Pickup time: <strong>{formatTime12(pickupTime)}</strong></p>
             {checkoutError && <p className="reservation-checkout-alert" role="alert">{checkoutError}</p>}
             <button type="submit" className="customer-btn-primary w-full" disabled={submitting || cart.length === 0}>
               {submitting ? "Sending..." : "Send pickup order"}
@@ -503,6 +560,37 @@ export default function TakeoutOrder() {
               Back to order
             </button>
           </form>
+        </section>
+      </div>}
+      {successOrder && <div className="customer-pickup-success-backdrop" onMouseDown={(event) => {
+        if (event.target === event.currentTarget) closeSuccess();
+      }}>
+        <section className="customer-pickup-success" role="dialog" aria-modal="true" aria-labelledby="pickup-success-title" tabIndex={-1} ref={successDialogRef}>
+          <button type="button" className="customer-pickup-success-close" aria-label="Close dialog" onClick={closeSuccess}><X aria-hidden="true" /></button>
+          <div className="customer-pickup-success-icon"><Clock3 aria-hidden="true" /></div>
+          <p className="customer-pickup-success-eyebrow">Pickup order</p>
+          <h2 id="pickup-success-title">Your pickup order is sent.</h2>
+          <p className="customer-pickup-success-copy">Staff will review it shortly. Your order is not confirmed until it is approved.</p>
+          <div className="customer-pickup-reference-chip">
+            <strong>{successOrder.order.order_number}</strong>
+            <button type="button" onClick={() => void copyReference(successOrder.order.order_number)}><Copy aria-hidden="true" /> Copy</button>
+          </div>
+          {referenceCopied && <p className="customer-pickup-copy-message" role="status">Reference copied</p>}
+          <span className="customer-pickup-status-pill">Pending approval</span>
+          <div className="customer-pickup-success-details">
+            <PickupDetail label="Pickup time" value={formatPickupDate(successOrder.order.pickup_time ?? pickupDateTime(pickupTime))} />
+            <div className="customer-pickup-success-detail"><span>Items</span><strong>{successOrder.order.items.map((item) => `${item.quantity} × ${item.name}`).join(", ")}</strong></div>
+            <PickupDetail label="Total" value={formatMoney(successOrder.order.total)} />
+            <PickupDetail label="Payment" value={`${successOrder.order.payment_plan === "pay_at_pickup" ? "Pay at pickup" : successOrder.order.payment_plan} · ${successOrder.order.payment_status}`} />
+          </div>
+          <button type="button" className="customer-pickup-success-primary" onClick={() => {
+            setQuantities({});
+            setPickupTime("");
+            setPickupTimeError("");
+            setSuccessOrder(null);
+            window.requestAnimationFrame(() => confirmButtonRef.current?.focus());
+          }}>Make another order</button>
+          <Link className="customer-pickup-success-link" to={`/reservation/status?bookingId=${encodeURIComponent(successOrder.order.order_number)}`} state={{ pickupPhone: successOrder.phone }} onClick={() => setSuccessOrder(null)}>See order status →</Link>
         </section>
       </div>}
     </main>
@@ -540,24 +628,25 @@ function PickupLocation({
   );
 }
 
-function PickupGoodToKnow({ empty = false }: { empty?: boolean }) {
-  const notes = [
-    empty ? "Pay at the counter. No payment online." : "Show your name at the counter when you arrive.",
-    "Track approval and ready time on the Status page.",
-    "Need to change something? Contact the restaurant as soon as possible; pickup orders cannot be edited online.",
-    "Ingredients are reserved once staff approves your order."
-  ];
+function PickupTimeCard({ value, error, onChange }: { value: string; error: string; onChange: (value: string) => void }) {
+  const slots = Array.from({ length: 17 }, (_, index) => {
+    const minutes = 13 * 60 + index * 30;
+    return `${String(Math.floor(minutes / 60)).padStart(2, "0")}:${String(minutes % 60).padStart(2, "0")}`;
+  });
   return (
-    <section className="customer-pickup-good-to-know" aria-label="Good to know">
-      <p className="customer-pickup-section-label">Good to know</p>
-      <ul>
-        {notes.map((note) => (
-          <li key={note}>
-            <Check aria-hidden="true" />
-            <span>{note}</span>
-          </li>
-        ))}
-      </ul>
+    <section className="customer-pickup-time" aria-label="Pickup time">
+      <div className="customer-pickup-time-heading"><p className="customer-pickup-section-label">Pickup time</p><strong>{value ? formatTime12(value) : "Required"}</strong></div>
+      <div className="customer-pickup-time-grid" aria-label="Choose a pickup time">
+        {slots.map((slot) => <button type="button" key={slot} aria-pressed={value === slot} className={value === slot ? "is-selected" : ""} onClick={() => onChange(slot)}>{formatTime12(slot)}</button>)}
+      </div>
+      <label className="customer-pickup-custom-time"><span>Or choose another time</span><input type="time" min="13:00" max="21:00" step={900} value={value} onChange={(event) => onChange(event.target.value)} /></label>
+      <small className="customer-pickup-time-help">Pickup is available from 1:00 PM until 9:00 PM.</small>
+      {error && <small className="customer-pickup-time-error" role="alert">{error}</small>}
     </section>
   );
 }
+
+function PickupDetail({ label, value }: { label: string; value: string }) {
+  return <div className="customer-pickup-success-detail"><span>{label}</span><strong>{value}</strong></div>;
+}
+

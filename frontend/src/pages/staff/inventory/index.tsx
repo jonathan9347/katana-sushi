@@ -9,7 +9,7 @@ import MaterialsList from "./MaterialsList";
 import SellingProductsList from "./SellingProductsList";
 import WasteDisposal from "./WasteDisposal";
 import YieldEstimator from "./YieldEstimator";
-import { StaffRole } from "./types";
+import { MaterialBatch, StaffRole } from "./types";
 
 type InventoryTab = "stock" | "reservations" | "movements";
 type StockView = "materials" | "batches" | "waste" | "menu-products" | "yield";
@@ -34,9 +34,28 @@ export default function InventoryPage({ readOnly = false }: { readOnly?: boolean
   const [stockView, setStockView] = useState<StockView>("materials");
   const [materialsStockFilter, setMaterialsStockFilter] = useState<MaterialsStockFilter>("all");
   const [batchesExpiringOnly, setBatchesExpiringOnly] = useState(false);
+  const [wastePreload, setWastePreload] = useState<{
+    raw_material_id: string;
+    batch_id?: string;
+    quantity?: number;
+    reason?: "spoilage" | "expired" | "prep_waste" | "damaged" | "other";
+    notes?: string;
+  } | null>(null);
   const role = getStoredRole();
   const allowed = role === "admin" || role === "inventory_manager" || (readOnly && role === "chef");
   const visibleTabs = readOnly ? tabs.filter((tab) => tab.id === "stock") : tabs;
+
+  const handleQuickDispose = (batch: MaterialBatch) => {
+    setActiveTab("stock");
+    setStockView("waste");
+    setWastePreload({
+      raw_material_id: batch.raw_material.id,
+      batch_id: batch.id,
+      quantity: Number(batch.remaining_quantity) || 0,
+      reason: "expired",
+      notes: `Expired batch ${batch.batch_number} was disposed after review.`
+    });
+  };
 
   if (!allowed) {
     return (
@@ -78,7 +97,12 @@ export default function InventoryPage({ readOnly = false }: { readOnly?: boolean
                       <button
                         key={view}
                         type="button"
-                        onClick={() => setStockView(view)}
+                        onClick={() => {
+                          setStockView(view);
+                          if (view !== "waste") {
+                            setWastePreload(null);
+                          }
+                        }}
                         className={`rounded-md px-3 py-2 text-sm font-semibold ${stockView === view ? "bg-red-700 text-white" : "border border-slate-300 bg-white text-slate-700"}`}
                       >
                         {label}
@@ -94,11 +118,19 @@ export default function InventoryPage({ readOnly = false }: { readOnly?: boolean
                     initialStockFilter={materialsStockFilter}
                   />
                 )}
-                {stockView === "batches" &&                                 <BatchManagement
-                  initialExpiringOnly={batchesExpiringOnly}
-                  onExpiringOnlyChange={setBatchesExpiringOnly}
-                />}
-                {stockView === "waste" && <WasteDisposal />}
+                {stockView === "batches" && (
+                  <BatchManagement
+                    initialExpiringOnly={batchesExpiringOnly}
+                    onExpiringOnlyChange={setBatchesExpiringOnly}
+                    onQuickDispose={handleQuickDispose}
+                  />
+                )}
+                {stockView === "waste" && (
+                  <WasteDisposal
+                    initialForm={wastePreload ?? undefined}
+                    onPreloadConsumed={() => setWastePreload(null)}
+                  />
+                )}
                 {stockView === "menu-products" && !readOnly && <SellingProductsList role={role} />}
                 {stockView === "yield" && !readOnly && <YieldEstimator />}
               </div>

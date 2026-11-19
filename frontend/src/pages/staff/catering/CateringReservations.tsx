@@ -1,11 +1,13 @@
+
 import { useMemo, useState } from "react";
-import { Link } from "react-router-dom";
 import { CalendarDays, Sparkles } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../../../lib/api";
 import { formatManilaDate, formatTime12, manilaDateKey, todayManilaDateKey } from "../../../lib/dateTime";
 import { MiniCalendar } from "../../../components/ui/MiniCalendar";
 import { ReservationDetailsModal } from "../../../components/ui/ReservationDetailsModal";
+import { ReservationReceipt } from "../../../components/ui/ReservationReceipt";
+import { BookingDetailsDrawer } from "../../../components/ui/BookingDetailsDrawer";
 import { Button } from "../../../components/ui/button";
 import { Dialog } from "../../../components/ui/dialog";
 import { useToast } from "../../../hooks/useToast";
@@ -122,6 +124,8 @@ export default function CateringReservations() {
   const [calendarOpen, setCalendarOpen] = useState(false);
   const [statusFilter, setStatusFilter] = useState("open");
   const [activeReservation, setActiveReservation] = useState<CateringReservation | null>(null);
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [paymentModalOpen, setPaymentModalOpen] = useState(false);
   const [approvalTarget, setApprovalTarget] = useState<CateringReservation | null>(null);
   const [mobilizationFeeInput, setMobilizationFeeInput] = useState("0");
   const [cancelTarget, setCancelTarget] = useState<CateringReservation | null>(null);
@@ -129,7 +133,6 @@ export default function CateringReservations() {
   const [completionTarget, setCompletionTarget] = useState<CateringReservation | null>(null);
   const [actionLoading, setActionLoading] = useState<Record<string, boolean>>({});
   const { toast } = useToast();
-  const canEditPhotos = localStorage.getItem("katana_role")?.toLowerCase() === "admin";
 
   const query = useQuery<RawCateringReservation[]>({
     queryKey: ["staff-catering-reservations"],
@@ -215,6 +218,19 @@ export default function CateringReservations() {
     setCursor((current) => new Date(current.getFullYear(), current.getMonth() + delta, 1));
   }
 
+  function closeReservationPanels() {
+    setDrawerOpen(false);
+    setPaymentModalOpen(false);
+    setApprovalTarget(null);
+    setCancelTarget(null);
+    setCompletionTarget(null);
+    setActiveReservation(null);
+  }
+
+  const handleDrawerClose = () => {
+    closeReservationPanels();
+  };
+
   async function handleApprove() {
     if (!approvalTarget) return;
     const mobilizationFee = Number(mobilizationFeeInput.trim());
@@ -225,10 +241,15 @@ export default function CateringReservations() {
     setActionLoading((current) => ({ ...current, [approvalTarget.id]: true }));
     try {
       await api.put(`/api/staff/catering/reservations/${approvalTarget.id}/approve`, {
-        mobilization_fee: mobilizationFee
+        mobilization_fee: mobilizationFee,
+        mobilizationFee: mobilizationFee,
+        amount: mobilizationFee
       });
+      console.log("SUCCESS TRIGGERED", { action: "approve", reservationId: approvalTarget.id });
       await query.refetch();
-      setApprovalTarget(null);
+      console.log("CLOSING DRAWER", { action: "approve", reservationId: approvalTarget.id });
+      closeReservationPanels();
+      toast("Event approved successfully.");
     } catch (error) {
       toast(getApiErrorMessage(error, "Unable to approve the catering reservation."));
     } finally {
@@ -242,9 +263,14 @@ export default function CateringReservations() {
     setActionLoading((current) => ({ ...current, [reservation.id]: true }));
     try {
       await api.put(`/api/staff/catering/reservations/${reservation.id}/decline`, { reason: reason.trim() });
+      console.log("SUCCESS TRIGGERED", { action: "decline", reservationId: reservation.id });
       await query.refetch();
+      console.log("CLOSING DRAWER", { action: "decline", reservationId: reservation.id });
+      closeReservationPanels();
       if (Number(reservation.downpayment_amount ?? 0) > 0) {
         toast("Request declined. Any refund must be handled manually.");
+      } else {
+        toast("Catering request declined successfully.");
       }
     } catch (error) {
       toast(getApiErrorMessage(error, "Unable to decline the catering request."));
@@ -259,7 +285,11 @@ export default function CateringReservations() {
     setActionLoading((current) => ({ ...current, [reservation.id]: true }));
     try {
       await api.put(`/api/staff/catering/reservations/${reservation.id}/no-show`, { reason: reason.trim() });
+      console.log("SUCCESS TRIGGERED", { action: "no-show", reservationId: reservation.id });
       await query.refetch();
+      console.log("CLOSING DRAWER", { action: "no-show", reservationId: reservation.id });
+      closeReservationPanels();
+      toast("Catering booking marked as no-show.");
     } catch (error) {
       toast(getApiErrorMessage(error, "Unable to mark the catering reservation as a no-show."));
     } finally {
@@ -271,7 +301,11 @@ export default function CateringReservations() {
     setActionLoading((current) => ({ ...current, [reservation.id]: true }));
     try {
       await api.put(`/api/staff/catering/reservations/${reservation.id}/start-event`);
+      console.log("SUCCESS TRIGGERED", { action: "start-event", reservationId: reservation.id });
       await query.refetch();
+      console.log("CLOSING DRAWER", { action: "start-event", reservationId: reservation.id });
+      closeReservationPanels();
+      toast("Catering event started successfully.");
     } catch (error) {
       toast(getApiErrorMessage(error, "Unable to start catering preparation."));
     } finally {
@@ -285,9 +319,11 @@ export default function CateringReservations() {
       await api.put(`/api/staff/catering/reservations/${reservation.id}/cancel`, {
         reason: cancelReason || "Cancelled from the dashboard."
       });
-      setCancelTarget(null);
+      console.log("SUCCESS TRIGGERED", { action: "cancel", reservationId: reservation.id });
       setCancelReason("");
       await query.refetch();
+      console.log("CLOSING DRAWER", { action: "cancel", reservationId: reservation.id });
+      closeReservationPanels();
       toast("Catering reservation cancelled.");
     } catch (error) {
       toast(getApiErrorMessage(error, "Unable to cancel the catering reservation."));
@@ -316,7 +352,10 @@ export default function CateringReservations() {
       if (response.data.reservation?.status !== "completed") {
         throw new Error("The server did not mark this event as completed.");
       }
+      console.log("SUCCESS TRIGGERED", { action: "complete", reservationId: reservation.id });
       await query.refetch();
+      console.log("CLOSING DRAWER", { action: "complete", reservationId: reservation.id });
+      closeReservationPanels();
       toast("Catering event marked as completed.");
     } catch (error) {
       toast(getApiErrorMessage(error, "Unable to complete the catering event."));
@@ -333,14 +372,13 @@ export default function CateringReservations() {
     disabled?: boolean;
   }> = activeReservation
     ? [
-        ...(activeReservation.status === "pending_approval"
+        ...(["pending", "pending_approval"].includes(activeReservation.status)
           ? [
               {
                 label: "Approve event",
                 onClick: () => {
                   setMobilizationFeeInput("0");
                   setApprovalTarget(activeReservation);
-                  setActiveReservation(null);
                 },
                 variant: "default" as const,
                 disabled: actionLoading[activeReservation.id]
@@ -353,13 +391,12 @@ export default function CateringReservations() {
               }
             ]
           : []),
-        ...(activeReservation.status === "confirmed"
+        ...(["confirmed", "approved"].includes(activeReservation.status)
           ? [
               {
                 label: "Start event",
                 onClick: () => {
                   void handleStart(activeReservation);
-                  setActiveReservation(null);
                 },
                 variant: "outline" as const,
                 disabled: actionLoading[activeReservation.id]
@@ -372,20 +409,30 @@ export default function CateringReservations() {
               }
             ]
           : []),
-        ...(activeReservation.status === "in_progress" || activeReservation.status === "pending_final_payment"
+        ...(["in_progress", "preparing", "pending_final_payment"].includes(activeReservation.status)
           ? [
               {
                 label: "Complete event",
                 onClick: () => {
                   void handleComplete(activeReservation);
-                  setActiveReservation(null);
                 },
                 variant: "danger" as const,
                 disabled: actionLoading[activeReservation.id] || hasOpenPayment(activeReservation)
               }
             ]
           : []),
-        ...((activeReservation.status === "pending_approval" || activeReservation.status === "confirmed" || activeReservation.status === "in_progress" || activeReservation.status === "pending_final_payment")
+        ...(hasOpenPayment(activeReservation) && ["confirmed", "approved", "in_progress", "preparing", "pending_final_payment"].includes(activeReservation.status)
+          ? [{
+              label: "Record balance",
+              onClick: () => {
+                setDrawerOpen(false);
+                setPaymentModalOpen(true);
+              },
+              variant: "outline" as const,
+              disabled: actionLoading[activeReservation.id]
+            }]
+          : []),
+        ...((["pending", "pending_approval", "confirmed", "approved", "in_progress", "preparing", "pending_final_payment"].includes(activeReservation.status))
           ? [
               {
                 label: "Cancel event",
@@ -402,40 +449,32 @@ export default function CateringReservations() {
     : [];
 
   return (
-    <main className="min-h-screen bg-slate-100 p-4 lg:p-6">
-      <section className="w-full overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+    <main className="min-h-screen bg-[#f4f4f8] p-4 lg:p-6">
+      <section className="w-full overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm">
         <div className="flex flex-col gap-4 border-b border-slate-200 px-6 py-6 lg:flex-row lg:items-center lg:justify-between">
           <div>
             <p className="text-xs font-semibold uppercase tracking-wide text-red-700">Catering management</p>
-            <h1 className="mt-2 text-3xl font-black uppercase tracking-tight text-slate-950">Catering operations</h1>
+            <h1 className="mt-2 text-3xl font-black tracking-tight text-slate-950">Catering operations</h1>
           </div>
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-            <div className="rounded-3xl border border-slate-200 bg-slate-50 p-4">
+            <div className="rounded-lg border border-slate-200 bg-slate-50 p-4">
               <p className="text-xs uppercase tracking-wide text-slate-500">Open events</p>
               <p className="mt-2 text-3xl font-black text-slate-950">{activeCount}</p>
             </div>
-            <div className="rounded-3xl border border-slate-200 bg-slate-50 p-4">
+            <div className="rounded-lg border border-slate-200 bg-slate-50 p-4">
               <p className="text-xs uppercase tracking-wide text-slate-500">Pending approvals</p>
               <p className="mt-2 text-3xl font-black text-amber-700">{pendingCount}</p>
             </div>
-            <div className="rounded-3xl border border-slate-200 bg-slate-50 p-4">
+            <div className="rounded-lg border border-slate-200 bg-slate-50 p-4">
               <p className="text-xs uppercase tracking-wide text-slate-500">Bookings shown</p>
               <p className="mt-2 text-3xl font-black text-slate-950">{reservations.length}</p>
             </div>
           </div>
-          {canEditPhotos && (
-            <Link
-              className="inline-flex min-h-10 items-center justify-center rounded-md border border-slate-300 bg-white px-4 text-sm font-semibold text-slate-800 hover:bg-slate-50"
-              to="/staff/catering/photos"
-            >
-              Catering menu photos
-            </Link>
-          )}
         </div>
 
         <div className="grid gap-5 p-4 sm:p-5">
           <div className="space-y-6">
-            <div className="rounded-3xl border border-slate-200 bg-slate-50 p-5">
+            <div className="rounded-lg border border-slate-200 bg-slate-50 p-5">
               <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
                 <div>
                   <p className="text-xs uppercase tracking-wide text-slate-500">Bookings</p>
@@ -443,6 +482,7 @@ export default function CateringReservations() {
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
                   <span className="inline-flex items-center gap-2 rounded-full bg-white px-3 py-2 text-xs font-semibold uppercase text-slate-600 shadow-sm">
+                    <span className="h-2 w-2 animate-pulse rounded-full bg-red-600" aria-hidden="true" />
                     <Sparkles className="h-4 w-4 text-red-700" /> Live status
                   </span>
                   <Button variant="outline" size="sm" onClick={() => setCalendarOpen(true)}>
@@ -480,11 +520,27 @@ export default function CateringReservations() {
               </div>
 
               <div className="mt-5 grid gap-4">
-                {selectedReservations.length === 0 ? (
-                  <div className="rounded-3xl border border-dashed border-slate-200 bg-white p-6 text-sm text-slate-600">No catering bookings match these filters.</div>
+                {query.isLoading ? (
+                  <div className="grid gap-3" role="status">
+                    {[1, 2, 3].map((item) => <div key={item} className="h-28 animate-pulse rounded-lg border border-slate-200 bg-white" />)}
+                  </div>
+                ) : query.isError ? (
+                  <div className="rounded-lg border border-red-200 bg-red-50 p-6 text-sm text-red-800" role="alert">
+                    <p>Unable to load catering bookings.</p>
+                    <Button className="mt-3" size="sm" variant="outline" onClick={() => void query.refetch()}>Retry</Button>
+                  </div>
+                ) : selectedReservations.length === 0 ? (
+                  <div className="rounded-lg border border-dashed border-slate-200 bg-white p-6 text-sm text-slate-600">No catering bookings match these filters.</div>
                 ) : (
-                  selectedReservations.map((reservation) => (
-                    <article key={reservation.id} className="relative overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm">
+                  selectedReservations.map((reservation, index) => (
+                    <div key={reservation.id} className="contents">
+                    {(index === 0 || manilaDateKey(selectedReservations[index - 1].date) !== manilaDateKey(reservation.date)) && (
+                      <div className="flex items-center gap-3 pt-2 text-sm font-black uppercase tracking-wide text-slate-600">
+                        <span>{formatManilaDate(reservation.date, { weekday: "long", month: "short", day: "numeric" })}</span>
+                        <span className="h-px flex-1 bg-slate-200" />
+                      </div>
+                    )}
+                    <article key={reservation.id} role="button" aria-label={`${reservation.reference} ${reservation.customer_name}`} tabIndex={0} onClick={() => { setActiveReservation(reservation); setDrawerOpen(true); }} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); setActiveReservation(reservation); setDrawerOpen(true); } }} className="relative overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm transition hover:-translate-y-0.5 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-600">
                       <div className="absolute inset-y-0 left-0 w-2 bg-red-600" />
                       <div className="grid gap-4 p-5 sm:grid-cols-[minmax(0,1fr)_auto]">
                         <div className="space-y-2 pl-3">
@@ -496,36 +552,32 @@ export default function CateringReservations() {
                           </div>
                           <p className="text-base font-black text-slate-950">{reservation.customer_name}</p>
                           <p className="text-sm text-slate-600">{reservation.package_name ?? "Catering"} · {reservation.venue_type ?? "Venue address TBD"}</p>
-                          {formatCateringPackageSnapshots(reservation.package_snapshot).map((line) => (
-                            <p key={line} className="text-sm font-semibold text-slate-700">{line}</p>
-                          ))}
-                          <p className="text-sm text-slate-600">
-                            {reservation.event_time ? `Event time: ${formatTime12(reservation.event_time)}` : "Event time: N/A"}
-                            {reservation.event_type
-                              ? ` · ${formatCateringEventType(reservation.event_type, reservation.event_type_other)}`
-                              : ""}
-                          </p>
-                          <p className="text-sm text-slate-600">Package total: ₱{reservation.package_total?.toFixed(2) ?? reservation.total_price.toFixed(2)}</p>
-                          <p className="text-sm font-semibold text-slate-700">
-                            Initial payment: {reservation.downpayment_status === "paid"
-                              ? `Received ₱${Number(reservation.downpayment_amount ?? 0).toFixed(2)}`
-                              : "Not received"}
-                          </p>
-                          {Number(reservation.mobilization_fee ?? 0) > 0 && (
-                            <p className="text-sm text-slate-600">Mobilization fee: ₱{reservation.mobilization_fee?.toFixed(2)}</p>
-                          )}
-                          <p className="text-sm text-slate-600">Approved total: ₱{reservation.total_price.toFixed(2)}</p>
-                          <p className="text-sm text-slate-600">Amount due: ₱{reservation.remaining_balance?.toFixed(2) ?? "0.00"}</p>
+                          <div className="flex flex-wrap gap-2 text-xs font-semibold text-slate-600">
+                            <span className="rounded-full bg-slate-100 px-2 py-1">{reservation.guests} guests</span>
+                            <span className="rounded-full bg-slate-100 px-2 py-1">{reservation.package_name ?? "Catering package"}</span>
+                            <span className="rounded-full bg-slate-100 px-2 py-1">{reservation.venue_type ?? "Venue TBD"}</span>
+                            {reservation.event_type && <span className="rounded-full bg-slate-100 px-2 py-1">{formatCateringEventType(reservation.event_type, reservation.event_type_other)}</span>}
+                          </div>
+                          <div className="pt-1">
+                            <div className="mb-1 flex justify-between text-[11px] font-bold uppercase tracking-wide text-slate-500">
+                              <span>Initial payment received ₱{Number(reservation.downpayment_amount ?? 0).toFixed(2)}</span>
+                              <span>Due ₱{Number(reservation.remaining_balance ?? 0).toFixed(2)}</span>
+                            </div>
+                            <div className="h-2 overflow-hidden rounded-full bg-slate-200">
+                              <div className="h-full rounded-full bg-red-700 transition-all" style={{ width: `${Math.min(100, Math.max(0, ((reservation.total_price - Number(reservation.remaining_balance ?? reservation.total_price)) / Math.max(reservation.total_price, 1)) * 100))}%` }} />
+                            </div>
+                          </div>
                         </div>
 
                         <div className="flex flex-col gap-2 text-right sm:text-left">
-                          <Button variant="outline" size="sm" onClick={() => setActiveReservation(reservation)}>
+                          <Button variant="outline" size="sm" onClick={(event) => { event.stopPropagation(); setActiveReservation(reservation); setDrawerOpen(true); }}>
                             View details
                           </Button>
                           {reservation.status === "pending_approval" ? (
                             <Button
                               size="sm"
-                              onClick={() => {
+                              onClick={(event) => {
+                                event.stopPropagation();
                                 setMobilizationFeeInput("0");
                                 setApprovalTarget(reservation);
                               }}
@@ -536,11 +588,11 @@ export default function CateringReservations() {
                           ) : null}
                           {reservation.status === "confirmed" ? (
                             <>
-                              <Button size="sm" onClick={() => void handleStart(reservation)} disabled={actionLoading[reservation.id]}>
+                              <Button size="sm" onClick={(event) => { event.stopPropagation(); void handleStart(reservation); }} disabled={actionLoading[reservation.id]}>
                                 {actionLoading[reservation.id] ? "Processing..." : "Start preparation"}
                               </Button>
                               {hasOpenPayment(reservation) && (
-                                <Button size="sm" variant="outline" onClick={() => setActiveReservation(reservation)}>
+                                <Button size="sm" variant="outline" onClick={(event) => { event.stopPropagation(); setActiveReservation(reservation); setDrawerOpen(true); }}>
                                   Record balance
                                 </Button>
                               )}
@@ -548,30 +600,31 @@ export default function CateringReservations() {
                           ) : null}
                           {reservation.status === "in_progress" ? (
                             hasOpenPayment(reservation) ? (
-                              <Button size="sm" variant="outline" onClick={() => setActiveReservation(reservation)}>
+                              <Button size="sm" variant="outline" onClick={(event) => { event.stopPropagation(); setActiveReservation(reservation); setDrawerOpen(true); }}>
                                 Record balance
                               </Button>
                             ) : (
-                              <Button variant="danger" size="sm" onClick={() => void handleComplete(reservation)} disabled={actionLoading[reservation.id]}>
+                              <Button variant="danger" size="sm" onClick={(event) => { event.stopPropagation(); void handleComplete(reservation); }} disabled={actionLoading[reservation.id]}>
                                 {actionLoading[reservation.id] ? "Processing..." : "Complete event"}
                               </Button>
                             )
                           ) : null}
                           {reservation.status === "pending_final_payment" ? (
-                            <Button size="sm" variant="outline" onClick={() => setActiveReservation(reservation)}>
+                            <Button size="sm" variant="outline" onClick={(event) => { event.stopPropagation(); setActiveReservation(reservation); setDrawerOpen(true); }}>
                               Record balance
                             </Button>
                           ) : null}
                         </div>
                       </div>
                     </article>
+                    </div>
                   ))
                 )}
               </div>
             </div>
 
             <div className="grid gap-4">
-              <div className="rounded-3xl border border-slate-200 bg-white p-5">
+              <div className={`rounded-lg border p-5 ${balanceWatch.some((reservation) => reservation.payment_status === "Balance overdue") ? "border-amber-300 bg-amber-50/60" : "border-slate-200 bg-white"}`}>
                 <p className="text-xs uppercase tracking-wide text-slate-500">Balance watch</p>
                 <p className="mt-2 text-sm text-slate-700">{balanceWatch.filter((reservation) => reservation.payment_status === "Balance overdue").length} overdue · {balanceWatch.filter((reservation) => reservation.payment_status !== "Balance overdue").length} due.</p>
                 {balanceWatch.length > 0 ? (
@@ -593,7 +646,7 @@ export default function CateringReservations() {
                   </ul>
                 ) : null}
               </div>
-              <div className="rounded-3xl border border-slate-200 bg-white p-5">
+              <div className="rounded-lg border border-slate-200 bg-white p-5">
                 <p className="text-xs uppercase tracking-wide text-slate-500">Workflow tip</p>
                 <p className="mt-2 text-sm text-slate-700">Use the booking list for daily work. Each booking has one next-step action; the calendar is a read-only date filter.</p>
               </div>
@@ -618,18 +671,23 @@ export default function CateringReservations() {
       </Dialog>
 
       <ReservationDetailsModal
-        open={Boolean(activeReservation)}
+        open={paymentModalOpen && Boolean(activeReservation)}
         title={activeReservation ? `${activeReservation.reference} details` : "Event details"}
         reservation={activeReservation}
-        onClose={() => setActiveReservation(null)}
+        onClose={() => {
+          setPaymentModalOpen(false);
+          setActiveReservation(null);
+        }}
         actions={modalActions}
         onPaymentRecorded={async () => {
           const result = await query.refetch();
           const updatedRaw = result.data?.find((reservation) => reservation.id === activeReservation?.id);
           if (!updatedRaw) {
+            setPaymentModalOpen(false);
             setActiveReservation(null);
             return;
           }
+
           setActiveReservation({
             id: updatedRaw.id,
             type: "catering",
@@ -655,7 +713,37 @@ export default function CateringReservations() {
             package_snapshot: updatedRaw.package_snapshot,
             venue_type: updatedRaw.inquiry?.venue_type ?? null
           });
+
+          setPaymentModalOpen(false);
+          setDrawerOpen(false);
+          setActiveReservation(null);
+          toast("Balance recorded successfully.");
         }}
+      />
+      <BookingDetailsDrawer
+        open={drawerOpen && Boolean(activeReservation)}
+        title={activeReservation?.reference ?? "Catering booking"}
+        typeLabel="CATERING BOOKING"
+        customerName={activeReservation?.customer_name ?? ""}
+        status={activeReservation?.status ?? ""}
+        onClose={handleDrawerClose}
+        actions={modalActions.map((action) => (
+          <Button key={action.label} type="button" variant={action.variant ?? "default"} disabled={action.disabled} onClick={() => {
+            action.onClick();
+          }}>
+            {action.label}
+          </Button>
+        )).concat(
+          <Button key="print-receipt" type="button" variant="outline" onClick={() => window.print()}>
+            Print Receipt
+          </Button>
+        )}
+        body={activeReservation ? (
+          <ReservationReceipt
+            reservation={activeReservation}
+            showPrintButton={false}
+          />
+        ) : null}
       />
 
       <Dialog open={Boolean(cancelTarget)} title="Cancel catering reservation" onClose={() => setCancelTarget(null)} panelClassName="max-w-xl">

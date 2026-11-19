@@ -483,3 +483,228 @@
 @keyframes catering-booking-spin {
   to { transform: rotate(360deg); }
 }
+
+.catering-contact-modal {
+  width: 100%;
+  background: #fff;
+  color: #241a1c;
+  font-family: "Manrope", "Segoe UI", sans-serif;
+}
+
+.catering-contact-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 24px 24px 14px;
+}
+
+.catering-contact-header-copy {
+  flex: 1;
+  min-width: 0;
+}
+
+.catering-contact-kicker {
+  margin: 0;
+  color: #b3262f;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+}
+
+.catering-contact-title {
+  margin: 6px 0 0;
+  color: #241a1c;
+  font-size: 25px;
+  font-weight: 800;
+  line-height: 1.1;
+}
+
+.catering-contact-subtitle {
+  margin: 6px 0 0;
+  color: #8d7a7d;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.catering-contact-close {
+  display: inline-flex;
+  width: 34px;
+  height: 34px;
+  align-items: center;
+  justify-content: center;
+  border: 1.5px solid #ead9da;
+  border-radius: 999px;
+  background: transparent;
+  color: #241a1c;
+  transition: border-color 150ms ease, background-color 150ms ease;
+}
+
+.catering-contact-close:hover:not(:disabled) {
+  border-color: #d5b4b6;
+  background: #fff3f4;
+}
+
+.catering-contact-close:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.catering-contact-close svg {
+  width: 18px;
+  height: 18px;
+}
+
+.catering-contact-form {
+  display: grid;
+  gap: 16px;
+  padding: 0 24px 24px;
+}
+
+.catering-contact-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px 16px;
+}
+
+.catering-contact-field {
+  display: grid;
+  gap: 7px;
+  color: #241a1c;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.catering-contact-field-full {
+  grid-column: 1 / -1;
+}
+
+.catering-contact-input {
+  min-height: 42px;
+  border: 1.5px solid #ead9da;
+  border-radius: 12px;
+  background: #fdf5f5;
+  padding: 10px 12px;
+  color: #241a1c;
+  font-size: 13px;
+  letter-spacing: 0;
+  text-transform: none;
+  box-shadow: none;
+}
+
+.catering-contact-textarea {
+  min-height: 64px;
+  resize: vertical;
+}
+
+.catering-contact-input:focus {
+  border-color: #b3262f;
+  background: #fff;
+  box-shadow: 0 0 0 3px rgba(179, 38, 47, 0.08);
+  outline: none;
+}
+
+.catering-contact-summary-box {
+  display: grid;
+  overflow: hidden;
+  border: 1px solid #f1dfe1;
+  border-radius: 16px;
+  background: #fff5f5;
+}
+
+.catering-contact-summary-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border-top: 1px solid #f3e0e2;
+  padding: 12px 14px;
+  color: #6f6366;
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.catering-contact-summary-row:first-child {
+  border-top: 0;
+}
+
+.catering-contact-summary-header-row {
+  background: #fff7f7;
+  color: #241a1c;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.catering-contact-summary-name {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.catering-contact-summary-total,
+.catering-contact-summary-amount,
+.catering-contact-summary-balance {
+  flex-shrink: 0;
+  color: #241a1c;
+  font-weight: 800;
+}
+
+.catering-contact-summary-amount {
+  color: #b3262f;
+}
+
+.catering-contact-notice {
+  margin: 0;
+  border-radius: 10px;
+  background: #fff2f1;
+  padding: 10px 12px;
+  color: #9f2d2c;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.5;
+}
+
+.catering-contact-submit {
+  width: 100%;
+  min-height: 44px;
+  border: 0;
+  border-radius: 999px;
+  background: linear-gradient(180deg, #c73840 0%, #b3262f 100%);
+  box-shadow: 0 10px 18px rgba(179, 38, 47, 0.18);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.catering-contact-submit:disabled {
+  cursor: not-allowed;
+  opacity: 0.7;
+}
+
+.catering-contact-back-link {
+  display: block;
+  margin: 0 auto;
+  border: 0;
+  background: transparent;
+  color: #b3262f;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+@media (max-width: 480px) {
+  .catering-contact-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .catering-contact-header,
+  .catering-contact-form {
+    padding-left: 18px;
+    padding-right: 18px;
+  }
+}

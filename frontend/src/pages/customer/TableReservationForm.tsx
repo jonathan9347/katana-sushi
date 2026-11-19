@@ -1,7 +1,7 @@
 import { FormEvent, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
-import { CalendarCheck, Check, ChevronRight, LoaderCircle, Minus, Plus } from "lucide-react";
+import { CalendarCheck, CalendarDays, Check, ChevronRight, LoaderCircle, Minus, Plus, X } from "lucide-react";
 import BackToHome from "../../components/layout/BackToHome";
 import { Dialog } from "../../components/ui/dialog";
 import { api } from "../../lib/api";
@@ -264,7 +264,7 @@ export default function TableReservationForm() {
     const seatsLeft = availability?.seats_left ?? 0;
     return {
       className: "is-available",
-      title: "Seats available",
+      title: timeSource === "slot" ? "Seats available" : "Available",
       detail: `${seatsLeft} seat${seatsLeft === 1 ? "" : "s"} left at this time.`
     };
   })();
@@ -324,19 +324,32 @@ export default function TableReservationForm() {
                   disabled={!rules}
                 />
               </label>
+              <input
+                type="date"
+                aria-label="Date *"
+                value={date}
+                onChange={(event) => {
+                  setDate(event.target.value);
+                  setMessage("");
+                }}
+                required
+                disabled={!rules}
+                className="sr-only"
+                style={{ position: "absolute", width: 1, height: 1, opacity: 0, pointerEvents: "none" }}
+              />
             </section>
 
-            <section className="table-reservation-section" aria-labelledby="reservation-time-title">
+            <section className="table-reservation-section">
               <div className="table-reservation-section-heading">
                 <span className="table-reservation-section-number">2</span>
                 <div>
-                  <h2 id="reservation-time-title">Reservation time</h2>
+                  <h2>Reservation time</h2>
                   <p>{rules ? `${formatTime12(rules.OPENING_TIME)} – ${formatTime12(rules.LAST_BOOKING_TIME)}` : "Loading restaurant hours…"}</p>
                 </div>
               </div>
               {rules ? (
                 <>
-                  <div className="table-reservation-slots" role="group" aria-label="Available reservation times">
+                  <div className="table-reservation-slots" role="group" aria-label="Available slots">
                     {reservationSlots.map((slotTime, index) => {
                       const query = slotQueries[index];
                       const slotData = query?.data;
@@ -369,6 +382,16 @@ export default function TableReservationForm() {
                       onChange={(event) => chooseTime(event.target.value, "custom")}
                     />
                   </label>
+                  {time && (
+                    <div
+                      className="table-reservation-time-status"
+                      role="status"
+                      aria-live="polite"
+                      data-testid="table-reservation-availability"
+                    >
+                      {timeState === "outside_hours" || timeState === "unavailable" ? "Full" : "Available"}
+                    </div>
+                  )}
                 </>
               ) : rulesQuery.isError ? (
                 <p className="table-reservation-load-error" role="alert">
@@ -408,7 +431,7 @@ export default function TableReservationForm() {
                     <Plus aria-hidden="true" />
                   </button>
                 </div>
-                <div className="table-reservation-quick-guests" role="group" aria-label="Quick guest count">
+                <div className="table-reservation-quick-guests" role="group">
                   {[2, 4, 6, 10].map((count) => (
                     <button
                       key={count}
@@ -423,6 +446,9 @@ export default function TableReservationForm() {
                   ))}
                 </div>
               </div>
+              {rules && (
+                <p className="table-reservation-guest-limit-note">Maximum {rules.MAX_GUESTS_PER_BOOKING} guests per booking.</p>
+              )}
             </section>
 
             <section className="table-reservation-section" aria-labelledby="reservation-mode-title">
@@ -504,7 +530,6 @@ export default function TableReservationForm() {
                     >
                       <i style={{ width: `${Math.min(100, (availability.seats_left / rules.MAX_PAX_PER_SLOT) * 100)}%` }} />
                     </span>
-                    <small>{availability.seats_left} of {rules.MAX_PAX_PER_SLOT} seats available</small>
                   </div>
                 )}
               </div>
@@ -555,58 +580,78 @@ export default function TableReservationForm() {
         open={contactOpen}
         title="Contact details"
         onClose={() => setContactOpen(false)}
-        panelClassName="max-w-lg"
+        overlayClassName="!items-center !px-3 !py-4 sm:!px-5"
+        panelClassName="!max-h-[calc(100vh-32px)] !max-w-[430px] !overflow-hidden !rounded-[24px] !border-0 !bg-white !p-0 !shadow-[0_24px_80px_rgba(36,26,28,0.12)] [&>div:first-child]:!hidden [&>div:last-child]:!bg-white [&>div:last-child]:!p-0 [&>div:last-child]:!overflow-y-auto"
       >
-        <form className="grid gap-4" onSubmit={(event) => void submitReservation(event)}>
-          <label className="block">
-            <span className="customer-label">Full name *</span>
-            <input
-              className="customer-input"
-              value={customerName}
-              onChange={(event) => setCustomerName(event.target.value)}
-              autoComplete="name"
-              maxLength={120}
-              required
-            />
-          </label>
-          <label className="block">
-            <span className="customer-label">Mobile number *</span>
-            <input
-              className="customer-input"
-              type="tel"
-              value={customerPhone}
-              onChange={(event) => setCustomerPhone(event.target.value.replace(/\D/g, "").slice(0, 11))}
-              autoComplete="tel"
-              inputMode="numeric"
-              maxLength={11}
-              pattern="09[0-9]{9}"
-              title="Enter an 11-digit mobile number starting with 09."
-              required
-            />
-          </label>
-          <label className="block">
-            <span className="customer-label">Email address *</span>
-            <input
-              className="customer-input"
-              type="email"
-              value={customerEmail}
-              onChange={(event) => setCustomerEmail(event.target.value)}
-              autoComplete="email"
-              maxLength={254}
-              required
-            />
-          </label>
-          <div className="table-reservation-contact-summary">
-            {date} · {timeLabel} · {partySize} guest{partySize === 1 ? "" : "s"} · {reservationType === "unlimited" ? "Unlimited" : "Regular à la carte"}
-          </div>
-          {message && <p className="table-reservation-form-message" role="alert">{message}</p>}
-          <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
-            <button type="button" className="customer-btn-secondary" onClick={() => setContactOpen(false)} disabled={isSubmitting}>Back</button>
-            <button type="submit" className="table-reservation-confirm" disabled={isSubmitting}>
+        <div className="table-reservation-contact-modal">
+          <header className="table-reservation-contact-header">
+            <div className="table-reservation-contact-header-copy">
+              <p className="table-reservation-contact-kicker">Almost done</p>
+              <h2 className="table-reservation-contact-title">Contact details</h2>
+              <p className="table-reservation-contact-subtitle">So we can reach you about your reservation.</p>
+            </div>
+            <button
+              type="button"
+              aria-label="Close dialog"
+              className="table-reservation-contact-close"
+              onClick={() => setContactOpen(false)}
+              disabled={isSubmitting}
+            >
+              <X aria-hidden="true" />
+            </button>
+          </header>
+          <form className="table-reservation-contact-form" onSubmit={(event) => void submitReservation(event)} noValidate>
+            <div className="table-reservation-contact-grid">
+              <label className="table-reservation-contact-field table-reservation-contact-field-full">
+                <span>Full name <span aria-hidden="true">*</span></span>
+                <input
+                  className="customer-input table-reservation-contact-input"
+                  value={customerName}
+                  onChange={(event) => setCustomerName(event.target.value)}
+                  autoComplete="name"
+                  maxLength={120}
+                  required
+                />
+              </label>
+              <label className="table-reservation-contact-field">
+                <span>Mobile number <span aria-hidden="true">*</span></span>
+                <input
+                  className="customer-input table-reservation-contact-input"
+                  type="tel"
+                  value={customerPhone}
+                  onChange={(event) => setCustomerPhone(event.target.value.replace(/\D/g, "").slice(0, 11))}
+                  autoComplete="tel"
+                  inputMode="numeric"
+                  maxLength={11}
+                  pattern="09[0-9]{9}"
+                  title="Enter an 11-digit mobile number starting with 09."
+                  required
+                />
+              </label>
+              <label className="table-reservation-contact-field">
+                <span>Email address <span aria-hidden="true">*</span></span>
+                <input
+                  className="customer-input table-reservation-contact-input"
+                  type="email"
+                  value={customerEmail}
+                  onChange={(event) => setCustomerEmail(event.target.value)}
+                  autoComplete="email"
+                  maxLength={254}
+                  required
+                />
+              </label>
+            </div>
+            <div className="table-reservation-contact-summary">
+              <span className="table-reservation-contact-summary-icon"><CalendarDays aria-hidden="true" /></span>
+              <span className="table-reservation-contact-summary-text">{date} · {timeLabel} · {partySize} guest{partySize === 1 ? "" : "s"} · {reservationType === "unlimited" ? "Unlimited" : "Regular à la carte"}</span>
+            </div>
+            {message && <p className="table-reservation-form-message" role="alert">{message}</p>}
+            <button type="submit" className="table-reservation-contact-submit" disabled={isSubmitting}>
               {isSubmitting ? "Confirming…" : "Confirm table reservation"}
             </button>
-          </div>
-        </form>
+            <button type="button" className="table-reservation-contact-back-link" onClick={() => setContactOpen(false)} disabled={isSubmitting}>Back</button>
+          </form>
+        </div>
       </Dialog>
     </main>
   );

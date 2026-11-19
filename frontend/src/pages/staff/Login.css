@@ -175,7 +175,7 @@
   width: min(100%, 420px);
   padding: clamp(25px, 3.3vw, 38px);
   border: 1px solid #f0e4e4;
-  border-radius: 10px;
+  border-radius: 0;
   background: rgba(255, 255, 255, 0.96);
   box-shadow: 0 28px 75px rgba(75, 27, 28, 0.13), 0 4px 14px rgba(44, 22, 24, 0.05);
 }

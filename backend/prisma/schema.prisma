@@ -289,6 +289,7 @@ model TakeoutOrder {
   payment_expires_at          DateTime?
   subtotal                    Float
   total                       Float
+  pickup_time                 DateTime?
   paid_at                     DateTime?
   prepared_at                 DateTime?
   ready_at                    DateTime?

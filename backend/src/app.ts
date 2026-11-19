@@ -2925,6 +2925,63 @@ app.post("/api/admin/users/:id/reset-password", async (req, res, next) => {
   }
 });
 
+app.get("/api/admin/activity-logs", async (req, res, next) => {
+  try {
+    const user = requireRole(req, res, ["admin"]);
+    if (!user) {
+      return;
+    }
+
+    const parsedQuery = z.object({
+      page: z.coerce.number().int().min(1).default(1),
+      limit: z.coerce.number().int().min(1).max(50).default(10)
+    }).parse(req.query);
+
+    const skip = (parsedQuery.page - 1) * parsedQuery.limit;
+
+    const [total, logs] = await Promise.all([
+      prisma.auditLog.count(),
+      prisma.auditLog.findMany({
+        orderBy: [{ created_at: "desc" }, { id: "desc" }],
+        skip,
+        take: parsedQuery.limit,
+        include: {
+          user: { select: { name: true, role: true } }
+        }
+      })
+    ]);
+
+    const entries = logs.map((log) => ({
+      id: log.id,
+      actor_name: log.user?.name ?? null,
+      actor_role: log.user?.role ?? null,
+      action: log.action,
+      entity: log.entity,
+      entity_id: log.entity_id,
+      created_at: log.created_at.toISOString(),
+      message: formatAuditMessage({
+        actor_name: log.user?.name ?? "System",
+        actor_role: log.user?.role ?? null,
+        action: log.action,
+        entity: log.entity,
+        entity_id: log.entity_id,
+        old_value: log.old_value ?? undefined,
+        new_value: log.new_value ?? undefined
+      })
+    }));
+
+    return res.json({
+      logs: entries,
+      total,
+      page: parsedQuery.page,
+      limit: parsedQuery.limit,
+      totalPages: Math.max(1, Math.ceil(total / parsedQuery.limit))
+    });
+  } catch (error) {
+    return next(error);
+  }
+});
+
 app.get("/api/catering/packages", async (_req, res, next) => {
   try {
     const packages = await prisma.cateringPackage.findMany({
@@ -3855,8 +3912,12 @@ app.put("/api/staff/catering/reservations/:id/approve", async (req, res, next) =
       return;
     }
     const body = z.object({
-      mobilization_fee: z.coerce.number().finite().min(0).max(1_000_000).default(0)
-    }).parse(req.body ?? {});
+      mobilization_fee: z.coerce.number().finite().min(0).max(1_000_000).optional(),
+      mobilizationFee: z.coerce.number().finite().min(0).max(1_000_000).optional(),
+      amount: z.coerce.number().finite().min(0).max(1_000_000).optional()
+    }).transform((value) => ({
+      mobilization_fee: Number(value.mobilization_fee ?? value.mobilizationFee ?? value.amount ?? 0)
+    })).parse(req.body ?? {});
 
     const reservation = await prisma.$transaction(async (tx) => {
       await lockCateringReservationForUpdate(tx, req.params.id);
@@ -7885,6 +7946,7 @@ function takeoutOrderSummary(order: {
   payment_plan: string;
   payment_status: string;
   ready_at: Date | null;
+  pickup_time: Date | null;
   subtotal: number;
   total: number;
   items: Array<{
@@ -7900,6 +7962,7 @@ function takeoutOrderSummary(order: {
     payment_plan: order.payment_plan,
     payment_status: order.payment_status,
     ready_at: order.ready_at,
+    pickup_time: order.pickup_time,
     subtotal: order.subtotal,
     total: order.total,
     items: order.items.map((item) => ({
@@ -7915,6 +7978,12 @@ const takeoutOrderBodySchema = z.object({
   customer_name: z.string().trim().min(1).max(120),
   customer_phone: z.string().regex(/^\d{1,11}$/),
   payment_plan: z.literal("pay_at_pickup"),
+  pickup_time: z.string().datetime({ offset: true }).refine((value) => {
+    const time = new Intl.DateTimeFormat("en-GB", {
+      hour: "2-digit", minute: "2-digit", hourCycle: "h23", timeZone: "Asia/Manila"
+    }).format(new Date(value));
+    return time >= "13:00" && time <= "21:00";
+  }, "Pickup time must be between 1:00 PM and 9:00 PM."),
   idempotency_key: z.string().min(16).max(128),
   items: z.array(z.object({
     product_id: z.string().min(1),
@@ -7985,6 +8054,7 @@ app.post("/api/takeout/orders", async (req, res, next) => {
       const sameRequest = existingOrder.customer_name === body.customer_name &&
         existingOrder.customer_phone === body.customer_phone &&
         existingOrder.payment_plan === body.payment_plan &&
+        existingOrder.pickup_time?.toISOString() === new Date(body.pickup_time).toISOString() &&
         existingItems.length === requestItems.length &&
         existingItems.every((item, index) =>
           item.product_id === requestItems[index].product_id &&
@@ -8033,6 +8103,7 @@ app.post("/api/takeout/orders", async (req, res, next) => {
               status: "pending_approval",
               payment_plan: body.payment_plan,
               payment_status: "unpaid",
+              pickup_time: new Date(body.pickup_time),
               subtotal,
               total: subtotal,
               items: {
@@ -8069,6 +8140,7 @@ app.post("/api/takeout/orders", async (req, res, next) => {
         const sameRequest = order.customer_name === body.customer_name &&
           order.customer_phone === body.customer_phone &&
           order.payment_plan === body.payment_plan &&
+          order.pickup_time?.toISOString() === new Date(body.pickup_time).toISOString() &&
           racedItems.length === requestItems.length &&
           racedItems.every((item, index) =>
             item.product_id === requestItems[index].product_id &&

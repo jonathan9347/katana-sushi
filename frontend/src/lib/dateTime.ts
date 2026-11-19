@@ -27,8 +27,34 @@ export function isFutureManilaReservationTime(date: string, time: string, now = 
   return Number.isFinite(bookingTime.getTime()) && bookingTime.getTime() > now.getTime();
 }
 
-export function formatManilaDate(date: string | Date, options?: Intl.DateTimeFormatOptions) {
-  return new Date(date).toLocaleDateString("en-PH", {
+function normalizeDateInput(date: string | Date | null | undefined) {
+  if (!date) {
+    return null;
+  }
+
+  if (date instanceof Date) {
+    return Number.isNaN(date.getTime()) ? null : date;
+  }
+
+  const trimmed = date.trim();
+  if (!trimmed) {
+    return null;
+  }
+
+  const parsed = /^\d{4}-\d{2}-\d{2}$/.test(trimmed)
+    ? new Date(`${trimmed}T00:00:00+08:00`)
+    : new Date(trimmed);
+
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
+export function formatManilaDate(date: string | Date | null | undefined, options?: Intl.DateTimeFormatOptions) {
+  const parsed = normalizeDateInput(date);
+  if (!parsed) {
+    return "Invalid date";
+  }
+
+  return parsed.toLocaleDateString("en-PH", {
     timeZone: "Asia/Manila",
     year: "numeric",
     month: "long",
@@ -37,8 +63,13 @@ export function formatManilaDate(date: string | Date, options?: Intl.DateTimeFor
   });
 }
 
-export function formatManilaDateTime(date: string | Date, options?: Intl.DateTimeFormatOptions) {
-  return new Date(date).toLocaleString("en-PH", {
+export function formatManilaDateTime(date: string | Date | null | undefined, options?: Intl.DateTimeFormatOptions) {
+  const parsed = normalizeDateInput(date);
+  if (!parsed) {
+    return "Invalid date";
+  }
+
+  return parsed.toLocaleString("en-PH", {
     timeZone: "Asia/Manila",
     year: "numeric",
     month: "short",
@@ -50,13 +81,18 @@ export function formatManilaDateTime(date: string | Date, options?: Intl.DateTim
   });
 }
 
-export function manilaDateKey(date: string | Date) {
+export function manilaDateKey(date: string | Date | null | undefined) {
+  const parsed = normalizeDateInput(date);
+  if (!parsed) {
+    return "invalid-date";
+  }
+
   return new Intl.DateTimeFormat("en-CA", {
     timeZone: "Asia/Manila",
     year: "numeric",
     month: "2-digit",
     day: "2-digit"
-  }).format(new Date(date));
+  }).format(parsed);
 }
 
 export function todayManilaDateKey() {

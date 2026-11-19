@@ -312,9 +312,7 @@ export default function PosPage() {
     },
     onSuccess: (transaction) => {
       setPaymentOpen(false);
-      clearCartFor("takeout");
-      setCustomerName("");
-      setSelectionView("menu");
+      clearCurrentOrderPath();
       queryClient.invalidateQueries({ queryKey: ["inventory"] });
       queryClient.invalidateQueries({ queryKey: ["products"] });
       queryClient.invalidateQueries({ queryKey: ["pos", "transactions"] });
@@ -408,6 +406,7 @@ export default function PosPage() {
     },
     onSuccess: ({ transaction }) => {
       setBillOutOpen(false);
+      clearCurrentOrderPath();
       setSelectedDiningSessionId("");
       queryClient.invalidateQueries({ queryKey: ["pos", "dining", "sessions"] });
       queryClient.invalidateQueries({ queryKey: ["pos", "dining", "tables"] });
@@ -629,6 +628,13 @@ export default function PosPage() {
     setCurrentOrderPath([]);
     setUnlimitedGuestsConfirmed(false);
     setPendingUnlimitedProduct(null);
+    setCustomerName("");
+    setDineOrderType("ala_carte");
+    setDineHeadcount(1);
+    clearCartFor("takeout");
+    clearCartFor("dine_in_ala_carte");
+    clearCartFor("dine_in_unlimited");
+    selectCart("takeout");
   }
 
   function beginExistingTable() {

@@ -1,4 +1,4 @@
-import { FormEvent, useState } from "react";
+import { ChangeEvent, FormEvent, useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Trash2 } from "lucide-react";
 import { api } from "../../../lib/api";
@@ -33,10 +33,37 @@ const reasonLabels: Record<WasteForm["reason"], string> = {
   other: "Other"
 };
 
-export default function WasteDisposal() {
-  const [wasteForm, setWasteForm] = useState<WasteForm>(emptyWasteForm);
+export default function WasteDisposal({
+  initialForm,
+  onPreloadConsumed
+}: {
+  initialForm?: Partial<WasteForm>;
+  onPreloadConsumed?: () => void;
+}) {
+  const [wasteForm, setWasteForm] = useState<WasteForm>({
+    ...emptyWasteForm,
+    ...initialForm,
+    reason: initialForm?.reason ?? emptyWasteForm.reason,
+    notes: initialForm?.notes ?? emptyWasteForm.notes,
+    quantity: initialForm?.quantity ? String(initialForm.quantity) : emptyWasteForm.quantity
+  });
   const queryClient = useQueryClient();
   const { toast } = useToast();
+
+  useEffect(() => {
+    if (!initialForm) {
+      return;
+    }
+
+    setWasteForm({
+      ...emptyWasteForm,
+      raw_material_id: initialForm.raw_material_id ?? "",
+      batch_id: initialForm.batch_id ?? "",
+      quantity: initialForm.quantity ? String(initialForm.quantity) : "",
+      reason: initialForm.reason ?? "expired",
+      notes: initialForm.notes ?? "",
+    });
+  }, [initialForm]);
 
   const materialsQuery = useQuery({
     queryKey: ["inventory", "materials"],
@@ -69,6 +96,11 @@ export default function WasteDisposal() {
     }
   });
 
+  const selectedBatch = wasteForm.batch_id
+    ? batchesQuery.data?.find((batch) => batch.id === wasteForm.batch_id)
+    : undefined;
+  const maxDisposalQuantity = selectedBatch ? Number(selectedBatch.remaining_quantity) : undefined;
+
   const disposeMutation = useMutation({
     mutationFn: async () =>
       api.post("/api/inventory/waste", {
@@ -80,6 +112,7 @@ export default function WasteDisposal() {
       }),
     onSuccess: () => {
       setWasteForm(emptyWasteForm);
+      onPreloadConsumed?.();
       queryClient.invalidateQueries({ queryKey: ["inventory"] });
       queryClient.invalidateQueries({ queryKey: ["analytics"] });
       toast("Product disposed and inventory updated.");
@@ -97,7 +130,30 @@ export default function WasteDisposal() {
 
   function handleSubmit(event: FormEvent) {
     event.preventDefault();
+
+    if (maxDisposalQuantity !== undefined && Number(wasteForm.quantity) > maxDisposalQuantity) {
+      setWasteForm((current) => ({
+        ...current,
+        quantity: String(maxDisposalQuantity)
+      }));
+      toast(`The selected batch only has ${maxDisposalQuantity} ${selectedMaterial?.unit ?? "units"} left.`);
+      return;
+    }
+
     disposeMutation.mutate();
+  }
+
+  function handleQuantityChange(event: ChangeEvent<HTMLInputElement>) {
+    const nextValue = event.target.value;
+    if (maxDisposalQuantity !== undefined && nextValue !== "") {
+      const numericValue = Number(nextValue);
+      if (!Number.isNaN(numericValue)) {
+        const clampedValue = Math.min(Math.max(Math.round(numericValue), 1), maxDisposalQuantity);
+        setWasteForm((current) => ({ ...current, quantity: String(clampedValue) }));
+        return;
+      }
+    }
+    setWasteForm((current) => ({ ...current, quantity: nextValue }));
   }
 
   return (
@@ -153,15 +209,17 @@ export default function WasteDisposal() {
               <input
                 required
                 min="1"
+                max={maxDisposalQuantity ?? undefined}
                 step="1"
                 type="number"
                 className="h-10 rounded-md border border-slate-300 px-3"
                 value={wasteForm.quantity}
-                onChange={(event) => setWasteForm((current) => ({ ...current, quantity: event.target.value }))}
+                onChange={handleQuantityChange}
               />
               {selectedMaterial && (
                 <span className="text-xs text-slate-500">
                   Available: {Number(selectedMaterial.available_quantity).toLocaleString()} {selectedMaterial.unit}
+                  {maxDisposalQuantity !== undefined && ` · Selected batch remaining: ${Number(maxDisposalQuantity).toLocaleString()}`}
                 </span>
               )}
             </label>

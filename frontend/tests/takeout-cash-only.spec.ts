@@ -49,6 +49,7 @@ async function mockPickupApi(page: Page, catalog = products) {
             status: "pending_approval",
             payment_plan: "pay_at_pickup",
             payment_status: "unpaid",
+            pickup_time: "2026-10-28T05:00:00.000Z",
             subtotal: 320,
             total: 320,
             ready_at: null,
@@ -113,13 +114,14 @@ test("pickup contact popup validates, submits without email, and opens pickup st
   await expect(cartPanel.getByRole("region", { name: "Pickup location" })).toContainText("[Add restaurant street address]");
   await expect(cartPanel.getByRole("region", { name: "Pickup location" })).toContainText("10:00 AM – 10:00 PM");
   await expect(cartPanel.getByRole("region", { name: "Pickup location" })).toContainText("[Add restaurant phone number]");
-  await expect(cartPanel.getByRole("region", { name: "Good to know" })).toBeVisible();
-  await expect(cartPanel).toContainText("Show your name at the counter when you arrive.");
-  await expect(cartPanel).toContainText("Ingredients are reserved once staff approves your order.");
+  await expect(cartPanel.getByRole("region", { name: "Pickup time" })).toBeVisible();
+  await expect(cartPanel).toContainText("Pickup is available from 1:00 PM until 9:00 PM.");
   await expect(cartPanel).toContainText("No payment is needed now. Please wait for staff approval before preparation begins.");
   await expect(cartPanel).not.toContainText("30 minutes");
   await expect(cartPanel).toContainText("Total to pay at counter");
 
+  await expect(cartPanel.getByRole("button", { name: "Choose a pickup time" })).toBeDisabled();
+  await cartPanel.getByRole("button", { name: "1:00 PM" }).click();
   await cartPanel.getByRole("button", { name: "Confirm pickup order" }).click();
   const dialog = page.getByRole("dialog", { name: "Contact details" });
   await expect(dialog).toBeVisible();
@@ -131,6 +133,7 @@ test("pickup contact popup validates, submits without email, and opens pickup st
   await expect(dialog.getByLabel(/email/i)).toHaveCount(0);
   await expect(dialog).toContainText("3 items, pay at counter");
   await expect(dialog).toContainText(/320/);
+  await expect(dialog).toContainText("Pickup time: 1:00 PM");
 
   await dialog.getByRole("button", { name: "Send pickup order" }).click();
   await expect(dialog.locator('[role="alert"]')).toHaveCount(2);
@@ -155,14 +158,19 @@ test("pickup contact popup validates, submits without email, and opens pickup st
   await dialog.getByLabel("Phone number").fill("09123456789");
   await dialog.getByRole("button", { name: "Send pickup order" }).click();
 
-  await expect(page).toHaveURL(/\/reservation\/status\?bookingId=KTO-CASH-001$/);
-  await expect(page.getByRole("heading", { name: "Check Booking Status" })).toBeVisible();
-  await expect(page.getByText("pending approval")).toBeVisible();
+  const success = page.getByRole("dialog", { name: "Your pickup order is sent." });
+  await expect(success).toBeVisible();
+  await expect(success).toContainText("KTO-CASH-001");
+  await expect(success).toContainText("1:00 PM");
+  await expect(success.getByRole("link", { name: "See order status" })).toHaveAttribute("href", /reservation\/status\?bookingId=KTO-CASH-001/);
+  await expect(success.getByLabel("Booking ID")).toHaveCount(0);
+  await expect(success.getByLabel("Phone number")).toHaveCount(0);
   expect(submittedBodies).toHaveLength(1);
   expect(submittedBodies[0]).toMatchObject({
     customer_name: "Pickup Guest",
     customer_phone: "09123456789",
     payment_plan: "pay_at_pickup",
+    pickup_time: "2026-10-28T05:00:00.000Z",
     items: [
       { product_id: "roll-1", quantity: 2 },
       { product_id: "nigiri-1", quantity: 1 }
@@ -171,10 +179,7 @@ test("pickup contact popup validates, submits without email, and opens pickup st
   expect(submittedBodies[0]).not.toHaveProperty("customer_email");
   expect(submittedBodies[0]).not.toHaveProperty("email");
   expect(submittedBodies[0]).not.toHaveProperty("payment_method");
-  await expect.poll(() => statusRequests.length).toBeGreaterThan(0);
-  expect(statusRequests.every(({ orderNumber, phone }) =>
-    orderNumber === "KTO-CASH-001" && phone === "09123456789"
-  )).toBe(true);
+  expect(statusRequests).toHaveLength(0);
 });
 
 test("empty pickup cart keeps confirmation disabled and shows location details", async ({ page }) => {
@@ -187,11 +192,30 @@ test("empty pickup cart keeps confirmation disabled and shows location details",
   await expect(cartPanel).toContainText("Add rolls, nigiri or bowls from the menu to start your pickup order.");
   await expect(cartPanel.getByRole("region", { name: "How pickup works" })).toHaveCount(0);
   await expect(cartPanel.getByRole("region", { name: "Pickup location" })).toBeVisible();
-  await expect(cartPanel.getByRole("region", { name: "Good to know" })).toContainText("Pay at the counter. No payment online.");
+  await expect(cartPanel.getByRole("region", { name: "Pickup time" })).toBeVisible();
   await expect(cartPanel.getByRole("region", { name: "Pickup location" })).toContainText("[Add restaurant street address]");
-  await expect(cartPanel.getByRole("button", { name: "Confirm pickup order" })).toBeDisabled();
+  await expect(cartPanel.getByRole("button", { name: "Choose a pickup time" })).toBeDisabled();
   await expect(page.getByRole("dialog")).toHaveCount(0);
   await expect(page.getByLabel(/email/i)).toHaveCount(0);
+});
+
+test("pickup custom time rejects out-of-range values and accepts both endpoints", async ({ page }) => {
+  await mockPickupApi(page);
+  await page.goto("/takeout", { waitUntil: "domcontentloaded" });
+  const panel = page.getByRole("complementary", { name: "Your pickup order" });
+  await page.getByRole("button", { name: "Add to cart" }).first().click();
+  const input = panel.getByLabel("Or choose another time");
+  await input.fill("12:45");
+  await expect(panel.getByRole("alert")).toContainText("Pickup time must be between 1:00 PM and 9:00 PM.");
+  await expect(panel.getByRole("button", { name: "Choose a pickup time" })).toBeDisabled();
+  await input.fill("13:00");
+  await expect(panel.getByText("1:00 PM", { exact: true }).first()).toBeVisible();
+  await expect(panel.getByRole("button", { name: "Confirm pickup order" })).toBeEnabled();
+  await input.fill("21:15");
+  await expect(panel.getByRole("alert")).toContainText("Pickup time must be between 1:00 PM and 9:00 PM.");
+  await input.fill("21:00");
+  await expect(panel.getByText("9:00 PM", { exact: true }).first()).toBeVisible();
+  await expect(panel.getByRole("button", { name: "Confirm pickup order" })).toBeEnabled();
 });
 
 for (const viewport of [
@@ -206,7 +230,7 @@ for (const viewport of [
     const cartPanel = page.getByRole("complementary", { name: "Your pickup order" });
     await expect(cartPanel).toBeVisible();
     const homeButton = page.getByRole("link", { name: "Back to home" });
-    const confirmButton = cartPanel.getByRole("button", { name: "Confirm pickup order" });
+    const confirmButton = cartPanel.getByRole("button", { name: "Choose a pickup time" });
 
     async function expectPanelGeometry() {
       const panelBox = await cartPanel.boundingBox();
@@ -229,7 +253,7 @@ for (const viewport of [
   });
 }
 
-test("pickup cart scroll reveals location and good-to-know content at 1920x910", async ({ page }) => {
+test("pickup cart scroll reveals location and pickup time at 1920x910", async ({ page }) => {
   await page.setViewportSize({ width: 1920, height: 910 });
   const expandedCatalog = Array.from({ length: 6 }, (_, index) => ({
     ...products[0],
@@ -259,11 +283,11 @@ test("pickup cart scroll reveals location and good-to-know content at 1920x910",
     if (target) element.scrollTop += target.getBoundingClientRect().top - element.getBoundingClientRect().top;
   });
   await expect(callRow).toBeInViewport();
-  const goodToKnow = cartPanel.getByRole("region", { name: "Good to know" });
+  const pickupTime = cartPanel.getByRole("region", { name: "Pickup time" });
   await scrollArea.evaluate((element) => {
     element.scrollTop = element.scrollHeight;
   });
-  await expect(goodToKnow).toBeInViewport();
+  await expect(pickupTime).toBeInViewport();
   await expect(scrollArea).toHaveAttribute("data-scroll-active", "true");
   await expect(scrollArea).toHaveAttribute("data-scroll-active", "false", { timeout: 2_000 });
   expect(await page.evaluate(() => window.scrollY)).toBe(0);
@@ -274,6 +298,7 @@ test("pickup contact popup fits mobile width", async ({ page }) => {
   await mockPickupApi(page);
   await page.goto("/takeout", { waitUntil: "domcontentloaded" });
   await page.getByRole("button", { name: "Add to cart" }).first().click();
+  await page.getByRole("button", { name: "1:00 PM" }).click();
   await page.getByRole("button", { name: "Confirm pickup order" }).click();
 
   const dialog = page.getByRole("dialog", { name: "Contact details" });

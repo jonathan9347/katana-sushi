@@ -27,6 +27,7 @@ type StatusResult = {
   remaining_balance?: number;
   payment_status?: string;
   ready_at?: string | null;
+  pickup_time?: string | null;
   full_payment_paid?: boolean;
   remaining_paid_at_venue?: boolean;
   special_requests?: string | null;
@@ -92,6 +93,7 @@ export default function ReservationStatus() {
             payment_plan: "pay_now" | "pay_at_pickup";
             payment_status: string;
             ready_at: string | null;
+            pickup_time?: string | null;
             total: number;
             items: NonNullable<StatusResult["order_items"]>;
           };
@@ -101,6 +103,7 @@ export default function ReservationStatus() {
           payment_plan: response.data.order.payment_plan,
           payment_status: response.data.order.payment_status,
           ready_at: response.data.order.ready_at,
+          pickup_time: response.data.order.pickup_time,
           total_price: response.data.order.total,
           order_items: response.data.order.items,
           is_takeout: true
@@ -190,146 +193,294 @@ export default function ReservationStatus() {
     }
   }, []);
 
+  const statusTone = result
+    ? result.is_takeout
+      ? result.status === "released" || result.status === "completed" || result.status === "ready"
+        ? "green"
+        : result.status === "pending_approval"
+          ? "amber"
+          : "green"
+      : result.is_catering
+        ? result.status === "pending_approval" ? "amber" : "green"
+        : result.status === "confirmed" ? "green" : "amber"
+    : "amber";
+
+  const statusTitle = result
+    ? result.is_takeout
+      ? result.status === "released" || result.status === "completed"
+        ? "Completed"
+        : result.status === "ready"
+          ? "Ready for pickup"
+          : result.status === "pending_approval"
+            ? "Waiting for approval"
+            : result.status === "approved"
+              ? "Approved"
+              : result.status === "confirmed"
+                ? "Confirmed"
+                : "Status"
+      : result.is_catering
+        ? result.status === "pending_approval"
+          ? "Waiting for approval"
+          : result.status === "approved"
+            ? "Approved"
+            : result.status === "confirmed"
+              ? "Table confirmed"
+              : "Status"
+        : result.status === "confirmed"
+          ? "Table confirmed"
+          : "Pending approval"
+    : "Status";
+
+  const statusMessage = result
+    ? result.is_takeout
+      ? result.status === "pending_approval"
+        ? "We received your order. Staff will confirm it soon."
+        : result.status === "ready" || result.status === "released" || result.status === "completed"
+          ? "Your order is ready for pickup."
+          : "Your order is being processed."
+      : result.is_catering
+        ? result.status === "pending_approval"
+          ? "We received your 50% payment. Staff is reviewing your request."
+          : "Your event request is confirmed."
+        : result.status === "confirmed"
+          ? "Your table is reserved."
+          : "We received your request."
+    : "";
+
+  const progressSteps = result
+    ? result.is_takeout
+      ? ["Received", "Approved", "Ready", "Picked up"]
+      : result.is_catering
+        ? ["Request sent", "In review", "Approved", "Event day"]
+        : ["Requested", "Confirmed", "Dined"]
+    : [];
+
+  const currentStepIndex = result
+    ? result.is_takeout
+      ? result.status === "pending_approval"
+        ? 0
+        : result.status === "approved"
+          ? 1
+          : result.status === "ready"
+            ? 2
+            : result.status === "released" || result.status === "completed"
+              ? 3
+              : 0
+      : result.is_catering
+        ? result.status === "pending_approval"
+          ? 1
+          : result.status === "approved"
+            ? 2
+            : result.status === "confirmed"
+              ? 2
+              : 0
+        : result.status === "confirmed"
+          ? 1
+          : 0
+    : 0;
+
+  type DetailPair = {
+    label: string;
+    value: string;
+    fullWidth?: boolean;
+    isTag?: boolean;
+  };
+
+  type PaymentRow = {
+    label: string;
+    value: string;
+    strong?: boolean;
+    red?: boolean;
+  };
+
+  const detailPairs: DetailPair[] = result
+    ? result.is_takeout
+      ? [
+          { label: "Ordered items", value: result.order_items?.length ? `${result.order_items.length} item${result.order_items.length === 1 ? "" : "s"}` : "—" },
+          { label: "Total to pay", value: result.total_price != null ? `₱${result.total_price.toFixed(2)}` : "—" },
+          { label: "Payment", value: result.payment_status ?? result.payment_plan ?? "Pay at pickup", isTag: Boolean(result.payment_status) || Boolean(result.payment_plan) }
+        ]
+      : result.is_catering
+        ? [
+            { label: "Event type", value: result.event_type ? formatCateringEventType(result.event_type, result.event_type_other) : "—" },
+            { label: "Date & time", value: result.date && result.time ? `${formatManilaDate(result.date)} · ${formatTime12(result.time)}` : "—" },
+            { label: "Package", value: result.package_name ?? "—", fullWidth: true }
+          ]
+        : [
+            { label: "Date", value: result.date ? formatManilaDate(result.date) : "—" },
+            { label: "Time", value: result.time ? formatTime12(result.time) : "—" },
+            { label: "Party size", value: result.party_size != null ? `${result.party_size} guest${result.party_size === 1 ? "" : "s"}` : "—" },
+            { label: "Payment", value: result.payment_status ?? result.payment_plan ?? "Pay at restaurant" }
+          ]
+    : [];
+
+  const paymentRows: PaymentRow[] = result
+    ? result.is_takeout
+      ? [
+          { label: "Item total", value: result.total_price != null ? `₱${result.total_price.toFixed(2)}` : "—" },
+          { label: "Total to pay at pickup", value: result.total_price != null ? `₱${result.total_price.toFixed(2)}` : "—", strong: true }
+        ]
+      : result.is_catering
+        ? [
+            { label: "Package total", value: result.package_total != null ? `₱${result.package_total.toFixed(2)}` : "—" },
+            { label: "Paid so far", value: result.net_paid != null ? `₱${result.net_paid.toFixed(2)}` : "—" },
+            { label: "Balance due", value: result.remaining_balance != null ? `₱${result.remaining_balance.toFixed(2)}` : "—", strong: true, red: true }
+          ]
+        : []
+    : [];
+
+  const venueDetails = result && result.is_catering
+    ? [
+        result.venue_type ? ["Venue address", result.venue_type] : null,
+        result.total_price != null ? ["Approved total", `₱${result.total_price.toFixed(2)}`] : null,
+        result.payment_plan ? ["Payment choice", result.payment_plan === "full_payment" ? "100% of package total" : "50% of package total"] : null,
+        result.full_payment_paid !== undefined ? ["Full payment status", result.full_payment_paid ? "Paid" : "Not yet paid"] : null,
+        result.package_name ? ["Package details", result.package_name] : null,
+        result.special_requests ? ["Special requests", result.special_requests] : null,
+        result.rejected_reason ? ["Reason", result.rejected_reason] : null
+      ].filter(Boolean) as Array<[string, string]>
+    : [];
+
   return (
-    <main className="px-4 pt-3 pb-8 md:pb-10">
+    <main className="min-h-screen bg-[#f5f2f1] px-3 py-6 text-[#241a1c] md:px-4">
       <div className="customer-shell mb-4">
         <BackToHome />
       </div>
-      <section className="customer-shell max-w-2xl">
-        <div className="customer-card overflow-hidden">
-          <div className="border-b border-katana-border px-6 py-5">
-            <p className="customer-kicker">Reservation</p>
-            <h1 className="mt-2 font-display text-3xl font-bold text-white">Check Booking Status</h1>
-          </div>
-          <form onSubmit={checkStatus} className="space-y-4 p-6">
-            <label className="block">
-              <span className="customer-label">Booking ID</span>
-              <input className="customer-input uppercase" value={bookingId} onChange={(event) => setBookingId(event.target.value)} placeholder="KTN-20260604-0001 or KTO-..." />
-            </label>
-            {bookingId.trim().toUpperCase().startsWith("KTO-") && (
-              <label className="block">
-                <span className="customer-label">Phone number used for pickup</span>
-                <input className="customer-input" inputMode="numeric" maxLength={11} value={phone} onChange={(event) => setPhone(event.target.value.replace(/\D/g, "").slice(0, 11))} />
-              </label>
-            )}
-            <button className="customer-btn-primary flex w-full gap-2" type="submit">
-              <Search className="h-4 w-4" /> Check Status
-            </button>
-            {message && <p className="rounded-xl border border-katana-red/30 bg-katana-red/10 px-4 py-3 text-sm text-katana-red">{message}</p>}
-          </form>
-
-          {result && (
-            <div className="border-t border-katana-border p-6">
-              <div className="flex items-center gap-3">
-                {statusIcon}
-                <div>
-                  <p className="text-xs font-bold uppercase tracking-[0.18em] text-katana-muted">Status</p>
-                  <p className="font-display text-2xl font-bold capitalize text-white">
-                    {result.is_takeout && result.status === "released" ? "completed" : result.status.replace(/_/g, " ")}
-                  </p>
-                </div>
-              </div>
-              {result.is_takeout && result.status === "ready" && (
-                <p className="mt-4 rounded-xl border border-emerald-400/50 bg-emerald-500/15 px-4 py-3 font-bold text-[var(--customer-text)]" role="status">
-                  Your order is ready for pickup.
-                  {result.ready_at ? ` Pickup Time: ${formatManilaDateTime(result.ready_at, { hour: "numeric", minute: "2-digit" })}.` : ""}
-                </p>
-              )}
-              {result.is_takeout && result.status === "declined" && (
-                <p className="mt-4 rounded-xl border border-red-400/50 bg-red-500/10 px-4 py-3 font-semibold text-[var(--customer-text)]" role="status">
-                  Your pickup order was declined by staff.
-                </p>
-              )}
-              {result.is_takeout && result.status === "pending_approval" && (
-              <p className="mt-4 rounded-xl border border-amber-400/50 bg-amber-500/10 px-4 py-3 font-semibold text-[var(--customer-text)]" role="status">
-                Your pickup order was received and is waiting for staff approval.
-              </p>
-              )}
-              <div className="mt-6 space-y-2 text-sm text-neutral-300">
-                {result.date && <p>Date: {formatManilaDate(result.date)}</p>}
-                {result.time && <p>Time: {formatTime12(result.time)}</p>}
-                {result.event_type && <p>Event type: {formatCateringEventType(result.event_type, result.event_type_other)}</p>}
-                {result.party_size !== undefined && !result.is_catering && <p>Party size: {result.party_size}</p>}
-                {result.order_items?.map((item, index) => (
-                  <p key={`${item.name}-${index}`}>{item.quantity} × {item.name} — ₱{item.total_price.toFixed(2)}</p>
-                ))}
-                {result.is_catering && result.package_total != null && <p>Package total: ₱{result.package_total.toFixed(2)}</p>}
-                {result.is_catering && Number(result.mobilization_fee ?? 0) > 0 && (
-                  <p>Mobilization fee: ₱{Number(result.mobilization_fee).toFixed(2)}</p>
-                )}
-                {result.total_price != null && <p>{result.is_catering ? "Approved total" : "Total"}: ₱{result.total_price.toFixed(2)}</p>}
-                {result.payment_plan && <p>Payment choice: {
-                  result.is_catering
-                    ? result.payment_plan === "full_payment" ? "100% of package total" : "50% of package total"
-                    : result.payment_plan === "full_payment" ? "Pay in full" :
-                    result.payment_plan === "pay_at_venue" ? "Pay at the restaurant" :
-                        result.payment_plan === "pay_now" ? "Pay online in full" :
-                        result.payment_plan === "pay_at_pickup" ? "Pay at pickup" :
-                          "Previous payment arrangement"
-                }</p>}
-                {result.total_price != null && result.net_paid !== undefined
-                  ? <p>Payment collected: ₱{result.net_paid.toFixed(2)}</p>
-                  : result.total_price != null && result.downpayment_amount !== undefined
-                    ? <p>Payment collected: ₱{result.downpayment_amount.toFixed(2)}</p>
-                    : null}
-                {result.payment_status && <p>Payment status: {result.payment_status}</p>}
-                {result.total_price != null && result.remaining_balance !== undefined && <p>Amount due: ₱{result.remaining_balance.toFixed(2)}</p>}
-                {result.full_payment_paid !== undefined && <p>{result.is_catering ? "All approved charges paid" : "Full payment completed"}: {result.full_payment_paid ? "Yes" : "No"}</p>}
-                {result.special_requests && <p>Special requests: {result.special_requests}</p>}
-                {result.package_name && <p>Package: {result.package_name}</p>}
-                {formatCateringPackageSnapshots(result.package_snapshot).map((line) => <p key={line}>{line}</p>)}
-                {result.venue_type && <p>Venue address: {result.venue_type}</p>}
-                {result.rejected_reason && <p className="text-katana-red">Reason: {result.rejected_reason}</p>}
-                {result.alternative_suggestions && <p>Suggestion: {result.alternative_suggestions}</p>}
-              </div>
-              {result.is_catering && result.status === "pending_approval" && Number(result.initial_payment_due ?? 0) > 0 && (
-                <section className="mt-6 space-y-3 rounded-xl border border-amber-400/30 bg-amber-400/10 p-4">
-                  <p className="text-sm font-semibold text-[var(--customer-text)]">
-                    Pay {result.payment_plan === "full_payment" ? "100%" : "50%"} of the package total to complete your request. Staff will review it afterward.
-                  </p>
-                  <p className="text-sm text-[var(--customer-text)]">Payment method: Cash (fake gateway)</p>
-                  <button
-                    className="customer-btn-primary w-full"
-                    type="button"
-                    disabled={isPaying}
-                    onClick={() => void payCateringBalance("initial")}
-                  >
-                    {isPaying ? "Processing payment..." : `Pay package amount ₱${Number(result.initial_payment_due).toFixed(2)}`}
-                  </button>
-                </section>
-              )}
-              {result.is_catering && result.status === "pending_approval" && result.downpayment_status === "paid" && (
-                <p className="mt-6 rounded-xl border border-amber-400/30 bg-amber-400/10 px-4 py-3 text-sm font-semibold text-[var(--customer-text)]">
-                  Your initial package payment was received. The request is waiting for staff approval.
-                </p>
-              )}
-              {result.is_catering && result.status === "confirmed" && Number(result.remaining_balance ?? 0) > 0 && (
-                <section className="mt-6 space-y-3 rounded-xl border border-amber-400/30 bg-amber-400/10 p-4">
-                  <p className="text-sm font-semibold text-[var(--customer-text)]">
-                    Remaining balance, including any staff-added fee: ₱{Number(result.remaining_balance).toFixed(2)}. Pay before the event date.
-                  </p>
-                  {result.date && manilaDateKey(result.date) > todayManilaDateKey() ? (
-                    <>
-                      <p className="text-sm text-[var(--customer-text)]">Payment method: Cash (fake gateway)</p>
-                      <button
-                        className="customer-btn-primary w-full"
-                        type="button"
-                        disabled={isPaying}
-                        onClick={() => void payCateringBalance("balance")}
-                      >
-                        {isPaying ? "Processing payment..." : `Pay remaining balance ₱${Number(result.remaining_balance).toFixed(2)}`}
-                      </button>
-                    </>
-                  ) : (
-                    <p className="text-sm text-[var(--customer-text)]">Online balance payment is no longer available on or after the event date.</p>
-                  )}
-                </section>
-              )}
-              <Link className="customer-btn-secondary mt-6 inline-flex gap-2" to="/reserve">
-                <CalendarPlus className="h-4 w-4" /> Make Another Reservation
-              </Link>
+      <section className="customer-shell mx-auto max-w-[1180px]">
+        <div className="mx-auto grid max-w-[1200px] gap-6 lg:grid-cols-3">
+          <article className="mx-auto w-full max-w-[400px] overflow-hidden rounded-[22px] border border-[#ead9da] bg-white shadow-[0_18px_40px_rgba(36,26,28,0.08)]">
+            <div className="border-b border-[#f0e3e4] px-5 py-5">
+              <p className="text-[10px] font-extrabold uppercase tracking-[0.28em] text-[#b3262f]">Reservation</p>
+              <h1 className="mt-2 text-[22px] font-extrabold tracking-[-0.04em] text-[#241a1c]">Check Booking Status</h1>
             </div>
-          )}
+            <form onSubmit={checkStatus} className="space-y-4 p-5">
+              <label className="block">
+                <span className="mb-2 block text-[11.5px] font-bold text-[#241a1c]">Booking ID</span>
+                <input className="h-10 w-full rounded-[12px] border border-[#ead9da] bg-[#fdf5f5] px-3 text-[13px] text-[#241a1c] outline-none transition focus:border-[#b3262f] focus:ring-2 focus:ring-[#b3262f]/10 uppercase" value={bookingId} onChange={(event) => setBookingId(event.target.value)} placeholder="KTN-20260604-0001 or KTO-..." />
+              </label>
+              {bookingId.trim().toUpperCase().startsWith("KTO-") && (
+                <label className="block">
+                  <span className="mb-2 block text-[11.5px] font-bold text-[#241a1c]">Phone number used for pickup</span>
+                  <input className="h-10 w-full rounded-[12px] border border-[#ead9da] bg-[#fdf5f5] px-3 text-[13px] text-[#241a1c] outline-none transition focus:border-[#b3262f] focus:ring-2 focus:ring-[#b3262f]/10" inputMode="numeric" maxLength={11} value={phone} onChange={(event) => setPhone(event.target.value.replace(/\D/g, "").slice(0, 11))} />
+                </label>
+              )}
+              <button className="flex w-full items-center justify-center gap-2 rounded-[12px] bg-[#b3262f] px-4 py-3 text-[11px] font-extrabold uppercase tracking-[0.18em] text-white shadow-[0_10px_18px_rgba(179,38,47,0.18)] transition hover:bg-[#9f2029]" type="submit">
+                <Search className="h-4 w-4" />
+                Check status
+              </button>
+              {message && <p className="rounded-xl border border-[#f0c7c9] bg-[#fff5f5] px-3 py-2 text-sm font-medium text-[#b3262f]">{message}</p>}
+            </form>
+
+            {result && (
+              <div className="border-t border-[#f0e3e4] p-5">
+                <div aria-live="polite" className="flex items-center gap-3">
+                  <div className={`flex h-9 w-9 items-center justify-center rounded-full ${statusTone === "amber" ? "bg-[#fff6e0] text-[#9a6200]" : "bg-[#e8f6ee] text-[#1f7a4d]"}`}>
+                    {statusIcon}
+                  </div>
+                  <div className="min-w-0">
+                    <p className="text-[10px] font-extrabold uppercase tracking-[0.22em] text-[#8d7a7d]">Status</p>
+                    <p className="mt-1 text-lg font-extrabold text-[#241a1c]">{statusTitle}</p>
+                  </div>
+                </div>
+
+                <p className={`mt-4 rounded-xl border px-3 py-2 text-sm ${statusTone === "amber" ? "border-[#f0d9a5] bg-[#fffaf0] text-[#7e5410]" : "border-[#bfe5cc] bg-[#f2faf5] text-[#1c6840]"}`} role="status">
+                  {statusMessage}
+                </p>
+
+                {progressSteps.length > 0 && (
+                  <div className="mt-5">
+                    <div className="flex items-center gap-2">
+                      {progressSteps.map((step, index) => {
+                        const isComplete = index < currentStepIndex;
+                        const isCurrent = index === currentStepIndex;
+                        const isUpcoming = index > currentStepIndex;
+
+                        return (
+                          <div key={step} className="flex min-w-0 flex-1 items-center gap-2">
+                            <div className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full border text-[8px] font-bold ${
+                              isComplete
+                                ? "border-[#b3262f] bg-[#b3262f] text-white"
+                                : isCurrent
+                                  ? "border-[#b3262f] bg-white text-[#b3262f]"
+                                  : "border-[#e2d7d8] bg-[#f5f1f1] text-[#bdb0b1]"
+                            }`}>
+                              {isComplete ? <Check className="h-3 w-3" strokeWidth={3} /> : index + 1}
+                            </div>
+                            {index < progressSteps.length - 1 && (
+                              <div className={`h-px flex-1 ${isComplete ? "bg-[#b3262f]" : isCurrent ? "bg-[#ead9da]" : "bg-[#ead9da]"}`} />
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                    <div className="mt-2 flex items-start justify-between gap-2 text-[10px] font-semibold uppercase tracking-[0.08em] text-[#8d7a7d]">
+                      {progressSteps.map((step, index) => (
+                        <span key={`${step}-${index}`} className={index === currentStepIndex ? "text-[#241a1c]" : ""}>{step}</span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                <div className="mt-5 grid grid-cols-2 gap-3">
+                  {detailPairs.map((detail) => (
+                    <div
+                      key={detail.label}
+                      className={`rounded-xl border border-[#f0e3e4] bg-[#fdf5f5] px-3 py-2 ${detail.fullWidth ? "col-span-2" : ""}`}
+                    >
+                      <p className="text-[10px] font-bold uppercase tracking-[0.12em] text-[#8d7a7d]">{detail.label}</p>
+                      <div className="mt-1 flex items-center justify-between gap-2 text-[12px] font-bold text-[#241a1c]">
+                        <span className="min-w-0 break-words">{detail.value}</span>
+                        {detail.isTag && (
+                          <span className="shrink-0 rounded-full border border-[#cfead9] bg-[#f0faf5] px-2 py-0.5 text-[9px] font-extrabold uppercase tracking-[0.08em] text-[#1f7a4d]">
+                            {detail.value.includes("paid") || detail.value.toLowerCase().includes("paid") ? "Paid" : "Unpaid"}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                {paymentRows.length > 0 && (
+                  <div className="mt-5 overflow-hidden rounded-[14px] border border-[#f0e3e4] bg-[#fff8f8]">
+                    {paymentRows.map((row, index) => (
+                      <div
+                        key={row.label}
+                        className={`flex items-center justify-between gap-3 px-3 py-2.5 text-[12px] ${index !== paymentRows.length - 1 ? "border-b border-[#f0e3e4]" : ""}`}
+                      >
+                        <span className="text-[#8d7a7d]">{row.label}</span>
+                        <span className={`${row.strong ? "font-extrabold" : "font-semibold"} ${row.red ? "text-[#b3262f]" : "text-[#241a1c]"}`}>
+                          {row.value}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {result.is_catering && venueDetails.length > 0 && (
+                  <details className="mt-4 rounded-xl border border-[#ead9da] bg-[#fdf5f5]">
+                    <summary className="cursor-pointer list-none px-3 py-2.5 text-[11px] font-extrabold uppercase tracking-[0.12em] text-[#241a1c]">
+                      Venue and more details
+                    </summary>
+                    <div className="border-t border-[#ead9da] px-3 py-3 text-[12px] text-[#241a1c]">
+                      <div className="space-y-2">
+                        {venueDetails.map(([label, value]) => (
+                          <div key={label} className="flex items-start justify-between gap-3">
+                            <span className="text-[#8d7a7d]">{label}</span>
+                            <span className="max-w-[58%] text-right font-semibold break-words">{value}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </details>
+                )}
+
+                <Link className="mt-6 inline-flex w-full items-center justify-center gap-2 rounded-full border border-[#b3262f] bg-transparent px-4 py-2.5 text-[11px] font-extrabold uppercase tracking-[0.14em] text-[#b3262f] transition hover:bg-[#fff5f5]" to="/reserve">
+                  <CalendarPlus className="h-4 w-4" />
+                  Make another reservation
+                </Link>
+              </div>
+            )}
+          </article>
         </div>
       </section>
     </main>

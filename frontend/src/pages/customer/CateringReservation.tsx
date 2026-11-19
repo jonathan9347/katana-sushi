@@ -1,6 +1,6 @@
 import { FormEvent, ReactNode, useEffect, useId, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
-import { Banknote, Check, CheckCircle2, Landmark, LoaderCircle, Send, ShieldCheck, ShoppingBag, Smartphone, X } from "lucide-react";
+import { Banknote, Check, CheckCircle2, Clock3, Copy, Landmark, LoaderCircle, Send, ShieldCheck, ShoppingBag, Smartphone, X } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { Dialog } from "../../components/ui/dialog";
 import BackToHome from "../../components/layout/BackToHome";
@@ -17,6 +17,7 @@ import {
 import { isFutureManilaReservationTime, todayManilaDateKey } from "../../lib/dateTime";
 import { defaultSystemSettings, fetchSystemSettings } from "../../lib/systemSettings";
 import "./CateringReservation.css";
+import "./ReservationForm.css";
 
 type CateringPackage = {
   id: string;
@@ -53,6 +54,7 @@ type SuccessState = {
   reservationId: string;
   packageTotal: number;
   paidAmount: number;
+  remainingBalance: number;
   paymentPlan: "downpayment" | "full_payment";
 };
 
@@ -380,6 +382,8 @@ export default function CateringReservation() {
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [cateringModal, setCateringModal] = useState<"inclusions" | "addons" | null>(null);
   const [success, setSuccess] = useState<SuccessState | null>(null);
+  const [successCopied, setSuccessCopied] = useState(false);
+  const successDialogRef = useRef<HTMLElement | null>(null);
   const paymentInFlightRef = useRef(false);
 
   const packagesQuery = useQuery({
@@ -577,6 +581,12 @@ export default function CateringReservation() {
       return "Choose priced catering options to submit a reservation. Custom quotes are handled through catering inquiries.";
     }
 
+    const hasWholeTuna = selectedStationTypes.includes("whole_tuna");
+    const hasMixedStationSelection = selectedStationTypes.some((id) => id !== "whole_tuna");
+    if (hasWholeTuna && hasMixedStationSelection) {
+      return "Whole Tuna can only be booked by itself.";
+    }
+
     if (!form.payment_plan) {
       return "Choose a payment option.";
     }
@@ -689,6 +699,7 @@ export default function CateringReservation() {
         reservationId: response.data.reservation_id,
         packageTotal: response.data.package_total,
         paidAmount: response.data.paid_amount,
+        remainingBalance: response.data.remaining_balance,
         paymentPlan: response.data.payment_plan
       });
       setDetailsOpen(false);
@@ -700,33 +711,95 @@ export default function CateringReservation() {
     }
   }
 
+  async function copySuccessId() {
+    if (!success) return;
+    await navigator.clipboard.writeText(success.reservationId);
+    setSuccessCopied(true);
+    window.setTimeout(() => setSuccessCopied(false), 1800);
+  }
+
+  function closeSuccess() {
+    setSuccess(null);
+    setSuccessCopied(false);
+  }
+
+  useEffect(() => {
+    if (!success) return;
+    successDialogRef.current?.focus();
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") closeSuccess();
+    };
+    document.addEventListener("keydown", closeOnEscape);
+    return () => document.removeEventListener("keydown", closeOnEscape);
+  }, [success]);
+
   if (success) {
     return (
-      <main className="px-4 pt-3 pb-8 md:pb-10">
-        <div className="customer-shell mb-4">
-          <BackToHome />
-        </div>
-        <section className="customer-shell max-w-lg">
-          <div className="customer-card overflow-hidden">
-            <div className="border-b border-katana-border px-6 py-5">
-              <h1 className="flex items-center gap-2 font-display text-2xl font-bold text-white">
-                <ShieldCheck className="h-5 w-5 text-emerald-400" /> Catering Reservation Sent
-              </h1>
+      <div
+        className="customer-pickup-success-backdrop"
+        onMouseDown={(event) => {
+          if (event.target === event.currentTarget) closeSuccess();
+        }}
+      >
+        <section
+          ref={successDialogRef}
+          className="customer-pickup-success"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="catering-success-title"
+          tabIndex={-1}
+        >
+          <button type="button" className="customer-pickup-success-close" aria-label="Close dialog" onClick={closeSuccess}><X aria-hidden="true" /></button>
+          <div className="customer-pickup-success-icon" style={{ background: "#dcfce7", color: "#1f7a45" }}>
+            <CheckCircle2 aria-hidden="true" />
+          </div>
+          <p className="customer-pickup-success-eyebrow">CATERING RESERVATION</p>
+          <h2 id="catering-success-title">Your request is sent.</h2>
+          <p className="customer-pickup-success-copy">Staff will review your catering request and confirm the next steps. A payment has been recorded and any remaining balance will be settled before the event.</p>
+          <div className="customer-pickup-reference-chip">
+            <strong>{success.reservationId}</strong>
+            <button type="button" onClick={() => void copySuccessId()}><Copy aria-hidden="true" /> Copy</button>
+          </div>
+          {successCopied && <p className="customer-pickup-copy-message" role="status">Reference copied</p>}
+          <div className="customer-pickup-success-details">
+            <div className="customer-pickup-success-detail"><span>Package total</span><strong>{money(success.packageTotal)}</strong></div>
+            <div className="customer-pickup-success-detail"><span>Initial payment</span><strong>{money(success.paidAmount)}</strong></div>
+            <div className="customer-pickup-success-detail"><span>Remaining balance</span><strong>{money(success.remainingBalance)}</strong></div>
+          </div>
+          <div className="mt-4 text-left">
+            <p className="mb-2 text-xs font-semibold uppercase tracking-[0.16em] text-[#6b7280]">Initial payment received</p>
+            <div className="mb-2 flex items-center justify-between text-sm text-[var(--customer-text)]">
+              <span>{success.packageTotal > 0 ? Math.round((success.paidAmount / success.packageTotal) * 100) : 0}%</span>
+              <strong>{money(success.paidAmount)}</strong>
             </div>
-            <div className="space-y-5 p-6 text-sm text-katana-muted">
-              <p className="rounded-xl border border-emerald-500/20 bg-emerald-500/10 px-4 py-3 font-semibold text-emerald-600 dark:text-emerald-300">Reservation ID: {success.reservationId}</p>
-              <p>Package total: <span className="font-semibold text-white">{money(success.packageTotal)}</span></p>
-              <p>Initial payment received ({success.paymentPlan === "full_payment" ? "100%" : "50%"}): <span className="font-semibold text-white">{money(success.paidAmount)}</span></p>
-              <p>Your initial payment is recorded. Staff will review the request; any remaining package balance and added mobilization fee must be paid before the event.</p>
-              <div className="grid gap-3">
-                <Link className="customer-btn-primary text-center" to={`/reservation/status?bookingId=${success.reservationId}`}>
-                  View reservation status
-                </Link>
-              </div>
+            <div role="progressbar" aria-label="Package amount paid" aria-valuemin={0} aria-valuemax={100} aria-valuenow={success.packageTotal > 0 ? Math.min(100, Math.round((success.paidAmount / success.packageTotal) * 100)) : 0} className="h-2 overflow-hidden rounded-full bg-emerald-950/15">
+              <div className="h-full bg-emerald-500" style={{ width: `${success.packageTotal > 0 ? Math.min(100, (success.paidAmount / success.packageTotal) * 100) : 0}%` }} />
             </div>
           </div>
+          <button type="button" className="customer-pickup-success-primary" onClick={() => {
+            setSuccess(null);
+            setSuccessCopied(false);
+            setForm((current) => ({
+              ...current,
+              event_date: earliestEventDate(),
+              event_time: "",
+              venue_address: "",
+              station_types: [],
+              package_by_station: {},
+              package_quantities: {},
+              customer_name: "",
+              customer_phone: "",
+              customer_email: "",
+              event_type: "",
+              event_type_other: "",
+              payment_method: "cash",
+              payment_plan: "",
+              acknowledged: false
+            }));
+          }}>MAKE ANOTHER BOOKING</button>
+          <Link className="customer-pickup-success-link" to={`/reservation/status?bookingId=${encodeURIComponent(success.reservationId)}`} onClick={() => setSuccess(null)}>View reservation status →</Link>
         </section>
-      </main>
+      </div>
     );
   }
 
@@ -1298,101 +1371,120 @@ export default function CateringReservation() {
           open={detailsOpen}
           title="Your contact details"
           onClose={() => !isProcessingPayment && setDetailsOpen(false)}
-          overlayClassName="items-end !px-0 !py-0 sm:items-center sm:!px-4 sm:!py-4"
-          panelClassName="h-[100dvh] max-h-[100dvh] max-w-none rounded-none border border-[color:var(--customer-border)] !bg-[var(--customer-surface)] !text-[var(--customer-text)] sm:h-auto sm:max-h-[90vh] sm:max-w-xl sm:rounded-lg [&>div:first-child]:!border-[color:var(--customer-border)] [&>div:first-child]:!bg-[var(--customer-surface)] [&>div:first-child>h2]:!text-[var(--customer-text)] [&>div:last-child]:!bg-[var(--customer-surface)] [&>div:last-child]:!text-[var(--customer-text)]"
+          overlayClassName="!items-center !px-3 !py-4 sm:!px-5"
+          panelClassName="!max-h-[calc(100vh-32px)] !max-w-[430px] !overflow-hidden !rounded-[24px] !border-0 !bg-white !p-0 !shadow-[0_24px_80px_rgba(36,26,28,0.12)] [&>div:first-child]:!hidden [&>div:last-child]:!bg-white [&>div:last-child]:!p-0 [&>div:last-child]:!overflow-y-auto"
         >
-          <form className="grid gap-4" onSubmit={handleSubmit}>
-            <p className="rounded-lg border border-[color:var(--customer-border)] bg-[var(--customer-surface-2)] p-3 text-sm text-[var(--customer-muted)]">
-              {form.event_date || "Choose an event date"} · {form.event_time || "Choose an event time"} · {form.event_type || "Choose event type"}
-            </p>
-            <label className="grid gap-1 text-sm font-semibold text-[var(--customer-text)]">
-              Your name *
-              <input
-                className="customer-input"
-                autoComplete="name"
-                maxLength={120}
-                value={form.customer_name}
-                onChange={(event) => setField("customer_name", event.target.value)}
-                required
-              />
-            </label>
-            <label className="grid gap-1 text-sm font-semibold text-[var(--customer-text)]">
-              Phone number *
-              <input
-                className="customer-input"
-                type="tel"
-                inputMode="numeric"
-                autoComplete="tel"
-                pattern="09[0-9]{9}"
-                maxLength={11}
-                placeholder="09123456789"
-                value={form.customer_phone}
-                onChange={(event) => setField("customer_phone", event.target.value.replace(/\D/g, "").slice(0, 11))}
-                required
-              />
-            </label>
-            <label className="grid gap-1 text-sm font-semibold text-[var(--customer-text)]">
-              Email *
-              <input
-                className="customer-input"
-                type="email"
-                autoComplete="email"
-                maxLength={254}
-                value={form.customer_email}
-                onChange={(event) => setField("customer_email", event.target.value)}
-                required
-              />
-            </label>
-            <label className="grid gap-1 text-sm font-semibold text-[var(--customer-text)]">
-              Venue address *
-              <textarea
-                className="min-h-24 customer-input"
-                autoComplete="street-address"
-                minLength={5}
-                maxLength={500}
-                placeholder="Complete event venue address"
-                value={form.venue_address}
-                onChange={(event) => setField("venue_address", event.target.value)}
-                required
-              />
-            </label>
-            <div className="rounded-lg border border-[color:var(--customer-border)] bg-[var(--customer-surface-2)] p-3 text-sm text-[var(--customer-muted)]">
-              <p className="font-bold text-[var(--customer-text)]">{form.station_types.map((id) => allStations.find((station) => station.id === id)?.name).filter(Boolean).join(", ") || "No station selected"}</p>
-              <p className="mt-1">Total: {money(totalPriceTotal)}</p>
-              <p className="mt-1">
-                {isZeroQuoteOnlyReservation
-                  ? "A custom quote is required."
-                  : paymentAmountTotal > 0
-                    ? `${isFullPayment ? "100% of package total" : "50% of package total"} required before submission: ${money(paymentAmountTotal)}`
-                    : "Select an option to calculate payment."}
-              </p>
-              {!isZeroQuoteOnlyReservation && <p className="mt-1">Remaining package balance before any staff-added fee: {money(remainingTotal)}</p>}
-            </div>
-            {notice && <p className="rounded-md bg-red-50 px-3 py-2 text-sm font-medium text-red-800" role="alert">{notice}</p>}
-            <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+          <div className="catering-contact-modal">
+            <header className="catering-contact-header">
+              <div className="catering-contact-header-copy">
+                <p className="catering-contact-kicker">Almost done</p>
+                <h2 className="catering-contact-title">Contact details</h2>
+                <p className="catering-contact-subtitle">So we can reach you about your event.</p>
+              </div>
               <button
                 type="button"
-                className="customer-btn-secondary"
-                onClick={() => setDetailsOpen(false)}
+                aria-label="Close dialog"
+                className="catering-contact-close"
+                onClick={() => !isProcessingPayment && setDetailsOpen(false)}
                 disabled={isProcessingPayment}
               >
-                Back
+                <X aria-hidden="true" />
               </button>
+            </header>
+            <form className="catering-contact-form" onSubmit={handleSubmit}>
+              <div className="catering-contact-grid">
+                <label className="catering-contact-field">
+                  <span>Your name <span aria-hidden="true">*</span></span>
+                  <input
+                    className="customer-input catering-contact-input"
+                    autoComplete="name"
+                    maxLength={120}
+                    value={form.customer_name}
+                    onChange={(event) => setField("customer_name", event.target.value)}
+                    required
+                  />
+                </label>
+                <label className="catering-contact-field">
+                  <span>Phone number <span aria-hidden="true">*</span></span>
+                  <input
+                    className="customer-input catering-contact-input"
+                    type="tel"
+                    inputMode="numeric"
+                    autoComplete="tel"
+                    pattern="09[0-9]{9}"
+                    maxLength={11}
+                    placeholder="09123456789"
+                    value={form.customer_phone}
+                    onChange={(event) => setField("customer_phone", event.target.value.replace(/\D/g, "").slice(0, 11))}
+                    required
+                  />
+                </label>
+              </div>
+              <label className="catering-contact-field catering-contact-field-full">
+                <span>Email <span aria-hidden="true">*</span></span>
+                <input
+                  className="customer-input catering-contact-input"
+                  type="email"
+                  autoComplete="email"
+                  maxLength={254}
+                  value={form.customer_email}
+                  onChange={(event) => setField("customer_email", event.target.value)}
+                  required
+                />
+              </label>
+              <label className="catering-contact-field catering-contact-field-full">
+                <span>Venue address <span aria-hidden="true">*</span></span>
+                <textarea
+                  className="customer-input catering-contact-input catering-contact-textarea"
+                  autoComplete="street-address"
+                  minLength={5}
+                  maxLength={500}
+                  placeholder="Complete event venue address"
+                  value={form.venue_address}
+                  onChange={(event) => setField("venue_address", event.target.value)}
+                  required
+                />
+              </label>
+              <div className="catering-contact-summary-box">
+                <div className="catering-contact-summary-row catering-contact-summary-header-row">
+                  <span className="catering-contact-summary-name">{form.station_types.map((id) => allStations.find((station) => station.id === id)?.name).filter(Boolean).join(", ") || "No station selected"}</span>
+                  <span className="catering-contact-summary-total">Total {money(totalPriceTotal)}</span>
+                </div>
+                <div className="catering-contact-summary-row">
+                  <span>50% of package total required before submission</span>
+                  <span className="catering-contact-summary-amount">{money(paymentAmountTotal)}</span>
+                </div>
+                {!isZeroQuoteOnlyReservation && (
+                  <div className="catering-contact-summary-row">
+                    <span>Remaining package balance before any staff-added fee</span>
+                    <span className="catering-contact-summary-balance">{money(remainingTotal)}</span>
+                  </div>
+                )}
+              </div>
+              {notice && <p className="catering-contact-notice" role="alert">{notice}</p>}
               <button
                 type="submit"
-                className="customer-btn-primary"
+                className="catering-contact-submit"
                 disabled={isProcessingPayment}
               >
                 {isProcessingPayment
-                ? "Processing payment..."
+                  ? "Processing payment..."
                   : isZeroQuoteOnlyReservation
                     ? "Select priced packages"
                     : paymentAmountTotal > 0
                       ? "Pay and submit request"
                       : "Choose a payment option"}
               </button>
-            </div>
-          </form>
+              <button
+                type="button"
+                className="catering-contact-back-link"
+                onClick={() => setDetailsOpen(false)}
+                disabled={isProcessingPayment}
+              >
+                Back
+              </button>
+            </form>
+          </div>
         </Dialog>
         </div>
       </section>

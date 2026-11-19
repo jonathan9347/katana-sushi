@@ -69,16 +69,36 @@ function costDisplayUnit(unit: string) {
   return unit;
 }
 
+function isExpiryToday(expirationDate?: string | null, daysUntilExpiry?: number | null) {
+  if (!expirationDate) return false;
+
+  const today = new Date();
+  const todayStart = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+  const expiryDateValue = new Date(expirationDate);
+  const expiryStart = new Date(expiryDateValue.getFullYear(), expiryDateValue.getMonth(), expiryDateValue.getDate());
+
+  if (daysUntilExpiry === 0) {
+    return true;
+  }
+
+  return expiryStart.getTime() === todayStart.getTime();
+}
+
+type BatchSortMode = "received" | "expiration";
+
 export default function BatchManagement({
   initialExpiringOnly = false,
-  onExpiringOnlyChange
+  onExpiringOnlyChange,
+  onQuickDispose
 }: {
   initialExpiringOnly?: boolean;
   onExpiringOnlyChange?: (value: boolean) => void;
+  onQuickDispose?: (batch: MaterialBatch) => void;
 }) {
   const [addOpen, setAddOpen] = useState(false);
   const [materialFilter, setMaterialFilter] = useState("");
   const [showExpiringOnly, setShowExpiringOnly] = useState(initialExpiringOnly);
+  const [batchSortMode, setBatchSortMode] = useState<BatchSortMode>("received");
   const [batchForm, setBatchForm] = useState<BatchForm>(emptyBatchForm);
   const queryClient = useQueryClient();
   const { toast } = useToast();
@@ -113,6 +133,23 @@ export default function BatchManagement({
       return response.data.batches;
     }
   });
+
+  const sortedBatches = useMemo(() => {
+    const batches = [...(batchesQuery.data ?? [])];
+    return batches.sort((a, b) => {
+      const leftDate = new Date(a.received_at).getTime();
+      const rightDate = new Date(b.received_at).getTime();
+      if (batchSortMode === "expiration") {
+        const leftExpiry = a.expiration_date ? new Date(a.expiration_date).getTime() : Number.POSITIVE_INFINITY;
+        const rightExpiry = b.expiration_date ? new Date(b.expiration_date).getTime() : Number.POSITIVE_INFINITY;
+        if (leftExpiry !== rightExpiry) {
+          return leftExpiry - rightExpiry;
+        }
+        return leftDate - rightDate;
+      }
+      return rightDate - leftDate;
+    });
+  }, [batchesQuery.data, batchSortMode]);
 
   const expiringQuery = useQuery({
     queryKey: ["inventory", "batches", "expiring"],
@@ -182,26 +219,36 @@ export default function BatchManagement({
             </CardTitle>
           </CardHeader>
           <CardContent className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-            {expiringQuery.data?.map((batch) => (
-              <div
-                key={batch.id}
-                className={`rounded-lg border p-4 ${batch.expiryStatus === "expired" ? "border-red-200 bg-red-50" : "border-amber-200 bg-white"} text-slate-900`}
-              >
-                <p className="font-semibold text-slate-950">{batch.raw_material.name}</p>
-                <p className="mt-1 text-sm text-slate-600">
-                  Batch {batch.batch_number} · {Number(batch.remaining_quantity).toLocaleString()} {batch.raw_material.unit}
-                </p>
-                <p className="mt-1 text-sm font-medium">
-                  {batch.expiration_date && batch.daysUntilExpiry !== null && batch.daysUntilExpiry !== undefined
-                    ? batch.daysUntilExpiry < 0
-                      ? `Expired ${Math.abs(batch.daysUntilExpiry)} day(s) ago`
-                      : `Expires in ${batch.daysUntilExpiry} day(s) — ${new Date(batch.expiration_date).toLocaleDateString()}`
-                    : batch.expiration_date
-                    ? `Expires ${new Date(batch.expiration_date).toLocaleDateString()}`
-                    : "No expiration date"}
-                </p>
-              </div>
-            ))}
+            {expiringQuery.data?.map((batch) => {
+              const expiresToday = isExpiryToday(batch.expiration_date, batch.daysUntilExpiry);
+              return (
+                <div
+                  key={batch.id}
+                  className={`rounded-lg border p-4 ${batch.expiryStatus === "expired" || expiresToday ? "border-red-200 bg-red-50" : "border-amber-200 bg-white"} text-slate-900`}
+                >
+                  <p className="font-semibold text-slate-950">{batch.raw_material.name}</p>
+                  <p className="mt-1 text-sm text-slate-600">
+                    Batch {batch.batch_number} · {Number(batch.remaining_quantity).toLocaleString()} {batch.raw_material.unit}
+                  </p>
+                  <p className={`mt-1 text-sm font-medium ${expiresToday ? "text-red-700" : "text-slate-700"}`}>
+                    {batch.expiration_date && batch.daysUntilExpiry !== null && batch.daysUntilExpiry !== undefined
+                      ? batch.daysUntilExpiry < 0
+                        ? `Expired ${Math.abs(batch.daysUntilExpiry)} day(s) ago`
+                        : expiresToday
+                          ? `Expires today — ${new Date(batch.expiration_date).toLocaleDateString()}`
+                          : `Expires in ${batch.daysUntilExpiry} day(s) — ${new Date(batch.expiration_date).toLocaleDateString()}`
+                      : batch.expiration_date
+                      ? `Expires ${new Date(batch.expiration_date).toLocaleDateString()}`
+                      : "No expiration date"}
+                  </p>
+                  {expiresToday && onQuickDispose && (
+                    <Button type="button" variant="danger" size="sm" className="mt-3" onClick={() => onQuickDispose(batch)}>
+                      Dispose Now
+                    </Button>
+                  )}
+                </div>
+              );
+            })}
           </CardContent>
         </Card>
       )}
@@ -221,6 +268,12 @@ export default function BatchManagement({
                 </option>
               ))}
             </Select>
+            <Button
+              variant={batchSortMode === "expiration" ? "default" : "outline"}
+              onClick={() => setBatchSortMode((current) => current === "received" ? "expiration" : "received")}
+            >
+              {batchSortMode === "expiration" ? "Sort by Received Date" : "Sort by Expiration"}
+            </Button>
             <Button variant={showExpiringOnly ? "default" : "outline"} onClick={toggleExpiringOnly}>
               Expiring within 7 days
             </Button>
@@ -233,10 +286,10 @@ export default function BatchManagement({
         <CardContent>
           {batchesQuery.isLoading && <p className="text-sm text-slate-500">Loading batches...</p>}
           {batchesQuery.isError && <p className="text-sm text-red-700">Unable to load batches.</p>}
-          {batchesQuery.data?.length === 0 && !batchesQuery.isLoading && (
+          {sortedBatches.length === 0 && !batchesQuery.isLoading && (
             <p className="text-sm text-slate-500">No batches found. Receive stock with a batch number and expiration date.</p>
           )}
-          {!!batchesQuery.data?.length && (
+          {!!sortedBatches.length && (
             <div className="overflow-x-auto">
               <Table>
                 <TableHeader>
@@ -247,25 +300,40 @@ export default function BatchManagement({
                     <TableHead>Received</TableHead>
                     <TableHead>Expiration</TableHead>
                     <TableHead>Status</TableHead>
+                    <TableHead>Action</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {batchesQuery.data.map((batch) => (
-                    <TableRow key={batch.id}>
-                      <TableCell className="font-medium">{batch.raw_material.name}</TableCell>
-                      <TableCell>{batch.batch_number}</TableCell>
-                      <TableCell>
-                        {Number(batch.remaining_quantity).toLocaleString()} / {Number(batch.quantity).toLocaleString()} {batch.raw_material.unit}
-                      </TableCell>
-                      <TableCell>{new Date(batch.received_at).toLocaleDateString()}</TableCell>
-                      <TableCell>{batch.expiration_date ? new Date(batch.expiration_date).toLocaleDateString() : "—"}</TableCell>
-                      <TableCell>
-                        <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${expiryBadge(batch.expiryStatus)}`}>
-                          {expiryLabel(batch.expiryStatus)}
-                        </span>
-                      </TableCell>
-                    </TableRow>
-                  ))}
+                  {sortedBatches.map((batch) => {
+                    const expiresToday = isExpiryToday(batch.expiration_date, batch.daysUntilExpiry);
+                    return (
+                      <TableRow key={batch.id} className={expiresToday ? "bg-red-50/80" : undefined}>
+                        <TableCell className="font-medium">{batch.raw_material.name}</TableCell>
+                        <TableCell>{batch.batch_number}</TableCell>
+                        <TableCell>
+                          {Number(batch.remaining_quantity).toLocaleString()} / {Number(batch.quantity).toLocaleString()} {batch.raw_material.unit}
+                        </TableCell>
+                        <TableCell>{new Date(batch.received_at).toLocaleDateString()}</TableCell>
+                        <TableCell className={expiresToday ? "font-semibold text-red-700" : undefined}>
+                          {batch.expiration_date ? new Date(batch.expiration_date).toLocaleDateString() : "—"}
+                        </TableCell>
+                        <TableCell>
+                          <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${expiryBadge(batch.expiryStatus)}`}>
+                            {expiryLabel(batch.expiryStatus)}
+                          </span>
+                        </TableCell>
+                        <TableCell>
+                          {expiresToday && onQuickDispose ? (
+                            <Button type="button" variant="danger" size="sm" onClick={() => onQuickDispose(batch)}>
+                              Dispose Now
+                            </Button>
+                          ) : (
+                            <span className="text-xs text-slate-400">—</span>
+                          )}
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
                 </TableBody>
               </Table>
             </div>
