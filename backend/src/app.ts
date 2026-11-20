@@ -678,12 +678,30 @@ const frontendUrl = process.env.FRONTEND_URL?.trim();
 const allowedFrontendOrigins = new Set([
   "http://localhost:5173",
   "http://127.0.0.1:5173",
-  "https://katana-sushi-u54k.vercel.app",
   frontendUrl
 ].filter((origin): origin is string => Boolean(origin)));
 
+function isVercelFrontendOrigin(origin?: string) {
+  if (!origin) {
+    return false;
+  }
+
+  try {
+    const parsed = new URL(origin);
+    return (
+      parsed.protocol === "https:" &&
+      parsed.port === "" &&
+      parsed.origin === origin &&
+      (parsed.hostname === "katana-sushi.vercel.app" ||
+        /^katana-sushi-.+\.vercel\.app$/.test(parsed.hostname))
+    );
+  } catch {
+    return false;
+  }
+}
+
 function isLocalFrontendOrigin(origin?: string) {
-  if (!origin || allowedFrontendOrigins.has(origin)) {
+  if (!origin || allowedFrontendOrigins.has(origin) || isVercelFrontendOrigin(origin)) {
     return true;
   }
 
@@ -706,7 +724,7 @@ function isLocalFrontendOrigin(origin?: string) {
 
 if (process.env.NODE_ENV === "production" && !frontendUrl) {
   console.warn(
-    "WARNING: FRONTEND_URL is not set in production. Netlify frontends are allowed by default if the request origin ends with .netlify.app, but set FRONTEND_URL to your exact domain for strict CORS enforcement."
+    "WARNING: FRONTEND_URL is not set in production. Katana Sushi Vercel and Netlify frontends are allowed by default, but set FRONTEND_URL to your exact domain for strict CORS enforcement."
   );
 }
 
