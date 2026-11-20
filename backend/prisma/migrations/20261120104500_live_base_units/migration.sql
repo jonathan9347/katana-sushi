@@ -56,17 +56,6 @@ FROM live_base_unit_materials AS units
 WHERE entry.raw_material_id = units.raw_material_id
   AND entry.unit IS NOT NULL;
 
-UPDATE public.inventory_movements AS entry
-SET quantity = entry.quantity * units.factor,
-    quantity_before = entry.quantity_before * units.factor,
-    quantity_after = entry.quantity_after * units.factor,
-    reserved_before = entry.reserved_before * units.factor,
-    reserved_after = entry.reserved_after * units.factor,
-    unit = units.target_unit
-FROM live_base_unit_materials AS units
-WHERE entry.raw_material_id = units.raw_material_id
-  AND entry.unit IS NOT NULL;
-
 UPDATE public.catering_ingredient_locks AS entry
 SET reserved_quantity = entry.reserved_quantity * units.factor,
     unit = units.target_unit
