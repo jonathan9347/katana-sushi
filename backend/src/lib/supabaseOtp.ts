@@ -23,8 +23,11 @@ export class SupabaseEmailOtp {
   private readonly apiKey: string | null;
 
   constructor(
-    url = process.env.SUPABASE_URL?.trim(),
-    key = process.env.SUPABASE_ANON_KEY?.trim() || process.env.SUPABASE_SERVICE_ROLE_KEY?.trim(),
+    // SUPABASE_AUTH_URL/KEY let staff codes come from a different Supabase project than storage.
+    url = process.env.SUPABASE_AUTH_URL?.trim() || process.env.SUPABASE_URL?.trim(),
+    key = process.env.SUPABASE_AUTH_KEY?.trim() ||
+      process.env.SUPABASE_ANON_KEY?.trim() ||
+      process.env.SUPABASE_SERVICE_ROLE_KEY?.trim(),
     private readonly fetchImpl: FetchLike = (input, init) => fetch(input, init)
   ) {
     let baseUrl: string | null = null;
@@ -37,7 +40,9 @@ export class SupabaseEmailOtp {
       }
     }
     this.baseUrl = baseUrl;
-    this.apiKey = key && !looksLikePlaceholder(key) ? key : null;
+    // Pasted keys sometimes carry line breaks or spaces; a Supabase key never contains whitespace.
+    const cleanedKey = key?.replace(/\s+/g, "");
+    this.apiKey = cleanedKey && !looksLikePlaceholder(cleanedKey) ? cleanedKey : null;
   }
 
   get isConfigured() {
@@ -74,7 +79,8 @@ export class SupabaseEmailOtp {
         headers: {
           "Content-Type": "application/json",
           apikey: this.apiKey,
-          Authorization: `Bearer ${this.apiKey}`
+          // Only legacy JWT keys (eyJ...) go in Authorization; new sb_publishable_/sb_secret_ keys are not JWTs.
+          ...(this.apiKey.startsWith("eyJ") ? { Authorization: `Bearer ${this.apiKey}` } : {})
         },
         body: JSON.stringify(payload),
         signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS)

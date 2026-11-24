@@ -96,6 +96,7 @@ Staff sign-ins stay in Katana's own database. Supabase Auth is used only to emai
 Setup in the Supabase dashboard (project `jiewnzbjaiddzbwcjjvm`):
 
 1. Render: set `SUPABASE_URL=https://jiewnzbjaiddzbwcjjvm.supabase.co` and `SUPABASE_ANON_KEY` (Project Settings -> API -> anon/public key).
+   If you manage the codes in a different Supabase project, set `SUPABASE_AUTH_URL` (that project's URL) and `SUPABASE_AUTH_KEY` (its publishable key) instead; storage keeps using `SUPABASE_URL`. Do steps 2-5 in that project.
 2. Authentication -> Providers -> Email: keep Email enabled and allow new users to sign up (codes create a Supabase Auth user the first time).
 3. Authentication -> URL Configuration: set Site URL to the customer site, for example `https://katana-sushi-sage.vercel.app`.
 4. Authentication -> Emails -> Templates: edit both "Magic Link" and "Confirm signup" so the email shows the code, for example:

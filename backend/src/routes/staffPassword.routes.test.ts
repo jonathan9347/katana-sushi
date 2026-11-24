@@ -155,3 +155,18 @@ test("verifyCode refuses a code Supabase issued for a different email", async ()
   const result = await otp.verifyCode("chef@katana.test", "123456");
   assert.equal(result.ok, false);
 });
+
+test("sends new-style keys only as apikey, and strips pasted line breaks", async () => {
+  const seen: Array<Record<string, string>> = [];
+  const capture = async (_url: string, init?: RequestInit) => {
+    seen.push(init?.headers as Record<string, string>);
+    return new Response("{}", { status: 200 });
+  };
+  await new SupabaseEmailOtp("https://project.supabase.co", "sb_publishable_abc\n123", capture).sendCode("a@b.test");
+  assert.equal(seen[0].apikey, "sb_publishable_abc123");
+  assert.equal(seen[0].Authorization, undefined);
+
+  await new SupabaseEmailOtp("https://project.supabase.co", " eyJhbGci.payload.sig ", capture).sendCode("a@b.test");
+  assert.equal(seen[1].apikey, "eyJhbGci.payload.sig");
+  assert.equal(seen[1].Authorization, "Bearer eyJhbGci.payload.sig");
+});
