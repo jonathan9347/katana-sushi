@@ -1,5 +1,27 @@
 export type GatewayPaymentMethod = "cash" | "gcash" | "bank_transfer" | "paymongo";
 
+/** Ways a customer can pay on Katana's own PayMongo payment page. */
+export type OnlinePaymentChannel = "qrph" | "card" | "gcash" | "paymaya";
+
+/** What the customer must do next after choosing a payment method. */
+export type PaymentNextAction =
+  | { type: "qr"; imageUrl: string; expiresAt?: string; testUrl?: string }
+  | { type: "redirect"; url: string };
+
+export interface StartPaymentInput {
+  channel: OnlinePaymentChannel;
+  /** Card payments: a payment method the browser created directly with PayMongo. */
+  paymentMethodId?: string;
+  billing?: { name?: string; email?: string; phone?: string };
+  returnUrl: string;
+}
+
+export interface StartPaymentResult {
+  status: "paid" | "action_required" | "pending" | "failed";
+  nextAction?: PaymentNextAction;
+  message?: string;
+}
+
 export interface PaymentGateway {
   readonly gatewayName: string;
   /** True when the customer completes payment on a page hosted by the provider (redirect + webhook). */
@@ -14,6 +36,8 @@ export interface PaymentGateway {
   resumePaymentIntent?(gatewayReference: string): Promise<{ paymentUrl: string } | null>;
   /** Stops a hosted checkout from accepting payment. */
   cancelPaymentIntent?(gatewayReference: string): Promise<void>;
+  /** Attaches the customer's chosen payment method and returns what they must do next. */
+  startPayment?(gatewayReference: string, input: StartPaymentInput): Promise<StartPaymentResult>;
 }
 
 export interface CreatePaymentIntentParams {
@@ -63,6 +87,10 @@ export interface VerifyPaymentResult {
   paidAt?: Date;
   /** Hosted checkout: the channel the customer used, e.g. gcash, card, qrph, paymaya. */
   paymentChannel?: string;
+  /** Still pending: what the customer still has to do (for example, scan the QR code). */
+  nextAction?: PaymentNextAction;
+  /** Still pending: why the last attempt failed, if it did. */
+  lastError?: string;
   message?: string;
 }
 

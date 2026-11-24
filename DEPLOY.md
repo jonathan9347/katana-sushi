@@ -11,6 +11,7 @@ Deployment notes
 - `FRONTEND_URL`: the customer site URL (for example `https://katana-sushi.vercel.app`); PayMongo returns customers here.
 - `PAYMENT_GATEWAY`: `paymongo`
 - `PAYMONGO_SECRET_KEY`: PayMongo secret key (`sk_test_...` while testing, `sk_live_...` when live)
+- `PAYMONGO_PUBLIC_KEY`: PayMongo public key from the same mode (`pk_test_...` or `pk_live_...`), used by the card form
 - `PAYMONGO_WEBHOOK_SECRET`: secret of the registered webhook (`whsk_...`, see "PayMongo payments" below)
 
 Set these values in the Render dashboard. The backend Render blueprint leaves the secrets unsynchronized so database credentials and JWT secrets are not committed to the repository. Copy the pooler URLs from the Supabase dashboard; do not reuse the transaction pooler URL for `DIRECT_URL`.
@@ -36,18 +37,22 @@ If your Postgres host resolves only to IPv6 and Render cannot reach IPv6 hosts f
 
 5) PayMongo payments
 
-Catering payments (50% downpayment, full package payment, and the remaining balance) use PayMongo's hosted Checkout. Customers choose QR Ph, card, GCash, or Maya on PayMongo's page.
+Catering payments (50% downpayment, full package payment, and the remaining balance) use Katana's own payment page at `/payment/:reference`, built on PayMongo's Payment Intents API. The page header shows "Katana Sushi Catering"; customers choose QR Ph, card, GCash, or Maya there.
 
 How a payment flows:
 
 1. The customer submits a catering request. The booking is saved as pending approval with the initial payment unpaid.
-2. The API creates a PayMongo checkout session for the amount the server computes from the booking, and the browser goes to PayMongo.
-3. After paying, PayMongo sends the customer to `/payment/return?reference=...`. That page polls `GET /api/payments/status/:reference`, which reads the session back from PayMongo.
-4. PayMongo also calls `POST /api/payments/paymongo/webhook`. The API checks the `Paymongo-Signature`, re-reads the session from PayMongo, and records the payment on the booking. Payment is recorded even if the customer closes the tab.
+2. The API opens a PayMongo payment intent for the amount the server computes from the booking, and the customer lands on the payment page.
+3. The customer picks a method and presses Pay (`POST /api/payments/:reference/pay`):
+   - QR Ph: the page shows the QR code with a countdown and checks every few seconds until it is paid.
+   - GCash or Maya: the browser goes to the wallet's approval page, then back to `/payment/return?reference=...`.
+   - Card: the browser sends the card details straight to PayMongo with the public key; only the `pm_...` id reaches the API. Cards that need 3-D Secure go to the bank's page and come back the same way.
+4. PayMongo also calls `POST /api/payments/paymongo/webhook` (`payment.paid`). The API checks the `Paymongo-Signature`, re-reads the payment intent from PayMongo, and records the payment on the booking. Payment is recorded even if the customer closes the tab.
 5. Staff can approve the request only after the initial payment is recorded.
 
 Setup:
 
+- Set `PAYMONGO_SECRET_KEY` and `PAYMONGO_PUBLIC_KEY` from the same mode (both test or both live). Without the public key, the Card option is hidden.
 - Register the webhook once per PayMongo key (test and live keys need separate webhooks). PayMongo only calls public HTTPS URLs:
 
   ```
@@ -55,9 +60,9 @@ Setup:
   npm run paymongo:webhook -- create https://<render-api-host>/api/payments/paymongo/webhook
   ```
 
-  Copy the printed `whsk_...` secret into `PAYMONGO_WEBHOOK_SECRET` on Render. `npm run paymongo:webhook -- list` shows existing webhooks.
-- Without the webhook secret, payments still complete while the customer waits on the return page. A customer who closes the tab early is not recorded until someone opens that payment's status again.
-- Set the business name and logo in the PayMongo dashboard; they appear on the checkout page.
-- Test mode: with `sk_test_` keys, use PayMongo's "Simulate payment" link or test cards. No real money moves.
-- Going live: switch to `sk_live_` keys, register a live webhook, and update `PAYMONGO_WEBHOOK_SECRET`.
+  Copy the printed `whsk_...` secret into `PAYMONGO_WEBHOOK_SECRET` on Render. `npm run paymongo:webhook -- list` shows existing webhooks, and `npm run paymongo:webhook -- update <hook_id> <url>` switches an existing webhook to the current events (`payment.paid`, `payment.failed`, `checkout_session.payment.paid`) without changing its secret.
+- Without the webhook, payments still complete while the customer is on the payment or return page. A customer who closes the tab early is not recorded until someone opens that payment's status again.
+- Receipts and wallet screens from PayMongo show the PayMongo account's business name; set it to "Katana Sushi" in the PayMongo dashboard. Card statements show `KATANA SUSHI`.
+- Test mode: with test keys, the QR screen shows a "simulate scanning" link, and PayMongo's test cards work (for example 4343 4343 4343 4345). No real money moves.
+- Going live: switch both keys to live keys, register a live webhook, and update `PAYMONGO_WEBHOOK_SECRET`.
 - Refunds are not automated; issue them from the PayMongo dashboard using the `pay_...` reference shown on the booking.

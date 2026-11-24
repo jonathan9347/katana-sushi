@@ -34,6 +34,29 @@ export type PaymentConfig = {
   testMode: boolean;
   available: boolean;
   methods: string[];
+  /** PayMongo publishable key; lets the browser send card details straight to PayMongo. */
+  publicKey?: string | null;
+};
+
+export type PaymentChannel = "qrph" | "card" | "gcash" | "paymaya";
+
+export type PaymentNextAction =
+  | { type: "qr"; imageUrl: string; expiresAt?: string; testUrl?: string }
+  | { type: "redirect"; url: string };
+
+export type StartPaymentResponse = {
+  referenceId?: string;
+  status: "paid" | "action_required" | "pending" | "failed";
+  nextAction?: PaymentNextAction;
+  message?: string;
+};
+
+export type CardDetails = {
+  name: string;
+  number: string;
+  expMonth: number;
+  expYear: number;
+  cvc: string;
 };
 
 export type PaymentVerifyRequest = {
@@ -63,6 +86,8 @@ export type PaymentStatusResponse = {
   transactionId?: string | null;
   paidAt?: string | null;
   expiresAt?: string | null;
+  nextAction?: PaymentNextAction | null;
+  lastError?: string | null;
   message?: string;
 };
 
@@ -191,18 +216,78 @@ export function usePaymentConfig() {
   });
 }
 
+/** Katana's own payment page for an open PayMongo payment. */
+export function paymentPagePath(referenceId: string) {
+  return `/payment/${encodeURIComponent(referenceId)}`;
+}
+
+export async function startOnlinePayment(
+  referenceId: string,
+  body: { channel: PaymentChannel; paymentMethodId?: string; returnUrl: string }
+) {
+  const response = await api.post<StartPaymentResponse>(`/api/payments/${encodeURIComponent(referenceId)}/pay`, body);
+  return response.data;
+}
+
+export async function getPaymentBilling(referenceId: string) {
+  const response = await api.get<{ name: string | null; email: string | null }>(
+    `/api/payments/${encodeURIComponent(referenceId)}/billing`
+  );
+  return response.data;
+}
+
+/**
+ * Sends card details straight from the browser to PayMongo using the publishable
+ * key. The card number never reaches Katana's server; only the pm_ id does.
+ */
+export async function createCardPaymentMethod(
+  publicKey: string,
+  card: CardDetails,
+  billing: { name: string; email: string }
+) {
+  const response = await fetch("https://api.paymongo.com/v1/payment_methods", {
+    method: "POST",
+    headers: {
+      Accept: "application/json",
+      "Content-Type": "application/json",
+      Authorization: `Basic ${window.btoa(`${publicKey}:`)}`
+    },
+    body: JSON.stringify({
+      data: {
+        attributes: {
+          type: "card",
+          details: {
+            card_number: card.number,
+            exp_month: card.expMonth,
+            exp_year: card.expYear,
+            cvc: card.cvc
+          },
+          billing: { name: card.name || billing.name, email: billing.email }
+        }
+      }
+    })
+  });
+  const payload = await response.json().catch(() => null) as
+    | { data?: { id?: string }; errors?: Array<{ detail?: string }> }
+    | null;
+  if (!response.ok || !payload?.data?.id) {
+    throw new Error(payload?.errors?.[0]?.detail ?? "Your card could not be checked. Please review the details.");
+  }
+  return payload.data.id;
+}
+
+/** Leaves the site for a wallet or bank page PayMongo asked us to open. */
+export function redirectToPaymentProvider(url: string) {
+  const target = new URL(url);
+  if (target.protocol !== "https:" || !target.hostname.endsWith("paymongo.com")) {
+    throw new Error("Unexpected payment page. Please try again.");
+  }
+  window.location.assign(target.toString());
+}
+
 /** Where PayMongo sends the customer back after paying or cancelling. */
 export function paymentReturnUrl() {
   return `${window.location.origin}/payment/return`;
-}
-
-/** Leaves the site for the PayMongo checkout page. */
-export function redirectToHostedCheckout(paymentUrl: string) {
-  const url = new URL(paymentUrl);
-  if (url.protocol !== "https:" || !url.hostname.endsWith("paymongo.com")) {
-    throw new Error("Unexpected payment page. Please try again.");
-  }
-  window.location.assign(url.toString());
 }
 
 export const PAYMONGO_METHOD_LABELS: Record<string, string> = {

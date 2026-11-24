@@ -1,10 +1,11 @@
 import assert from "node:assert/strict";
 import crypto from "node:crypto";
-import { test } from "node:test";
+import { afterEach, beforeEach, test } from "node:test";
 import { PayMongoGateway } from "./paymongo.gateway";
 import { toCentavos, verifyPayMongoSignature } from "./paymongo.client";
 
 const TEST_KEY = "sk_test_unitTestOnlyKey123";
+const RETURN_URL = "https://app.example/payment/return?reference=PMG-1";
 
 type Call = { url: string; init?: RequestInit };
 
@@ -24,24 +25,58 @@ function fakeFetch(responses: Array<{ status?: number; body: unknown }>) {
   return { calls, fetchImpl };
 }
 
-function session(overrides: Record<string, unknown> = {}) {
+function intent(overrides: Record<string, unknown> = {}) {
   return {
     data: {
-      id: "cs_test_123",
-      type: "checkout_session",
+      id: "pi_test_123",
+      type: "payment_intent",
       attributes: {
-        checkout_url: "https://checkout.paymongo.com/cs_test_123",
-        status: "active",
+        amount: 15050,
+        currency: "PHP",
+        status: "awaiting_payment_method",
+        client_key: "pi_test_123_client_abc",
         payments: [],
+        next_action: null,
         ...overrides
       }
     }
   };
 }
 
-function sign(body: string, secret: string, timestamp = "1700000000") {
-  return crypto.createHmac("sha256", secret).update(`${timestamp}.${body}`).digest("hex");
+function session(overrides: Record<string, unknown> = {}) {
+  return {
+    data: {
+      id: "cs_test_123",
+      type: "checkout_session",
+      attributes: { checkout_url: "https://checkout.paymongo.com/cs_test_123", status: "active", payments: [], ...overrides }
+    }
+  };
 }
+
+const paidPayment = {
+  id: "pay_abc",
+  type: "payment",
+  attributes: { amount: 15050, currency: "PHP", status: "paid", paid_at: 1795479890, source: { type: "qrph" } }
+};
+
+function body(call: Call) {
+  return JSON.parse(String(call.init?.body)).data.attributes;
+}
+
+function sign(payload: string, secret: string, timestamp = "1700000000") {
+  return crypto.createHmac("sha256", secret).update(`${timestamp}.${payload}`).digest("hex");
+}
+
+let savedPublicKey: string | undefined;
+beforeEach(() => {
+  savedPublicKey = process.env.PAYMONGO_PUBLIC_KEY;
+  process.env.PAYMONGO_PUBLIC_KEY = "pk_test_unitTestPublicKey1";
+  delete process.env.PAYMONGO_PAYMENT_METHODS;
+});
+afterEach(() => {
+  if (savedPublicKey === undefined) delete process.env.PAYMONGO_PUBLIC_KEY;
+  else process.env.PAYMONGO_PUBLIC_KEY = savedPublicKey;
+});
 
 test("converts pesos to integer centavos without float drift", () => {
   assert.equal(toCentavos(150.5), 15050);
@@ -53,21 +88,20 @@ test("converts pesos to integer centavos without float drift", () => {
 
 test("accepts a valid test-mode webhook signature and rejects tampering", () => {
   const secret = "whsk_unit_test";
-  const body = JSON.stringify({ data: { id: "evt_1", type: "event", attributes: { livemode: false } } });
-  const header = `t=1700000000,te=${sign(body, secret)},li=`;
+  const payload = JSON.stringify({ data: { id: "evt_1", type: "event", attributes: { livemode: false } } });
+  const header = `t=1700000000,te=${sign(payload, secret)},li=`;
 
-  assert.deepEqual(verifyPayMongoSignature(Buffer.from(body), header, secret, false), { valid: true });
-  assert.equal(verifyPayMongoSignature(Buffer.from(`${body} `), header, secret, false).valid, false);
-  assert.equal(verifyPayMongoSignature(Buffer.from(body), header, "whsk_other", false).valid, false);
-  // A test signature must not satisfy a live-mode event.
-  assert.equal(verifyPayMongoSignature(Buffer.from(body), header, secret, true).valid, false);
+  assert.deepEqual(verifyPayMongoSignature(Buffer.from(payload), header, secret, false), { valid: true });
+  assert.equal(verifyPayMongoSignature(Buffer.from(`${payload} `), header, secret, false).valid, false);
+  assert.equal(verifyPayMongoSignature(Buffer.from(payload), header, "whsk_other", false).valid, false);
+  assert.equal(verifyPayMongoSignature(Buffer.from(payload), header, secret, true).valid, false);
 });
 
 test("uses the live signature for live-mode events", () => {
   const secret = "whsk_unit_test";
-  const body = "{\"live\":true}";
-  const header = `t=1700000001,te=,li=${sign(body, secret, "1700000001")}`;
-  assert.deepEqual(verifyPayMongoSignature(body, header, secret, true), { valid: true });
+  const payload = "{\"live\":true}";
+  const header = `t=1700000001,te=,li=${sign(payload, secret, "1700000001")}`;
+  assert.deepEqual(verifyPayMongoSignature(payload, header, secret, true), { valid: true });
 });
 
 test("rejects missing or malformed signature headers", () => {
@@ -76,8 +110,8 @@ test("rejects missing or malformed signature headers", () => {
   assert.equal(verifyPayMongoSignature("{}", "t=1,te=abc", "whsk", false).valid, false);
 });
 
-test("creates a checkout session with centavo amounts, methods, and return URLs", async () => {
-  const { calls, fetchImpl } = fakeFetch([{ body: session() }]);
+test("opens a payment intent in centavos with the allowed methods and booking metadata", async () => {
+  const { calls, fetchImpl } = fakeFetch([{ body: intent() }]);
   const gateway = new PayMongoGateway(TEST_KEY, fetchImpl);
 
   const result = await gateway.createPaymentIntent({
@@ -87,50 +121,104 @@ test("creates a checkout session with centavo amounts, methods, and return URLs"
     reservationType: "catering",
     purpose: "downpayment",
     referenceId: "PMG-ref-1",
-    lineItemName: "Catering package downpayment (50%)",
-    description: "Katana Sushi catering CAT-20261201-001 - 50% downpayment",
-    customer: { name: "Juan", email: "juan@example.com", phone: "" },
-    successUrl: "https://app.example/payment/return?reference=PMG-ref-1",
-    failureUrl: "https://app.example/payment/return?reference=PMG-ref-1&cancelled=1"
+    description: "Katana Sushi catering CAT-20261201-001 - 50% downpayment"
   });
 
   assert.equal(result.success, true);
   assert.equal(result.referenceId, "PMG-ref-1");
-  assert.equal(result.gatewayReference, "cs_test_123");
-  assert.equal(result.paymentUrl, "https://checkout.paymongo.com/cs_test_123");
+  assert.equal(result.gatewayReference, "pi_test_123");
+  assert.equal(result.paymentUrl, undefined);
   assert.ok(result.expiresAt instanceof Date);
 
-  assert.equal(calls[0].url, "https://api.paymongo.com/v1/checkout_sessions");
-  assert.equal(calls[0].init?.method, "POST");
+  assert.equal(calls[0].url, "https://api.paymongo.com/v1/payment_intents");
   const headers = calls[0].init?.headers as Record<string, string>;
   assert.equal(headers.Authorization, `Basic ${Buffer.from(`${TEST_KEY}:`).toString("base64")}`);
-
-  const attributes = JSON.parse(String(calls[0].init?.body)).data.attributes;
-  assert.equal(attributes.line_items[0].amount, 250075);
-  assert.equal(attributes.line_items[0].currency, "PHP");
-  assert.equal(attributes.line_items[0].quantity, 1);
-  assert.deepEqual(attributes.payment_method_types, ["qrph", "card", "gcash", "paymaya"]);
-  assert.equal(attributes.reference_number, "CAT-20261201-001");
-  assert.equal(attributes.success_url, "https://app.example/payment/return?reference=PMG-ref-1");
-  assert.equal(attributes.cancel_url, "https://app.example/payment/return?reference=PMG-ref-1&cancelled=1");
-  assert.deepEqual(attributes.billing, { name: "Juan", email: "juan@example.com" });
+  const attributes = body(calls[0]);
+  assert.equal(attributes.amount, 250075);
+  assert.equal(attributes.currency, "PHP");
+  assert.equal(attributes.capture_type, "automatic");
+  assert.deepEqual(attributes.payment_method_allowed, ["qrph", "card", "gcash", "paymaya"]);
+  assert.equal(attributes.statement_descriptor, "KATANA SUSHI");
+  assert.equal(attributes.metadata.booking_id, "CAT-20261201-001");
   assert.equal(attributes.metadata.reference_id, "PMG-ref-1");
-  assert.equal(attributes.send_email_receipt, true);
 });
 
-test("reports a paid checkout with the PayMongo payment id, amount, and channel", async () => {
-  const { fetchImpl } = fakeFetch([{
-    body: session({
-      payments: [{
-        id: "pay_abc",
-        type: "payment",
-        attributes: { amount: 15050, currency: "PHP", status: "paid", paid_at: 1795479890, source: { type: "qrph" } }
-      }]
-    })
-  }]);
+test("hides card when no matching public key is configured", () => {
+  delete process.env.PAYMONGO_PUBLIC_KEY;
+  assert.deepEqual(new PayMongoGateway(TEST_KEY).availableChannels, ["qrph", "gcash", "paymaya"]);
+
+  process.env.PAYMONGO_PUBLIC_KEY = "pk_live_mismatchedKey1";
+  assert.equal(new PayMongoGateway(TEST_KEY).publicKey, null);
+});
+
+test("QR Ph: creates the payment method server-side and returns the QR to show", async () => {
+  const { calls, fetchImpl } = fakeFetch([
+    { body: { data: { id: "pm_qr1", attributes: { type: "qrph" } } } },
+    {
+      body: intent({
+        status: "awaiting_next_action",
+        next_action: {
+          type: "consume_qr",
+          code: { id: "qr_1", amount: 15050, image_url: "data:image/png;base64,AAAA", test_url: "https://test.example/sim", expires_at: "2026-11-24T02:20:00Z" }
+        }
+      })
+    }
+  ]);
   const gateway = new PayMongoGateway(TEST_KEY, fetchImpl);
 
-  const result = await gateway.verifyPayment({ referenceId: "PMG-1", bookingId: "CAT-1", gatewayReference: "cs_test_123" });
+  const result = await gateway.startPayment("pi_test_123", {
+    channel: "qrph",
+    billing: { name: "Juan", email: "juan@example.com", phone: "" },
+    returnUrl: RETURN_URL
+  });
+
+  assert.equal(result.status, "action_required");
+  assert.deepEqual(result.nextAction, {
+    type: "qr",
+    imageUrl: "data:image/png;base64,AAAA",
+    expiresAt: "2026-11-24T02:20:00Z",
+    testUrl: "https://test.example/sim"
+  });
+  assert.equal(calls[0].url, "https://api.paymongo.com/v1/payment_methods");
+  assert.deepEqual(body(calls[0]), { type: "qrph", billing: { name: "Juan", email: "juan@example.com" } });
+  assert.equal(calls[1].url, "https://api.paymongo.com/v1/payment_intents/pi_test_123/attach");
+  assert.deepEqual(body(calls[1]), { payment_method: "pm_qr1", return_url: RETURN_URL });
+});
+
+test("GCash and Maya: return the wallet page to redirect to", async () => {
+  const { fetchImpl } = fakeFetch([
+    { body: { data: { id: "pm_gc1", attributes: { type: "gcash" } } } },
+    { body: intent({ status: "awaiting_next_action", next_action: { type: "redirect", redirect: { url: "https://pm.example/gcash", return_url: RETURN_URL } } }) }
+  ]);
+  const result = await new PayMongoGateway(TEST_KEY, fetchImpl).startPayment("pi_test_123", { channel: "gcash", returnUrl: RETURN_URL });
+  assert.deepEqual(result, { status: "action_required", nextAction: { type: "redirect", url: "https://pm.example/gcash" } });
+});
+
+test("Card: attaches the browser-created payment method and never creates one server-side", async () => {
+  const { calls, fetchImpl } = fakeFetch([{ body: intent({ status: "succeeded", payments: [paidPayment] }) }]);
+  const gateway = new PayMongoGateway(TEST_KEY, fetchImpl);
+
+  const result = await gateway.startPayment("pi_test_123", { channel: "card", paymentMethodId: "pm_card1", returnUrl: RETURN_URL });
+  assert.deepEqual(result, { status: "paid" });
+  assert.equal(calls.length, 1);
+  assert.match(calls[0].url, /\/attach$/);
+
+  const missing = await gateway.startPayment("pi_test_123", { channel: "card", returnUrl: RETURN_URL });
+  assert.equal(missing.status, "failed");
+});
+
+test("reports a declined attempt so the customer can choose again", async () => {
+  const { fetchImpl } = fakeFetch([
+    { body: { data: { id: "pm_gc2", attributes: { type: "gcash" } } } },
+    { body: intent({ status: "awaiting_payment_method", last_payment_error: { failed_message: "Insufficient balance." } }) }
+  ]);
+  const result = await new PayMongoGateway(TEST_KEY, fetchImpl).startPayment("pi_test_123", { channel: "gcash", returnUrl: RETURN_URL });
+  assert.deepEqual(result, { status: "failed", message: "Insufficient balance." });
+});
+
+test("verifies a paid intent with the PayMongo payment id, amount, and channel", async () => {
+  const { fetchImpl } = fakeFetch([{ body: intent({ status: "succeeded", payments: [paidPayment] }) }]);
+  const result = await new PayMongoGateway(TEST_KEY, fetchImpl).verifyPayment({ referenceId: "PMG-1", bookingId: "CAT-1", gatewayReference: "pi_test_123" });
   assert.equal(result.success, true);
   assert.equal(result.status, "paid");
   assert.equal(result.amount, 150.5);
@@ -139,37 +227,48 @@ test("reports a paid checkout with the PayMongo payment id, amount, and channel"
   assert.equal(result.paidAt?.getTime(), 1795479890 * 1000);
 });
 
-test("reports pending and expired checkouts without a transaction", async () => {
+test("reports a pending intent with its QR and last error", async () => {
+  const { fetchImpl } = fakeFetch([{
+    body: intent({
+      status: "awaiting_next_action",
+      next_action: { type: "consume_qr", code: { id: "qr_1", amount: 15050, image_url: "data:image/png;base64,BBBB" } },
+      last_payment_error: "Card declined."
+    })
+  }]);
+  const result = await new PayMongoGateway(TEST_KEY, fetchImpl).verifyPayment({ referenceId: "PMG-1", bookingId: "CAT-1", gatewayReference: "pi_test_123" });
+  assert.equal(result.status, "pending");
+  assert.equal(result.transactionId, "");
+  assert.equal(result.nextAction?.type, "qr");
+  assert.equal(result.lastError, "Card declined.");
+});
+
+test("still reads payments started on the old checkout page", async () => {
   const { fetchImpl } = fakeFetch([
-    { body: session() },
+    { body: session({ payments: [paidPayment] }) },
     { body: session({ status: "expired" }) }
   ]);
   const gateway = new PayMongoGateway(TEST_KEY, fetchImpl);
-
-  const pending = await gateway.verifyPayment({ referenceId: "PMG-1", bookingId: "CAT-1", gatewayReference: "cs_test_123" });
-  assert.equal(pending.status, "pending");
-  assert.equal(pending.success, false);
-  assert.equal(pending.transactionId, "");
-
+  const paid = await gateway.verifyPayment({ referenceId: "PMG-1", bookingId: "CAT-1", gatewayReference: "cs_test_123" });
+  assert.equal(paid.status, "paid");
+  assert.equal(paid.transactionId, "pay_abc");
   const expired = await gateway.verifyPayment({ referenceId: "PMG-1", bookingId: "CAT-1", gatewayReference: "cs_test_123" });
   assert.equal(expired.status, "expired");
 });
 
-test("resumes only active, unpaid checkouts", async () => {
-  const { fetchImpl } = fakeFetch([
-    { body: session() },
-    { body: session({ status: "expired" }) },
-    { body: session({ payments: [{ id: "pay_x", type: "payment", attributes: { amount: 100, currency: "PHP", status: "paid" } }] }) }
+test("resumes open intents, never old checkout sessions", async () => {
+  const { calls, fetchImpl } = fakeFetch([
+    { body: intent() },
+    { body: intent({ status: "succeeded", payments: [paidPayment] }) }
   ]);
   const gateway = new PayMongoGateway(TEST_KEY, fetchImpl);
-
-  assert.deepEqual(await gateway.resumePaymentIntent("cs_test_123"), { paymentUrl: "https://checkout.paymongo.com/cs_test_123" });
-  assert.equal(await gateway.resumePaymentIntent("cs_test_123"), null);
-  assert.equal(await gateway.resumePaymentIntent("cs_test_123"), null);
+  assert.deepEqual(await gateway.resumePaymentIntent("pi_test_123"), { paymentUrl: "" });
+  assert.equal(await gateway.resumePaymentIntent("pi_test_123"), null);
+  assert.equal(await gateway.resumePaymentIntent("cs_old_1"), null);
+  assert.equal(calls.length, 2);
 });
 
-test("tolerates expiring a session PayMongo already closed, but not outages", async () => {
-  const { fetchImpl } = fakeFetch([
+test("expires old checkout sessions, tolerating ones PayMongo already closed; intents are left alone", async () => {
+  const { calls, fetchImpl } = fakeFetch([
     { status: 400, body: { errors: [{ code: "invalid_request_body", detail: "Checkout session is already paid" }] } },
     { status: 503, body: { errors: [{ detail: "unavailable" }] } }
   ]);
@@ -177,20 +276,15 @@ test("tolerates expiring a session PayMongo already closed, but not outages", as
 
   await gateway.cancelPaymentIntent("cs_test_123");
   await assert.rejects(() => gateway.cancelPaymentIntent("cs_test_123"), /unavailable/);
+  await gateway.cancelPaymentIntent("pi_test_123");
+  assert.equal(calls.length, 2);
 });
 
 test("fails closed without a valid secret key", async () => {
   const missing = new PayMongoGateway("");
   assert.equal(missing.isConfigured, false);
   await assert.rejects(
-    () => missing.createPaymentIntent({
-      amount: 100,
-      paymentMethod: "paymongo",
-      bookingId: "CAT-1",
-      reservationType: "catering",
-      successUrl: "https://a/b",
-      failureUrl: "https://a/c"
-    }),
+    () => missing.createPaymentIntent({ amount: 100, paymentMethod: "paymongo", bookingId: "CAT-1", reservationType: "catering" }),
     /PAYMONGO_SECRET_KEY/
   );
 
