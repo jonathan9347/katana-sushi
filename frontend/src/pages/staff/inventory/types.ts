@@ -8,16 +8,26 @@ export type RawMaterial = {
   current_stock: string | number;
   reserved_quantity?: string | number;
   available_quantity?: string | number;
+  batch_total?: string | number;
+  batch_mismatch?: boolean;
+  expiring_within_7_days?: boolean;
   reserved_for?: Array<{
     id: string;
+    booking_reference?: string;
     reserved_quantity: string | number;
     unit: string;
     event_name: string;
-    event_date: string;
+    event_date: string | null;
     customer_name: string;
+    status?: string;
   }>;
   reorder_level: string | number;
   cost_per_unit: string | number;
+};
+
+export type InventoryMaterialWithAvailability = RawMaterial & {
+  reserved_quantity: string | number;
+  available_quantity: string | number;
 };
 
 export type RecipeIngredient = {
@@ -34,8 +44,10 @@ export type SellingProductYield = {
   maxPortions: number;
   limitingIngredient: string;
   limitingStock: number;
+  limitingUnit?: string;
   requiredPerPortion: number;
   potentialRevenue: number;
+  recipeWarnings?: string[];
 };
 
 export type InventoryTransaction = {
@@ -78,14 +90,6 @@ export type MaterialBatch = {
   };
 };
 
-export type ConversionRule = {
-  id: string;
-  name: string;
-  from_quantity: string | number;
-  from_unit: string;
-  to_quantity: string | number;
-  to_unit: string;
-};
 
 export type SellingProduct = {
   id: string;
@@ -114,6 +118,7 @@ export type RecipeDetailIngredient = {
 export type ProductRecipeDetail = {
   productId: string;
   productName: string;
+  status?: string;
   sellingPrice: number;
   ingredients: RecipeDetailIngredient[];
   totalIngredientCost: number;
@@ -124,5 +129,6 @@ export type MaterialSummary = {
   id: string;
   name: string;
   current_stock: string | number;
+  available_quantity: string | number;
   unit: string;
 };

@@ -41,8 +41,8 @@ export default function InventorySettings() {
         <form onSubmit={submit}>
           <div className="grid gap-4 lg:grid-cols-3">
             <label className="space-y-2 text-sm text-slate-700">
-              <span>Reorder Level Default</span>
-              <input className="w-full rounded-2xl border border-slate-300 bg-slate-50 px-4 py-3" min="0" step="0.001" type="number" value={form.default_reorder_level} onChange={(event) => setForm((current) => ({ ...current, default_reorder_level: event.target.value }))} />
+              <span>PAR Level Default</span>
+              <input className="w-full rounded-2xl border border-slate-300 bg-slate-50 px-4 py-3" min="0" step="1" type="number" value={form.default_reorder_level} onChange={(event) => setForm((current) => ({ ...current, default_reorder_level: event.target.value }))} />
             </label>
             <label className="space-y-2 text-sm text-slate-700">
               <span>Low Stock Alert Threshold</span>

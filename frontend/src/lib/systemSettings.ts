@@ -9,6 +9,7 @@ export type SystemSettings = {
   receipt_footer: string;
   max_party_size: number;
   reservation_duration_minutes: number;
+  estimated_dining_duration_minutes: number;
   reservation_grace_period_minutes: number;
   minimum_catering_pax: number;
   default_downpayment_percent: number;
@@ -31,6 +32,7 @@ export const defaultSystemSettings: SystemSettings = {
   receipt_footer: "Thank you for dining with us!",
   max_party_size: 30,
   reservation_duration_minutes: 90,
+  estimated_dining_duration_minutes: 120,
   reservation_grace_period_minutes: 15,
   minimum_catering_pax: 10,
   default_downpayment_percent: 50,

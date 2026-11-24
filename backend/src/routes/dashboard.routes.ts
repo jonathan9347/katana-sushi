@@ -1,9 +1,9 @@
 import express from "express";
 import jwt from "jsonwebtoken";
 import { Request, Response } from "express";
+import { getJwtSecret } from "../lib/jwt";
 
 const router = express.Router();
-const jwtSecret = process.env.JWT_SECRET ?? "katana-super-secret-key-change-in-production";
 
 type TokenPayload = {
   sub: string;
@@ -18,6 +18,11 @@ function getUserFromRequest(req: Request) {
   const token = req.cookies?.token ?? bearerToken;
 
   if (!token) {
+    return null;
+  }
+
+  const jwtSecret = getJwtSecret();
+  if (!jwtSecret) {
     return null;
   }
 

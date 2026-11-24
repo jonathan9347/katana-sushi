@@ -7,9 +7,7 @@ import {
   Lock,
   LogOut,
   Package,
-  PartyPopper,
   Settings,
-  Shield,
   User,
   Users
 } from "lucide-react";
@@ -29,10 +27,9 @@ const menuItems: MenuItem[] = [
   { label: "Dashboard", to: "/staff/dashboard", icon: Home, roles: ["admin", "inventory_manager", "cashier", "receptionist", "event_coordinator", "chef"] },
   { label: "Inventory", to: "/staff/inventory", icon: Package, roles: ["admin", "inventory_manager"] },
   { label: "POS", to: "/staff/pos", icon: CreditCard, roles: ["admin", "cashier"] },
-  { label: "Dine-in", to: "/staff/reservations", icon: CalendarDays, roles: ["admin", "receptionist"] },
-  { label: "Catering", to: "/staff/catering", icon: PartyPopper, roles: ["admin", "event_coordinator"] },
+  { label: "Reservations", to: "/staff/reservations", icon: CalendarDays, roles: ["admin", "cashier", "receptionist", "event_coordinator", "chef"] },
   { label: "Analytics", to: "/staff/analytics", icon: BarChart3, roles: ["admin", "inventory_manager"] },
-  { label: "Settings", to: "/staff/settings", icon: Settings, roles: ["admin", "inventory_manager", "cashier", "receptionist", "event_coordinator", "chef"] }
+  { label: "Settings", to: "/staff/settings", icon: Settings, roles: ["admin"] }
 ];
 
 const mobileItems = menuItems.slice(0, 5);
@@ -64,6 +61,7 @@ export default function StaffSidebar() {
   const navigate = useNavigate();
   const role = (localStorage.getItem("katana_role") ?? "staff").toLowerCase();
   const user = getStoredUser();
+  const displayRole = role === "staff" ? "Team member" : role.replace("_", " ");
   const visibleItems = menuItems.filter((item) => canSee(item, role));
   const topItems = visibleItems.filter((item) => item.label !== "Settings");
   const bottomItems = visibleItems.filter((item) => item.label === "Settings");
@@ -115,15 +113,9 @@ export default function StaffSidebar() {
               {profileOpen && (
                 <div className="absolute left-full bottom-0 z-[120] ml-3 w-56 rounded-lg border border-slate-200 bg-white p-2 shadow-xl">
                   <div className="border-b border-slate-200 px-3 py-2">
-                    <p className="truncate text-sm font-black text-slate-950">{user.name ?? "Staff User"}</p>
-                    <p className="truncate text-xs text-slate-500">{role.replace("_", " ")}</p>
+                    <p className="truncate text-sm font-black text-slate-950">{user.name ?? "User"}</p>
+                    <p className="truncate text-xs text-slate-500">{displayRole}</p>
                   </div>
-                  <button className="mt-2 flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm font-semibold text-slate-700 hover:bg-slate-100">
-                    <User className="h-4 w-4" /> My Profile
-                  </button>
-                  <button className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm font-semibold text-slate-700 hover:bg-slate-100">
-                    <Shield className="h-4 w-4" /> Change Password
-                  </button>
                   <button onClick={logout} className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm font-semibold text-red-700 hover:bg-red-50">
                     <LogOut className="h-4 w-4" /> Logout
                   </button>
@@ -156,7 +148,7 @@ export function PlaceholderStaffPage({ title, icon: Icon = Lock }: { title: stri
       <section className="mx-auto max-w-5xl rounded-lg border border-slate-200 bg-white p-8 shadow-sm">
         <Icon className="h-8 w-8 text-red-700" />
         <h1 className="mt-4 text-2xl font-black text-slate-950">{title}</h1>
-        <p className="mt-2 text-sm text-slate-600">This category is reachable from the minimalist staff sidebar.</p>
+        <p className="mt-2 text-sm text-slate-600">This category is reachable from the navigation.</p>
       </section>
     </main>
   );

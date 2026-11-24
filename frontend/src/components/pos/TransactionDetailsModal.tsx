@@ -14,11 +14,17 @@ export type PosHistoryTransaction = {
   subtotal: number;
   tax: number;
   total: number;
+  discount_amount?: number;
+  guest_count?: number;
+  discount_guest_count?: number;
+  discount_base_snapshot?: number | null;
+  discount_rate_snapshot?: number | null;
   payment_method: string;
   cash_received?: number | null;
   change_due?: number | null;
   status: string;
   created_at: string;
+  table_number?: number | null;
   cashier?: {
     name: string;
     email: string;
@@ -28,6 +34,7 @@ export type PosHistoryTransaction = {
     quantity: number;
     unit_price: number;
     total_price: number;
+    name_snapshot?: string | null;
     selling_product: {
       name: string;
       category: string;
@@ -70,6 +77,9 @@ export default function TransactionDetailsModal({
             <p>Payment: <span className="font-semibold">{transaction.payment_method}</span></p>
             <p>Status: <span className="font-semibold">{transaction.status}</span></p>
             <p>Date: <span className="font-semibold">{formatManilaDateTime(transaction.created_at)}</span></p>
+            {transaction.transaction_type === "dine_in" && transaction.table_number !== null && transaction.table_number !== undefined && (
+              <p>Table: <span className="font-semibold">{transaction.table_number}</span></p>
+            )}
             {transaction.reference_booking_id && (
               <p>
                 Booking ID:{" "}
@@ -93,7 +103,7 @@ export default function TransactionDetailsModal({
               <TableBody>
                 {transaction.items.map((item) => (
                   <TableRow key={item.id}>
-                    <TableCell className="font-medium">{item.selling_product.name}</TableCell>
+                    <TableCell className="font-medium">{item.name_snapshot ?? item.selling_product.name}</TableCell>
                     <TableCell>{item.quantity}</TableCell>
                     <TableCell>{money(item.unit_price)}</TableCell>
                     <TableCell>{money(item.total_price)}</TableCell>
@@ -106,6 +116,19 @@ export default function TransactionDetailsModal({
           <div className="ml-auto grid w-full max-w-xs gap-1 text-sm">
             <Line label="Subtotal" value={transaction.subtotal} />
             <Line label="Tax" value={transaction.tax} />
+            {transaction.discount_amount ? (
+              <Line
+                label={
+                  transaction.discount_base_snapshot !== null
+                    && transaction.discount_base_snapshot !== undefined
+                    && transaction.discount_rate_snapshot !== null
+                    && transaction.discount_rate_snapshot !== undefined
+                    ? `Senior/PWD discount (${transaction.discount_guest_count ?? 0} of ${transaction.guest_count ?? 0} guests; ${transaction.discount_rate_snapshot * 100}% of ${money(transaction.discount_base_snapshot)} a-la-carte total)`
+                    : "Senior/PWD discount"
+                }
+                value={-transaction.discount_amount}
+              />
+            ) : null}
             <Line label="Total" value={transaction.total} strong />
           </div>
 

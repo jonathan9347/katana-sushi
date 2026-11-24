@@ -1,4 +1,4 @@
-export type FakePaymentReservationType = "dine_in" | "catering";
+export type FakePaymentReservationType = "dine_in" | "catering" | "takeout";
 export type FakePaymentPlan = "initial_only" | "full_payment";
 export type FakePaymentMethod = "cash" | "gcash" | "bank_transfer";
 
@@ -6,6 +6,7 @@ export type FakePaymentParams = {
   amount: number;
   paymentMethod: FakePaymentMethod;
   bookingId: string;
+  referenceId: string;
   reservationType: FakePaymentReservationType;
   paymentPlan: FakePaymentPlan;
 };
@@ -32,7 +33,7 @@ export class FakePaymentService {
 
     await this.delay(500);
 
-    const transactionId = `FAKE_TXN_${Date.now()}_${Math.random().toString(36).substring(2, 10)}`;
+    const transactionId = `FAKE_TXN_${params.referenceId}`;
 
     console.log(`[FAKE PAYMENT] SUCCESS: Transaction ID: ${transactionId}`);
 

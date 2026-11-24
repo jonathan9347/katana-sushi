@@ -70,49 +70,15 @@ function money(value: number) {
   return `PHP ${value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
-function normalizeUnit(unit: string) {
+function materialCostLabel(costPerBaseUnit: string | number, unit: string) {
   const normalized = unit.trim().toLowerCase();
-
-  if (normalized === "piece") {
-    return "pieces";
-  }
-
-  if (normalized === "sheet") {
-    return "sheets";
-  }
-
-  if (normalized === "liter" || normalized === "litre" || normalized === "litres") {
-    return "liters";
-  }
-
-  return normalized;
-}
-
-function quantityInMaterialUnit(quantity: number, recipeUnit: string, materialUnit: string) {
-  const recipe = normalizeUnit(recipeUnit);
-  const material = normalizeUnit(materialUnit);
-
-  if (recipe === material) {
-    return quantity;
-  }
-
-  if (recipe === "g" && material === "kg") {
-    return quantity / 1000;
-  }
-
-  if (recipe === "kg" && material === "g") {
-    return quantity * 1000;
-  }
-
-  if (recipe === "ml" && material === "liters") {
-    return quantity / 1000;
-  }
-
-  if (recipe === "liters" && material === "ml") {
-    return quantity * 1000;
-  }
-
-  return null;
+  const factor = normalized === "g" || normalized === "ml" ? 100 : 1;
+  const displayUnit = normalized === "g" ? "100 g" : normalized === "ml" ? "100 ml" : unit;
+  const cost = Number(costPerBaseUnit) * factor;
+  return `PHP ${cost.toLocaleString(undefined, {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: factor === 100 ? 6 : 8
+  })}/${displayUnit}`;
 }
 
 function marginStatus(margin: number) {
@@ -129,20 +95,6 @@ function marginStatus(margin: number) {
   }
 
   return { label: "Critical", className: "bg-red-50 text-red-700", note: "Immediate price, supplier, or recipe review needed." };
-}
-
-function recipeUnitOptions(material?: MaterialOption) {
-  const unit = normalizeUnit(material?.unit ?? "");
-
-  if (unit === "kg" || unit === "g") {
-    return ["kg", "g"];
-  }
-
-  if (unit === "liters" || unit === "ml") {
-    return ["liters", "ml"];
-  }
-
-  return material?.unit ? [material.unit] : [];
 }
 
 export default function ProductModal({
@@ -225,16 +177,14 @@ export default function ProductModal({
         };
       }
 
-      const convertedQuantity = quantityInMaterialUnit(quantity, ingredient.unit, material.unit);
-
-      if (convertedQuantity === null) {
+      if (ingredient.unit !== material.unit) {
         return {
           id: ingredient.rowId,
           ingredient,
           material,
           cost: 0,
-          convertedQuantity,
-          issue: `Cannot convert ${ingredient.unit || "recipe unit"} to ${material.unit}.`
+          convertedQuantity: null,
+          issue: `Recipe unit ${ingredient.unit || "not set"} must match the stock unit ${material.unit}.`
         };
       }
 
@@ -242,8 +192,8 @@ export default function ProductModal({
         id: ingredient.rowId,
         ingredient,
         material,
-        cost: convertedQuantity * Number(material.cost_per_unit),
-        convertedQuantity,
+        cost: quantity * Number(material.cost_per_unit),
+        convertedQuantity: quantity,
         issue: ""
       };
     });
@@ -272,11 +222,11 @@ export default function ProductModal({
     }
 
     const invalidIngredient = form.ingredients.find(
-      (ingredient) => !ingredient.rawMaterialId || Number(ingredient.quantity) <= 0 || !ingredient.unit
+      (ingredient) => !ingredient.rawMaterialId || !Number.isSafeInteger(Number(ingredient.quantity)) || Number(ingredient.quantity) <= 0 || !ingredient.unit
     );
 
     if (invalidIngredient) {
-      setValidationMessage("Each recipe ingredient needs a material, unit, and quantity greater than 0.");
+      setValidationMessage("Each recipe ingredient needs a material, matching stock unit, and a whole-number quantity greater than 0.");
       return;
     }
 
@@ -481,23 +431,20 @@ export default function ProductModal({
                     </Select>
                     <input
                       className="h-10 rounded-md border border-slate-300 px-3 text-sm outline-none focus:border-red-700 focus:ring-2 focus:ring-red-100"
-                      min="0.001"
+                      min="1"
                       required
-                      step="0.001"
+                      step="1"
                       type="number"
                       value={ingredient.quantity}
                       onChange={(event) => updateIngredient(ingredient.rowId, { quantity: event.target.value })}
                     />
-                    <Select value={ingredient.unit} onChange={(event) => updateIngredient(ingredient.rowId, { unit: event.target.value })}>
-                      {material ? (
-                        recipeUnitOptions(material).map((unit) => (
-                          <option key={unit} value={unit}>
-                            {unit}
-                          </option>
-                        ))
-                      ) : (
-                        <option value="">Select material</option>
-                      )}
+                    <Select
+                      aria-label="Recipe ingredient stock unit"
+                      value={ingredient.unit}
+                      disabled
+                      onChange={() => undefined}
+                    >
+                      {material ? <option value={material.unit}>{material.unit}</option> : <option value="">Select material</option>}
                     </Select>
                     <Button type="button" variant="ghost" onClick={() => removeIngredient(ingredient.rowId)}>
                       <Trash2 className="h-4 w-4" />
@@ -513,7 +460,7 @@ export default function ProductModal({
               <div>
                 <h4 className="text-sm font-semibold uppercase text-slate-600">Cost Analysis</h4>
                 <p className="mt-1 text-slate-600">
-                  Material cost per unit is the supplier cost for the material unit. Recipe quantity is converted to that unit before costing.
+                  Ingredients use the material's stock unit directly; quantities are whole-number base units.
                 </p>
               </div>
               <span className={`inline-flex w-fit rounded-full px-3 py-1 text-xs font-bold uppercase ${costAnalysis.status.className}`}>
@@ -533,7 +480,7 @@ export default function ProductModal({
                         <p className="text-xs text-slate-500">
                           {Number(row.ingredient.quantity).toLocaleString()} {row.ingredient.unit} ={" "}
                           {row.convertedQuantity?.toLocaleString(undefined, { maximumFractionDigits: 4 })} {row.material?.unit} x{" "}
-                          {money(Number(row.material?.cost_per_unit ?? 0))}/{row.material?.unit}
+                          {materialCostLabel(row.material?.cost_per_unit ?? 0, row.material?.unit ?? "")}
                         </p>
                       )}
                     </div>

@@ -1,8 +1,7 @@
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Download, Eye, Printer, RotateCcw, Settings, ShoppingCart } from "lucide-react";
+import { Download, Eye, Printer, RotateCcw } from "lucide-react";
 import { Link } from "react-router-dom";
-import SectionNav, { SectionNavTab } from "../../../components/layout/SectionNav";
 import TransactionDetailsModal, { PosHistoryTransaction } from "../../../components/pos/TransactionDetailsModal";
 import { Button } from "../../../components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "../../../components/ui/card";
@@ -11,6 +10,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from ".
 import { api } from "../../../lib/api";
 import { useToast } from "../../../hooks/useToast";
 import { formatManilaDateTime, todayManilaDateKey } from "../../../lib/dateTime";
+import PosHeader from "./PosHeader";
 
 type PosSummary = {
   totalSales: number;
@@ -20,11 +20,12 @@ type PosSummary = {
   byPayment: Record<string, { count: number; total: number }>;
 };
 
-const posTabs: Array<SectionNavTab> = [
-  { id: "new-sale", label: "New Sale", icon: <ShoppingCart className="h-4 w-4" />, to: "/staff/pos", end: true },
-  { id: "history", label: "Transaction History", icon: <Printer className="h-4 w-4" />, to: "/staff/pos/history" },
-  { id: "settings", label: "Unlimited Settings", icon: <Settings className="h-4 w-4" />, to: "/staff/pos/unlimited-settings" }
-];
+type HistoryTable = {
+  id: string;
+  table_number: number;
+  is_archived: boolean;
+  is_temporary: boolean;
+};
 
 function today() {
   return todayManilaDateKey();
@@ -60,11 +61,14 @@ function transactionTypeLabel(type: string) {
 
 
 export default function PosHistory() {
-  const [from, setFrom] = useState(today());
-  const [to, setTo] = useState(today());
+  const [from, setFrom] = useState("");
+  const [to, setTo] = useState("");
   const [paymentMethod, setPaymentMethod] = useState("");
   const [transactionType, setTransactionType] = useState("");
+  const [tableId, setTableId] = useState("");
   const [search, setSearch] = useState("");
+  const [page, setPage] = useState(1);
+  const [exporting, setExporting] = useState(false);
   const [selectedTransaction, setSelectedTransaction] = useState<PosHistoryTransaction | null>(null);
   const role = getStoredRole();
   const admin = role === "admin";
@@ -72,21 +76,34 @@ export default function PosHistory() {
   const queryClient = useQueryClient();
   const { toast } = useToast();
 
-  const transactionsQuery = useQuery({
-    queryKey: ["pos", "transactions", from, to, paymentMethod, transactionType, search],
+  const tablesQuery = useQuery({
+    queryKey: ["pos", "transactions", "history-tables"],
     queryFn: async () => {
-      const response = await api.get<{ transactions: PosHistoryTransaction[] }>("/api/pos/transactions/unified", {
+      const response = await api.get<{ tables: HistoryTable[] }>("/api/pos/dining/history-tables");
+      return response.data.tables;
+    },
+    enabled: allowed
+  });
 
+  const transactionsQuery = useQuery({
+    queryKey: ["pos", "transactions", from, to, paymentMethod, transactionType, tableId, search, page],
+    queryFn: async () => {
+      const response = await api.get<{
+        transactions: PosHistoryTransaction[];
+        pagination: { page: number; limit: number; total: number; pages: number };
+      }>("/api/pos/transactions/unified", {
         params: {
-          from,
-          to,
+          from: from || undefined,
+          to: to || undefined,
           payment_method: paymentMethod || undefined,
           transaction_type: transactionType || undefined,
+          table_id: tableId || undefined,
           search: search || undefined,
+          page,
           limit: 100
         }
       });
-      return response.data.transactions;
+      return response.data;
     },
     enabled: allowed,
     refetchInterval: 30000
@@ -104,11 +121,41 @@ export default function PosHistory() {
     refetchInterval: 30000
   });
 
-  const filteredTransactions = transactionsQuery.data ?? [];
+  const filteredTransactions = transactionsQuery.data?.transactions ?? [];
+  const pagination = transactionsQuery.data?.pagination;
   const totalSales = useMemo(
     () => filteredTransactions.reduce((sum, transaction) => sum + Number(transaction.total), 0),
     [filteredTransactions]
   );
+
+  const handleExport = async () => {
+    if (!pagination) return;
+
+    setExporting(true);
+    try {
+      const allTransactions = [...filteredTransactions];
+      for (let nextPage = 2; nextPage <= pagination.pages; nextPage += 1) {
+        const response = await api.get<{ transactions: PosHistoryTransaction[] }>("/api/pos/transactions/unified", {
+          params: {
+            from: from || undefined,
+            to: to || undefined,
+            payment_method: paymentMethod || undefined,
+            transaction_type: transactionType || undefined,
+            table_id: tableId || undefined,
+            search: search || undefined,
+            page: nextPage,
+            limit: 100
+          }
+        });
+        allTransactions.push(...response.data.transactions);
+      }
+      exportCsv(allTransactions);
+    } catch {
+      toast("Unable to export transaction history.");
+    } finally {
+      setExporting(false);
+    }
+  };
 
   const refundMutation = useMutation({
     mutationFn: async (transaction: PosHistoryTransaction) => api.post(`/api/pos/refund/${transaction.id}`),
@@ -126,7 +173,7 @@ export default function PosHistory() {
       <main className="flex min-h-screen flex-col items-center justify-center gap-4 px-6 text-center">
         <h1 className="text-2xl font-semibold text-slate-950">POS history access required</h1>
         <Link className="text-red-700 underline" to="/staff/login">
-          Go to staff login
+          Sign in
         </Link>
       </main>
     );
@@ -135,40 +182,37 @@ export default function PosHistory() {
   return (
     <main className="min-h-screen bg-slate-100 px-4 py-6 lg:pl-4 lg:pr-8">
       <div className="grid w-full gap-5">
-        <div className="flex flex-col gap-2 md:flex-row md:items-end md:justify-between">
-          <div>
-            <p className="text-sm font-medium uppercase text-red-700">Point of Sale</p>
-            <h1 className="text-3xl font-semibold text-slate-950">Transaction History</h1>
-          </div>
+        <PosHeader section="Transaction History" showBack />
+        <div className="flex justify-end">
           <div className="flex gap-2">
-            <Button variant="outline" onClick={() => exportCsv(filteredTransactions)}>
+            <Button variant="outline" disabled={exporting || !pagination} onClick={handleExport}>
               <Download className="mr-2 h-4 w-4" />
-              Export CSV
+              {exporting ? "Exporting..." : "Export CSV"}
             </Button>
           </div>
         </div>
 
-        <div className="grid gap-5 lg:grid-cols-[220px_minmax(0,1fr)] lg:items-start">
-          <aside className="lg:sticky lg:top-6">
-            <SectionNav orientation="vertical" tabs={posTabs} />
-          </aside>
-
-          <section className="grid min-w-0 gap-5">
+        <section className="grid min-w-0 gap-5">
             <Card>
               <CardHeader>
                 <CardTitle>Filters</CardTitle>
               </CardHeader>
               <CardContent>
-                <div className="grid gap-3 md:grid-cols-5">
-              <input className="h-10 rounded-md border border-slate-300 px-3 text-sm" type="date" value={from} onChange={(event) => setFrom(event.target.value)} />
-              <input className="h-10 rounded-md border border-slate-300 px-3 text-sm" type="date" value={to} onChange={(event) => setTo(event.target.value)} />
-              <Select value={paymentMethod} onChange={(event) => setPaymentMethod(event.target.value)}>
+                {tablesQuery.isError && (
+                  <p className="mb-3 text-sm text-red-700" role="alert">
+                    Unable to load tables for history filtering.
+                  </p>
+                )}
+                <div className="grid gap-3 md:grid-cols-6">
+              <input aria-label="From date" className="h-10 rounded-md border border-slate-300 px-3 text-sm" type="date" value={from} onChange={(event) => { setFrom(event.target.value); setPage(1); }} />
+              <input aria-label="To date" className="h-10 rounded-md border border-slate-300 px-3 text-sm" type="date" value={to} onChange={(event) => { setTo(event.target.value); setPage(1); }} />
+              <Select value={paymentMethod} onChange={(event) => { setPaymentMethod(event.target.value); setPage(1); }}>
                 <option value="">All payments</option>
                 <option value="cash">Cash</option>
                 <option value="gcash">GCash</option>
                 <option value="bank_transfer">BPI (Bank Transfer)</option>
               </Select>
-              <Select value={transactionType} onChange={(event) => setTransactionType(event.target.value)}>
+              <Select value={transactionType} onChange={(event) => { setTransactionType(event.target.value); setPage(1); }}>
                 <option value="">All types</option>
                 <option value="dine_in">Dine-in Sale</option>
                 <option value="takeout">Takeout Sale</option>
@@ -180,14 +224,25 @@ export default function PosHistory() {
                 <option value="catering_balance">Catering Balance</option>
                 <option value="catering_prepaid">Catering Prepaid</option>
               </Select>
+              <Select aria-label="Table" value={tableId} onChange={(event) => { setTableId(event.target.value); setPage(1); }}>
+                <option value="">All tables</option>
+                {(tablesQuery.data ?? []).map((table) => (
+                  <option key={table.id} value={table.id}>
+                    Table {table.table_number}
+                    {table.is_temporary ? " (temporary)" : ""}
+                    {table.is_archived ? " (archived)" : ""}
+                  </option>
+                ))}
+              </Select>
 
               <input
                 className="h-10 rounded-md border border-slate-300 px-3 text-sm"
                 placeholder="Search # or customer"
                 value={search}
-                onChange={(event) => setSearch(event.target.value)}
+                onChange={(event) => { setSearch(event.target.value); setPage(1); }}
               />
                 </div>
+              <p className="mt-3 text-xs text-slate-500">Leave the date filters empty to show all transaction history.</p>
               </CardContent>
             </Card>
 
@@ -219,19 +274,34 @@ export default function PosHistory() {
                   meta={`${summaryQuery.data.byType.unlimited?.count ?? 0} sessions`}
                 />
                 <SummaryTile
+                  label="Dine-in Deposits"
+                  value={money(summaryQuery.data.byType.dine_in_deposit?.total ?? 0)}
+                  meta={`${summaryQuery.data.byType.dine_in_deposit?.count ?? 0} payments`}
+                />
+                <SummaryTile
+                  label="Dine-in Balances"
+                  value={money(summaryQuery.data.byType.dine_in_balance?.total ?? 0)}
+                  meta={`${summaryQuery.data.byType.dine_in_balance?.count ?? 0} payments`}
+                />
+                <SummaryTile
+                  label="Dine-in Prepaid"
+                  value={money(summaryQuery.data.byType.dine_in_prepaid?.total ?? 0)}
+                  meta={`${summaryQuery.data.byType.dine_in_prepaid?.count ?? 0} payments`}
+                />
+                <SummaryTile
                   label="Catering Deposits"
-                  value={money(summaryQuery.data.byType.reservation_deposit?.total ?? 0)}
-                  meta={`${summaryQuery.data.byType.reservation_deposit?.count ?? 0} payments`}
+                  value={money(summaryQuery.data.byType.catering_deposit?.total ?? 0)}
+                  meta={`${summaryQuery.data.byType.catering_deposit?.count ?? 0} payments`}
                 />
                 <SummaryTile
                   label="Catering Balances"
-                  value={money(summaryQuery.data.byType.reservation_balance?.total ?? 0)}
-                  meta={`${summaryQuery.data.byType.reservation_balance?.count ?? 0} payments`}
+                  value={money(summaryQuery.data.byType.catering_balance?.total ?? 0)}
+                  meta={`${summaryQuery.data.byType.catering_balance?.count ?? 0} payments`}
                 />
                 <SummaryTile
-                  label="Dine-in Bookings"
-                  value={(summaryQuery.data.byType.dine_in_reservation?.count ?? 0).toLocaleString()}
-                  meta="No payment"
+                  label="Catering Prepaid"
+                  value={money(summaryQuery.data.byType.catering_prepaid?.total ?? 0)}
+                  meta={`${summaryQuery.data.byType.catering_prepaid?.count ?? 0} payments`}
                 />
                 <SummaryTile
                   label="Cash / GCash / BPI"
@@ -246,7 +316,7 @@ export default function PosHistory() {
             <Card>
               <CardHeader className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
                 <CardTitle>Transactions</CardTitle>
-                <p className="text-sm font-semibold text-slate-700">Total Sales: {money(totalSales)}</p>
+                <p className="text-sm font-semibold text-slate-700">Page Sales: {money(totalSales)}</p>
               </CardHeader>
               <CardContent>
                 {transactionsQuery.isLoading && <p className="text-sm text-slate-500">Loading transactions...</p>}
@@ -302,14 +372,40 @@ export default function PosHistory() {
                         </TableCell>
                           </TableRow>
                         ))}
+                        {filteredTransactions.length === 0 && !transactionsQuery.isLoading && (
+                          <TableRow>
+                            <TableCell colSpan={9} className="py-8 text-center text-slate-500">
+                              No transactions match the selected filters.
+                            </TableCell>
+                          </TableRow>
+                        )}
                       </TableBody>
                     </Table>
                   </div>
                 )}
+                {pagination && (
+                  <div className="mt-4 flex flex-col gap-3 border-t border-slate-200 pt-4 sm:flex-row sm:items-center sm:justify-between">
+                    <p className="text-sm text-slate-600">
+                      {pagination.total === 0
+                        ? "No transactions"
+                        : `Showing ${(page - 1) * pagination.limit + 1}–${Math.min(page * pagination.limit, pagination.total)} of ${pagination.total.toLocaleString()} transactions`}
+                    </p>
+                    <div className="flex items-center gap-3">
+                      <Button variant="outline" disabled={page <= 1 || transactionsQuery.isFetching} onClick={() => setPage((current) => current - 1)}>
+                        Previous
+                      </Button>
+                      <span className="text-sm text-slate-600">
+                        Page {page} of {Math.max(1, pagination.pages)}
+                      </span>
+                      <Button variant="outline" disabled={page >= pagination.pages || transactionsQuery.isFetching} onClick={() => setPage((current) => current + 1)}>
+                        Next
+                      </Button>
+                    </div>
+                  </div>
+                )}
               </CardContent>
             </Card>
-          </section>
-        </div>
+        </section>
       </div>
 
       <TransactionDetailsModal

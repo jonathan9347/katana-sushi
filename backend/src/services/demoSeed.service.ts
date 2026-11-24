@@ -1,60 +1,89 @@
 import bcrypt from "bcrypt";
 import { PrismaClient } from "@prisma/client";
+import { INVENTORY_STANDARDS } from "../config/inventoryStandards";
+import { CATERING_PACKAGE_SEEDS } from "../config/cateringPackages";
+import { assertDevelopmentDatabase } from "../lib/seedSafety";
 
 export async function seedDemoData(prisma: PrismaClient) {
+  await assertDevelopmentDatabase(prisma);
+
   type ProductSeed = {
     name: string;
     category: string;
     price: number;
     description?: string;
+    is_available?: boolean;
     recipe: Array<{ material: string; quantity: number; unit: string }>;
   };
 
-  const rawMaterials = [
-    { name: "Rice", unit: "kg", current_stock: 25, reorder_level: 5, cost_per_unit: 85 },
-    { name: "Salmon", unit: "kg", current_stock: 8, reorder_level: 2, cost_per_unit: 950 },
-    { name: "Tuna", unit: "kg", current_stock: 7, reorder_level: 2, cost_per_unit: 820 },
-    { name: "Nori", unit: "sheet", current_stock: 200, reorder_level: 40, cost_per_unit: 6 },
-    { name: "Crabstick", unit: "piece", current_stock: 180, reorder_level: 40, cost_per_unit: 12 },
-    { name: "Cucumber", unit: "kg", current_stock: 6, reorder_level: 2, cost_per_unit: 90 },
-    { name: "Mango", unit: "kg", current_stock: 8, reorder_level: 2, cost_per_unit: 120 },
-    { name: "Ebiko", unit: "kg", current_stock: 4, reorder_level: 1, cost_per_unit: 720 },
-    { name: "Tamago", unit: "piece", current_stock: 80, reorder_level: 20, cost_per_unit: 18 },
-    { name: "Cream cheese", unit: "kg", current_stock: 4, reorder_level: 1, cost_per_unit: 430 },
-    { name: "Tempura flakes", unit: "kg", current_stock: 6, reorder_level: 2, cost_per_unit: 180 },
-    { name: "Unagi", unit: "kg", current_stock: 3, reorder_level: 1, cost_per_unit: 1100 },
-    { name: "Shrimp", unit: "kg", current_stock: 7, reorder_level: 2, cost_per_unit: 520 },
-    { name: "Avocado", unit: "piece", current_stock: 40, reorder_level: 10, cost_per_unit: 55 },
-    { name: "Spring onion", unit: "kg", current_stock: 2, reorder_level: 0.5, cost_per_unit: 160 },
-    { name: "Sesame seeds", unit: "kg", current_stock: 2, reorder_level: 0.5, cost_per_unit: 280 },
-    { name: "Spicy mayo", unit: "L", current_stock: 5, reorder_level: 1, cost_per_unit: 240 },
-    { name: "Teriyaki sauce", unit: "L", current_stock: 5, reorder_level: 1, cost_per_unit: 220 },
-    { name: "Sriracha", unit: "L", current_stock: 4, reorder_level: 1, cost_per_unit: 260 },
-    { name: "Bonito flakes", unit: "kg", current_stock: 2, reorder_level: 0.5, cost_per_unit: 850 },
-    { name: "Lettuce", unit: "kg", current_stock: 4, reorder_level: 1, cost_per_unit: 130 },
-    { name: "Pineapple tidbits", unit: "kg", current_stock: 4, reorder_level: 1, cost_per_unit: 140 },
-    { name: "Kani tempura", unit: "piece", current_stock: 80, reorder_level: 20, cost_per_unit: 18 },
-    { name: "Nachos", unit: "kg", current_stock: 3, reorder_level: 1, cost_per_unit: 190 },
-    { name: "Chili", unit: "kg", current_stock: 2, reorder_level: 0.5, cost_per_unit: 180 },
-    { name: "Tuna sashimi block", unit: "kg", current_stock: 6, reorder_level: 2, cost_per_unit: 900 },
-    { name: "Salmon sashimi block", unit: "kg", current_stock: 6, reorder_level: 2, cost_per_unit: 1050 },
-    { name: "Chicken", unit: "kg", current_stock: 6, reorder_level: 2, cost_per_unit: 240 },
-    { name: "Aonori", unit: "kg", current_stock: 1, reorder_level: 0.25, cost_per_unit: 680 },
-    { name: "Bottled Water", unit: "bottle", current_stock: 0, reorder_level: 0, cost_per_unit: 0 },
-    { name: "Softdrinks (Coke/Sprite/Royal)", unit: "bottle", current_stock: 0, reorder_level: 0, cost_per_unit: 0 },
-    { name: "Iced Tea", unit: "bottle", current_stock: 0, reorder_level: 0, cost_per_unit: 0 },
-    { name: "Japanese Soda Ramune", unit: "bottle", current_stock: 0, reorder_level: 0, cost_per_unit: 0 },
-    { name: "Green Tea (Hot/Cold)", unit: "cup", current_stock: 0, reorder_level: 0, cost_per_unit: 0 },
-    { name: "Sapporo Beer", unit: "bottle", current_stock: 0, reorder_level: 0, cost_per_unit: 0 },
-    { name: "Asahi Beer", unit: "bottle", current_stock: 0, reorder_level: 0, cost_per_unit: 0 },
-    { name: "Sake (Small)", unit: "bottle", current_stock: 0, reorder_level: 0, cost_per_unit: 0 },
-    { name: "Sake (Large)", unit: "bottle", current_stock: 0, reorder_level: 0, cost_per_unit: 0 },
-    { name: "Calamansi Juice", unit: "bottle", current_stock: 0, reorder_level: 0, cost_per_unit: 0 },
-    { name: "Mango Shake", unit: "cup", current_stock: 0, reorder_level: 0, cost_per_unit: 0 }
+  type RawMaterialSeed = {
+    name: string;
+    unit: string;
+    current_stock: bigint;
+    reorder_level: bigint;
+    cost_per_unit: number;
+    cost_source_amount?: number;
+    cost_source_quantity?: bigint;
+    cost_source_unit?: string;
+  };
+
+  const rawMaterials: RawMaterialSeed[] = [
+    { name: "Rice", unit: "g", current_stock: 25000n, reorder_level: 5000n, cost_per_unit: 0.085 },
+    { name: "Salmon", unit: "g", current_stock: 8000n, reorder_level: 2000n, cost_per_unit: 0.95 },
+    { name: "Tuna", unit: "g", current_stock: 7000n, reorder_level: 2000n, cost_per_unit: 0.82 },
+    { name: "Nori", unit: "sheet", current_stock: 200n, reorder_level: 40n, cost_per_unit: 6 },
+    { name: "Crabstick", unit: "piece", current_stock: 180n, reorder_level: 40n, cost_per_unit: 12 },
+    { name: "Cucumber", unit: "g", current_stock: 6000n, reorder_level: 2000n, cost_per_unit: 0.09 },
+    { name: "Mango", unit: "g", current_stock: 8000n, reorder_level: 2000n, cost_per_unit: 0.12 },
+    { name: "Ebiko", unit: "g", current_stock: 4000n, reorder_level: 1000n, cost_per_unit: 0.72 },
+    { name: "Tamago", unit: "piece", current_stock: 80n, reorder_level: 20n, cost_per_unit: 18 },
+    { name: "Cream cheese", unit: "g", current_stock: 4000n, reorder_level: 1000n, cost_per_unit: 0.43 },
+    { name: "Tempura flakes", unit: "g", current_stock: 6000n, reorder_level: 2000n, cost_per_unit: 0.18 },
+    { name: "Tempura flour", unit: "g", current_stock: 0n, reorder_level: 0n, cost_per_unit: 0 },
+    { name: "Cooking oil", unit: "ml", current_stock: 0n, reorder_level: 0n, cost_per_unit: 0 },
+    { name: "Dipping sauce", unit: "ml", current_stock: 0n, reorder_level: 0n, cost_per_unit: 0 },
+    { name: "Unagi", unit: "g", current_stock: 3000n, reorder_level: 1000n, cost_per_unit: 1.1 },
+    { name: "Shrimp", unit: "g", current_stock: 7000n, reorder_level: 2000n, cost_per_unit: 0.52 },
+    {
+      name: "Avocado",
+      unit: "g",
+      current_stock: 6000n,
+      reorder_level: 1500n,
+      cost_per_unit: 0.36666667,
+      cost_source_amount: 55,
+      cost_source_quantity: 150n,
+      cost_source_unit: "g"
+    },
+    { name: "Spring onion", unit: "g", current_stock: 2000n, reorder_level: 500n, cost_per_unit: 0.16 },
+    { name: "Sesame seeds", unit: "g", current_stock: 2000n, reorder_level: 500n, cost_per_unit: 0.28 },
+    { name: "Spicy mayo", unit: "ml", current_stock: 5000n, reorder_level: 1000n, cost_per_unit: 0.24 },
+    { name: "Teriyaki sauce", unit: "ml", current_stock: 5000n, reorder_level: 1000n, cost_per_unit: 0.22 },
+    { name: "Sriracha", unit: "ml", current_stock: 4000n, reorder_level: 1000n, cost_per_unit: 0.26 },
+    { name: "Bonito flakes", unit: "g", current_stock: 2000n, reorder_level: 500n, cost_per_unit: 0.85 },
+    { name: "Lettuce", unit: "g", current_stock: 4000n, reorder_level: 1000n, cost_per_unit: 0.13 },
+    { name: "Pineapple tidbits", unit: "g", current_stock: 4000n, reorder_level: 1000n, cost_per_unit: 0.14 },
+    { name: "Kani tempura", unit: "piece", current_stock: 80n, reorder_level: 20n, cost_per_unit: 18 },
+    { name: "Nachos", unit: "g", current_stock: 3000n, reorder_level: 1000n, cost_per_unit: 0.19 },
+    { name: "Chili", unit: "g", current_stock: 2000n, reorder_level: 500n, cost_per_unit: 0.18 },
+    { name: "Tuna sashimi block", unit: "g", current_stock: 6000n, reorder_level: 2000n, cost_per_unit: 0.9 },
+    { name: "Salmon sashimi block", unit: "g", current_stock: 6000n, reorder_level: 2000n, cost_per_unit: 1.05 },
+    { name: "Chicken", unit: "g", current_stock: 6000n, reorder_level: 2000n, cost_per_unit: 0.24 },
+    { name: "Aonori", unit: "g", current_stock: 1000n, reorder_level: 250n, cost_per_unit: 0.68 },
+    { name: "Bottled Water", unit: "bottle", current_stock: 0n, reorder_level: 0n, cost_per_unit: 0 },
+    { name: "Softdrinks", unit: "bottle", current_stock: 0n, reorder_level: 0n, cost_per_unit: 0 },
+    { name: "Iced Tea", unit: "bottle", current_stock: 0n, reorder_level: 0n, cost_per_unit: 0 },
+    { name: "Japanese Soda Ramune", unit: "bottle", current_stock: 0n, reorder_level: 0n, cost_per_unit: 0 },
+    { name: "Green Tea (Hot/Cold)", unit: "cup", current_stock: 0n, reorder_level: 0n, cost_per_unit: 0 },
+    { name: "Sapporo Beer", unit: "bottle", current_stock: 0n, reorder_level: 0n, cost_per_unit: 0 },
+    { name: "Asahi Beer", unit: "bottle", current_stock: 0n, reorder_level: 0n, cost_per_unit: 0 },
+    { name: "Sake (Small)", unit: "bottle", current_stock: 0n, reorder_level: 0n, cost_per_unit: 0 },
+    { name: "Sake (Large)", unit: "bottle", current_stock: 0n, reorder_level: 0n, cost_per_unit: 0 },
+    { name: "Calamansi Juice", unit: "bottle", current_stock: 0n, reorder_level: 0n, cost_per_unit: 0 },
+    { name: "Mango Shake", unit: "cup", current_stock: 0n, reorder_level: 0n, cost_per_unit: 0 }
   ];
   const beverageMaterialNames = new Set([
     "Bottled Water",
-    "Softdrinks (Coke/Sprite/Royal)",
+    "Softdrinks",
     "Iced Tea",
     "Japanese Soda Ramune",
     "Green Tea (Hot/Cold)",
@@ -67,19 +96,35 @@ export async function seedDemoData(prisma: PrismaClient) {
   ]);
 
   const classicBase = [
-    { material: "Rice", quantity: 0.2, unit: "kg" },
+    { material: "Rice", quantity: 200, unit: "g" },
     { material: "Nori", quantity: 1, unit: "sheet" }
   ];
 
   const hosoBase = [
-    { material: "Rice", quantity: 0.1, unit: "kg" },
+    { material: "Rice", quantity: 100, unit: "g" },
     { material: "Nori", quantity: 1, unit: "sheet" }
   ];
 
-  const defaultRoll = (protein: string, secondary: string) => [
-    ...classicBase,
-    { material: protein, quantity: 0.03, unit: "kg" },
-    { material: secondary, quantity: 0.02, unit: "kg" }
+  const defaultRoll = (protein: string, secondary: string) => {
+    const ingredient = (material: string, quantity: number, unit: string) => ({ material, quantity, unit });
+    const proteinIngredient = protein === "Crabstick"
+      ? ingredient(protein, 4, "piece")
+      : protein === "Kani tempura"
+        ? ingredient(protein, 1, "piece")
+        : ingredient(protein, 30, "g");
+    const secondaryIngredient = secondary === "Spicy mayo"
+      ? ingredient(secondary, INVENTORY_STANDARDS.ownerConfirmedSpicyMayoMlPerServing, "ml")
+      : secondary === "Crabstick"
+        ? ingredient(secondary, 4, "piece")
+        : ingredient(secondary, 20, "g");
+    return [...classicBase, proteinIngredient, secondaryIngredient];
+  };
+
+  const bakedRoll = (isMedium: boolean) => [
+    { material: "Rice", quantity: isMedium ? 300 : 200, unit: "g" },
+    { material: "Nori", quantity: isMedium ? 2 : 1, unit: "sheet" },
+    { material: "Crabstick", quantity: isMedium ? 3 : 2, unit: "piece" },
+    { material: "Ebiko", quantity: isMedium ? 30 : 20, unit: "g" }
   ];
 
   const products: ProductSeed[] = [
@@ -91,16 +136,16 @@ export async function seedDemoData(prisma: PrismaClient) {
       recipe: [
         ...classicBase,
         { material: "Crabstick", quantity: 4, unit: "piece" },
-        { material: "Cucumber", quantity: 0.03, unit: "kg" },
-        { material: "Mango", quantity: 0.04, unit: "kg" },
-        { material: "Ebiko", quantity: 0.01, unit: "kg" }
+        { material: "Cucumber", quantity: 30, unit: "g" },
+        { material: "Mango", quantity: 40, unit: "g" },
+        { material: "Ebiko", quantity: 10, unit: "g" }
       ]
     },
     {
       name: "Mango Roll",
       category: "Classic Roll",
       price: 220,
-      recipe: [...classicBase, { material: "Crabstick", quantity: 4, unit: "piece" }, { material: "Mango", quantity: 0.04, unit: "kg" }]
+      recipe: [...classicBase, { material: "Crabstick", quantity: 4, unit: "piece" }, { material: "Mango", quantity: 40, unit: "g" }]
     },
     {
       name: "Volcano Roll",
@@ -109,9 +154,9 @@ export async function seedDemoData(prisma: PrismaClient) {
       recipe: [
         ...classicBase,
         { material: "Crabstick", quantity: 3, unit: "piece" },
-        { material: "Mango", quantity: 0.03, unit: "kg" },
-        { material: "Cucumber", quantity: 0.03, unit: "kg" },
-        { material: "Ebiko", quantity: 0.01, unit: "kg" }
+        { material: "Mango", quantity: 30, unit: "g" },
+        { material: "Cucumber", quantity: 30, unit: "g" },
+        { material: "Ebiko", quantity: 10, unit: "g" }
       ]
     },
     {
@@ -120,9 +165,9 @@ export async function seedDemoData(prisma: PrismaClient) {
       price: 220,
       recipe: [
         ...classicBase,
-        { material: "Tuna", quantity: 0.03, unit: "kg" },
-        { material: "Spicy mayo", quantity: 0.01, unit: "L" },
-        { material: "Pineapple tidbits", quantity: 0.02, unit: "kg" }
+        { material: "Tuna", quantity: 30, unit: "g" },
+        { material: "Spicy mayo", quantity: 10, unit: "ml" },
+        { material: "Pineapple tidbits", quantity: 20, unit: "g" }
       ]
     },
     {
@@ -132,9 +177,9 @@ export async function seedDemoData(prisma: PrismaClient) {
       recipe: [
         ...classicBase,
         { material: "Crabstick", quantity: 4, unit: "piece" },
-        { material: "Cucumber", quantity: 0.03, unit: "kg" },
-        { material: "Mango", quantity: 0.02, unit: "kg" },
-        { material: "Tempura flakes", quantity: 0.02, unit: "kg" }
+        { material: "Cucumber", quantity: 30, unit: "g" },
+        { material: "Mango", quantity: 20, unit: "g" },
+        { material: "Tempura flakes", quantity: 20, unit: "g" }
       ]
     },
     {
@@ -143,9 +188,9 @@ export async function seedDemoData(prisma: PrismaClient) {
       price: 240,
       recipe: [
         ...classicBase,
-        { material: "Chicken", quantity: 0.03, unit: "kg" },
-        { material: "Cream cheese", quantity: 0.02, unit: "kg" },
-        { material: "Teriyaki sauce", quantity: 0.01, unit: "L" }
+        { material: "Chicken", quantity: 30, unit: "g" },
+        { material: "Cream cheese", quantity: 20, unit: "g" },
+        { material: "Teriyaki sauce", quantity: 10, unit: "ml" }
       ]
     },
     {
@@ -154,12 +199,18 @@ export async function seedDemoData(prisma: PrismaClient) {
       price: 240,
       recipe: [
         ...classicBase,
-        { material: "Tuna", quantity: 0.03, unit: "kg" },
-        { material: "Spicy mayo", quantity: 0.01, unit: "L" },
-        { material: "Aonori", quantity: 0.005, unit: "kg" }
+        { material: "Tuna", quantity: 30, unit: "g" },
+        { material: "Spicy mayo", quantity: 10, unit: "ml" },
+        // Estimated at 1 g per serving; confirm with the owner or kitchen.
+        { material: "Aonori", quantity: INVENTORY_STANDARDS.ownerConfirmedAonoriGramsPerServing, unit: "g" }
       ]
     },
-    { name: "Mango Hoso", category: "Fried Roll", price: 250, recipe: defaultRoll("Crabstick", "Mango") },
+    {
+      name: "Mango Hoso",
+      category: "Fried Roll",
+      price: 250,
+      recipe: [...classicBase, { material: "Crabstick", quantity: 3, unit: "piece" }, { material: "Mango", quantity: 20, unit: "g" }]
+    },
     { name: "Bomb Hoso", category: "Fried Roll", price: 260, recipe: defaultRoll("Tuna", "Spicy mayo") },
     { name: "Futo California", category: "Fried Roll", price: 200, recipe: defaultRoll("Crabstick", "Mango") },
     { name: "Futo California", category: "Futo Maki", price: 190, recipe: defaultRoll("Crabstick", "Cucumber") },
@@ -167,8 +218,8 @@ export async function seedDemoData(prisma: PrismaClient) {
     { name: "Futo Salmon", category: "Futo Maki", price: 240, recipe: defaultRoll("Salmon", "Cream cheese") },
     { name: "Futo Crab Mango", category: "Futo Maki", price: 210, recipe: defaultRoll("Crabstick", "Mango") },
     { name: "Futo Dynamite", category: "Futo Maki", price: 210, recipe: defaultRoll("Kani tempura", "Spicy mayo") },
-    { name: "Tuna Hoso", category: "Hoso Maki", price: 160, recipe: [...hosoBase, { material: "Tuna", quantity: 0.03, unit: "kg" }] },
-    { name: "Salmon Hoso", category: "Hoso Maki", price: 180, recipe: [...hosoBase, { material: "Salmon", quantity: 0.03, unit: "kg" }] },
+    { name: "Tuna Hoso", category: "Hoso Maki", price: 160, recipe: [...hosoBase, { material: "Tuna", quantity: 30, unit: "g" }] },
+    { name: "Salmon Hoso", category: "Hoso Maki", price: 180, recipe: [...hosoBase, { material: "Salmon", quantity: 30, unit: "g" }] },
     { name: "Kani Hoso", category: "Hoso Maki", price: 150, recipe: [...hosoBase, { material: "Crabstick", quantity: 3, unit: "piece" }] },
     { name: "Tamago Hoso", category: "Hoso Maki", price: 140, recipe: [...hosoBase, { material: "Tamago", quantity: 3, unit: "piece" }] },
     { name: "Unagi Roll", category: "Special Roll", price: 290, recipe: defaultRoll("Unagi", "Cucumber") },
@@ -185,42 +236,56 @@ export async function seedDemoData(prisma: PrismaClient) {
       name: "Salmon Nigiri (2pcs)",
       category: "Nigiri",
       price: 170,
-      recipe: [{ material: "Rice", quantity: 0.04, unit: "kg" }, { material: "Salmon", quantity: 0.04, unit: "kg" }]
+      recipe: [{ material: "Rice", quantity: 40, unit: "g" }, { material: "Salmon", quantity: 40, unit: "g" }]
     },
     {
       name: "Tuna Nigiri (2pcs)",
       category: "Nigiri",
       price: 150,
-      recipe: [{ material: "Rice", quantity: 0.04, unit: "kg" }, { material: "Tuna", quantity: 0.04, unit: "kg" }]
+      recipe: [{ material: "Rice", quantity: 40, unit: "g" }, { material: "Tuna", quantity: 40, unit: "g" }]
     },
     {
       name: "Tamago Sushi (3pcs)",
       category: "Nigiri",
       price: 80,
-      recipe: [{ material: "Rice", quantity: 0.06, unit: "kg" }, { material: "Tamago", quantity: 3, unit: "piece" }]
+      recipe: [{ material: "Rice", quantity: 60, unit: "g" }, { material: "Tamago", quantity: 3, unit: "piece" }]
     },
     {
       name: "Kani Sushi (4pcs)",
       category: "Nigiri",
       price: 100,
-      recipe: [{ material: "Rice", quantity: 0.08, unit: "kg" }, { material: "Crabstick", quantity: 4, unit: "piece" }]
+      recipe: [{ material: "Rice", quantity: 80, unit: "g" }, { material: "Crabstick", quantity: 4, unit: "piece" }]
     },
     {
       name: "Unagi Nigiri (3pcs)",
       category: "Nigiri",
       price: 230,
-      recipe: [{ material: "Rice", quantity: 0.06, unit: "kg" }, { material: "Unagi", quantity: 0.045, unit: "kg" }]
+      recipe: [{ material: "Rice", quantity: 60, unit: "g" }, { material: "Unagi", quantity: 45, unit: "g" }]
     },
-    { name: "Salmon Sashimi 100g", category: "Sashimi", price: 260, recipe: [{ material: "Salmon sashimi block", quantity: 0.1, unit: "kg" }] },
-    { name: "Salmon Sashimi 500g", category: "Sashimi", price: 1200, recipe: [{ material: "Salmon sashimi block", quantity: 0.5, unit: "kg" }] },
-    { name: "Salmon Sashimi 1000g", category: "Sashimi", price: 2300, recipe: [{ material: "Salmon sashimi block", quantity: 1, unit: "kg" }] },
-    { name: "Tuna Sashimi 100g", category: "Sashimi", price: 160, recipe: [{ material: "Tuna sashimi block", quantity: 0.1, unit: "kg" }] },
-    { name: "Tuna Sashimi 500g", category: "Sashimi", price: 700, recipe: [{ material: "Tuna sashimi block", quantity: 0.5, unit: "kg" }] },
-    { name: "Tuna Sashimi 1000g", category: "Sashimi", price: 1300, recipe: [{ material: "Tuna sashimi block", quantity: 1, unit: "kg" }] },
-    { name: "Baked Sushi California Small", category: "Baked Sushi", price: 320, recipe: defaultRoll("Crabstick", "Ebiko") },
-    { name: "Baked Sushi California Medium", category: "Baked Sushi", price: 600, recipe: defaultRoll("Crabstick", "Ebiko") },
-    { name: "Large Classic Platter (71pcs)", category: "Platter", price: 1400, recipe: defaultRoll("Salmon", "Crabstick") },
-    { name: "Medium Classic Platter (40pcs)", category: "Platter", price: 750, recipe: defaultRoll("Tuna", "Crabstick") },
+    { name: "Salmon Sashimi 100g", category: "Sashimi", price: 260, recipe: [{ material: "Salmon sashimi block", quantity: 100, unit: "g" }] },
+    { name: "Salmon Sashimi 500g", category: "Sashimi", price: 1200, recipe: [{ material: "Salmon sashimi block", quantity: 500, unit: "g" }] },
+    { name: "Salmon Sashimi 1000g", category: "Sashimi", price: 2300, recipe: [{ material: "Salmon sashimi block", quantity: 1000, unit: "g" }] },
+    { name: "Tuna Sashimi 100g", category: "Sashimi", price: 160, recipe: [{ material: "Tuna sashimi block", quantity: 100, unit: "g" }] },
+    { name: "Tuna Sashimi 500g", category: "Sashimi", price: 700, recipe: [{ material: "Tuna sashimi block", quantity: 500, unit: "g" }] },
+    { name: "Tuna Sashimi 1000g", category: "Sashimi", price: 1300, recipe: [{ material: "Tuna sashimi block", quantity: 1000, unit: "g" }] },
+    { name: "Baked Sushi California Small", category: "Baked Sushi", price: 320, recipe: bakedRoll(false) },
+    { name: "Baked Sushi California Medium", category: "Baked Sushi", price: 600, recipe: bakedRoll(true) },
+    {
+      name: "Large Classic Platter (71pcs)",
+      category: "Platter",
+      price: 1400,
+      is_available: false,
+      // Keep unavailable until platter composition and component deduction are implemented.
+      recipe: [...classicBase, { material: "Salmon", quantity: 30, unit: "g" }, { material: "Crabstick", quantity: 0, unit: "piece" }]
+    },
+    {
+      name: "Medium Classic Platter (40pcs)",
+      category: "Platter",
+      price: 750,
+      is_available: false,
+      // Keep unavailable until platter composition and component deduction are implemented.
+      recipe: [...classicBase, { material: "Tuna", quantity: 30, unit: "g" }, { material: "Crabstick", quantity: 0, unit: "piece" }]
+    },
     { name: "Kani Spring Roll (3pcs)", category: "Spring Roll", price: 150, recipe: defaultRoll("Crabstick", "Lettuce") },
     { name: "Tuna Gyozai (4pcs)", category: "Gyozai", price: 160, recipe: defaultRoll("Tuna", "Spring onion") },
     { name: "Bottled Water", category: "Beverage", price: 20, recipe: [] },
@@ -276,11 +341,15 @@ export async function seedDemoData(prisma: PrismaClient) {
   await prisma.unlimitedSetting.deleteMany();
   await prisma.unlimitedSession.deleteMany();
   await prisma.reservation.deleteMany();
+  await prisma.diningOrder.deleteMany();
+  await prisma.diningTableSession.deleteMany();
+  await prisma.tableCombinationMember.deleteMany();
+  await prisma.tableCombination.deleteMany();
+  await prisma.table.updateMany({ data: { linked_to_table_id: null } });
   await prisma.table.deleteMany();
   await prisma.recipeIngredient.deleteMany();
   await prisma.recipe.deleteMany();
   await prisma.sellingProduct.deleteMany();
-  await prisma.conversionRule.deleteMany();
   await prisma.rawMaterial.deleteMany();
   await prisma.user.deleteMany();
 
@@ -334,6 +403,7 @@ export async function seedDemoData(prisma: PrismaClient) {
         name: product.name,
         category: product.category,
         price: product.price,
+        is_available: product.is_available ?? true,
         description: product.description ?? `${product.category} menu item`,
         image_url: chosenImage
       }
@@ -343,7 +413,8 @@ export async function seedDemoData(prisma: PrismaClient) {
       data: {
         selling_product_id: sellingProduct.id,
         total_yield_quantity: 1,
-        yield_unit: "serving"
+        yield_unit: "serving",
+        status: product.category === "Platter" ? "superseded by composition" : "recipe not confirmed"
       }
     });
 
@@ -357,10 +428,10 @@ export async function seedDemoData(prisma: PrismaClient) {
           }
 
           return {
+            quantity_per_yield: BigInt(ingredient.quantity),
+            unit: ingredient.unit,
             recipe_id: recipe.id,
-            raw_material_id: rawMaterialId,
-            quantity_per_yield: ingredient.quantity,
-            unit: ingredient.unit
+            raw_material_id: rawMaterialId
           };
         })
       });
@@ -384,74 +455,16 @@ export async function seedDemoData(prisma: PrismaClient) {
     }))
   });
 
-  await prisma.conversionRule.createMany({
-    data: [
-      { name: "Raw rice to cooked rice", from_quantity: 1, from_unit: "kg raw rice", to_quantity: 2.5, to_unit: "kg cooked rice" },
-      { name: "Salmon usable yield", from_quantity: 1, from_unit: "kg salmon", to_quantity: 0.9, to_unit: "kg usable salmon" },
-      { name: "Tuna usable yield", from_quantity: 1, from_unit: "kg tuna", to_quantity: 0.85, to_unit: "kg usable tuna" }
-    ]
-  });
-
   await prisma.cateringPackage.createMany({
-    data: [
-      {
-        id: "pkg_classic",
-        name: "Classic Station",
-        description: "California Maki, Mango Roll, Volcano Roll, Iced Tea",
-        pricePerPerson: 350,
-        minPax: 10,
-        maxPax: 100,
-        imageUrl: "/images/catering/classic-station.jpg",
-        items: ["California Maki", "Mango Roll", "Volcano Roll", "Iced Tea"]
-      },
-      {
-        id: "pkg_premium",
-        name: "Premium Station",
-        description: "Tori Teriyaki Roll, Salmon Cheese Maki, Futomaki, Iced Tea",
-        pricePerPerson: 550,
-        minPax: 10,
-        maxPax: 100,
-        imageUrl: "/images/catering/premium-station.jpg",
-        items: ["Tori Teriyaki Roll", "Salmon Cheese Maki", "Futomaki", "Iced Tea"]
-      },
-      {
-        id: "pkg_nigiri",
-        name: "Nigiri Station",
-        description: "Tamago Sushi, Salmon Nigiri, Kani Sushi, Iced Tea",
-        pricePerPerson: 300,
-        minPax: 10,
-        maxPax: 100,
-        imageUrl: "/images/catering/nigiri-station.jpg",
-        items: ["Tamago Sushi", "Salmon Nigiri", "Kani Sushi", "Iced Tea"]
-      },
-      {
-        id: "pkg_mix",
-        name: "Mix Station",
-        description: "California Maki, Mango Roll, Salmon Nigiri, Tamago Sushi, Iced Tea",
-        pricePerPerson: 450,
-        minPax: 10,
-        maxPax: 100,
-        imageUrl: "/images/catering/mix-station.jpg",
-        items: ["California Maki", "Mango Roll", "Salmon Nigiri", "Tamago Sushi", "Iced Tea"]
-      },
-      {
-        id: "pkg_sashimi",
-        name: "Sashimi Bar",
-        description: "Salmon Sashimi, Tuna Sashimi, Assorted Nigiri, Iced Tea",
-        pricePerPerson: 650,
-        minPax: 20,
-        maxPax: 100,
-        imageUrl: "/images/catering/sashimi-bar.jpg",
-        items: ["Salmon Sashimi", "Tuna Sashimi", "Assorted Nigiri", "Iced Tea"]
-      }
-    ]
+    data: CATERING_PACKAGE_SEEDS
   });
 
   await prisma.table.createMany({
-    data: [2, 4, 4, 2, 4, 6, 2, 4, 8, 4].map((capacity, index) => ({
+    data: Array.from({ length: 16 }, (_, index) => ({
       table_number: index + 1,
-      capacity,
-      status: "AVAILABLE"
-    }))
+      capacity: index < 8 ? 4 : 2,
+      status: "available"
+    })),
+    skipDuplicates: true
   });
 }

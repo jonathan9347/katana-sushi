@@ -4,6 +4,16 @@ function trimTrailingSlash(value: string) {
   return value.replace(/\/+$/, "");
 }
 
+function isLocalApiUrl(value: string) {
+  try {
+    const { hostname } = new URL(value);
+    return ["localhost", "127.0.0.1", "[::1]", "::1"].includes(hostname) ||
+      (typeof window !== "undefined" && hostname === window.location.hostname);
+  } catch {
+    return false;
+  }
+}
+
 function getCandidateBaseUrls() {
   const urls = new Set<string>();
   const configured = import.meta.env.VITE_API_URL?.trim();
@@ -18,7 +28,10 @@ function getCandidateBaseUrls() {
     urls.add(trimTrailingSlash(configured));
   }
 
-  if (import.meta.env.DEV && typeof window !== "undefined") {
+  // Local fallbacks only make sense when the API itself runs on this machine.
+  // With a remote VITE_API_URL (for example a Render server that is waking up),
+  // a slow first request must not switch the app to a local port with no server.
+  if (import.meta.env.DEV && typeof window !== "undefined" && (!configured || isLocalApiUrl(configured))) {
     const protocol = window.location.protocol === "https:" ? "https:" : "http:";
     urls.add(`${protocol}//${window.location.hostname}:5001`);
 

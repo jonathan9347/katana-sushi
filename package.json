@@ -4,7 +4,9 @@
     "build": "cd backend && npm install && npm run build",
     "start": "cd backend && npm run start",
     "prisma:generate": "cd backend && npx prisma generate --schema=prisma/schema.prisma",
-    "prisma:push": "cd backend && npx prisma db push --schema=prisma/schema.prisma"
+    "prisma:push": "cd backend && npx prisma db push --schema=prisma/schema.prisma",
+    "prisma:migrate:deploy": "cd backend && npx prisma migrate deploy --schema=prisma/schema.prisma",
+    "db:ready": "cd backend && npm run db:ready"
   },
   "prisma": {
     "schema": "backend/prisma/schema.prisma"

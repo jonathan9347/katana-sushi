@@ -151,7 +151,7 @@ export default function AnalyticsPage() {
       <div className="mx-auto grid max-w-7xl gap-5">
         <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
           <div>
-            <p className="text-sm font-medium uppercase text-red-700">Staff</p>
+            <p className="text-sm font-medium uppercase text-red-700">Reports</p>
             <h1 className="flex items-center gap-2 text-3xl font-semibold text-slate-950">
               <BarChart3 className="h-8 w-8" />
               Analytics & Insights

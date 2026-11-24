@@ -5,7 +5,7 @@ services:
     plan: free
     region: oregon
     buildCommand: npm --prefix backend install --include=dev && npm --prefix backend run build
-    preDeployCommand: cd backend && npm run prisma:push && npm run prisma:seed:prod
+    preDeployCommand: cd backend && npm run prisma:migrate:deploy
     startCommand: cd backend && npm run start
     envVars:
       - key: NODE_ENV
@@ -17,4 +17,12 @@ services:
       - key: DATABASE_URL
         sync: false
       - key: DIRECT_URL
+        sync: false
+      - key: FRONTEND_URL
+        sync: false
+      - key: PAYMENT_GATEWAY
+        value: paymongo
+      - key: PAYMONGO_SECRET_KEY
+        sync: false
+      - key: PAYMONGO_WEBHOOK_SECRET
         sync: false

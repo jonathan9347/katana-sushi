@@ -167,8 +167,8 @@ export class EmailService {
     return `<h3>Order items</h3><table style="width:100%;border-collapse:collapse">${items.map((item) => `<tr><td style="padding:6px 0">${this.escape(item.name)} x ${item.quantity}</td><td style="padding:6px 0;text-align:right">${this.money(item.price * item.quantity)}</td></tr>`).join("")}</table>`;
   }
 
-  private paymentSummary(total?: number | null, downpayment?: number | null, remaining?: number | null): string {
-    return `<h3>Payment summary</h3><table style="width:100%;border-collapse:collapse"><tr><td>Total</td><td style="text-align:right">${this.money(total)}</td></tr><tr><td>Downpayment</td><td style="text-align:right">${this.money(downpayment)}</td></tr><tr><td>Remaining</td><td style="text-align:right">${this.money(remaining)}</td></tr></table>`;
+  private paymentSummary(total?: number | null, paid?: number | null, amountDue?: number | null): string {
+    return `<h3>Payment summary</h3><table style="width:100%;border-collapse:collapse"><tr><td>Total</td><td style="text-align:right">${this.money(total)}</td></tr><tr><td>Paid</td><td style="text-align:right">${this.money(paid)}</td></tr><tr><td>Amount due</td><td style="text-align:right">${this.money(amountDue)}</td></tr></table>`;
   }
 
   private status(value: string): string {

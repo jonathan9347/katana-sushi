@@ -1,6 +1,7 @@
 import { FormEvent, useState } from "react";
 import axios from "axios";
 import { CheckCircle2, MessageSquareHeart, Send, Star } from "lucide-react";
+import BackToHome from "../../components/layout/BackToHome";
 import { api } from "../../lib/api";
 
 const visitTypes = [
@@ -69,7 +70,10 @@ export default function Feedback() {
 
   if (feedbackId) {
     return (
-      <main className="px-4 py-8 md:py-12">
+      <main className="px-4 pt-3 pb-8 md:pb-12">
+        <div className="customer-shell mb-4">
+          <BackToHome />
+        </div>
         <section className="customer-shell">
           <div className="mx-auto max-w-xl customer-card p-6 text-center md:p-8">
             <CheckCircle2 className="mx-auto h-12 w-12 text-emerald-400" />
@@ -87,7 +91,10 @@ export default function Feedback() {
   }
 
   return (
-    <main className="px-3 py-6 md:px-4 md:py-12">
+    <main className="px-3 pt-3 pb-6 md:px-4 md:pb-12">
+      <div className="customer-shell mb-4">
+        <BackToHome />
+      </div>
       <section className="customer-shell">
         <div className="grid gap-5 lg:grid-cols-[0.85fr_1.15fr]">
           <div className="customer-card overflow-hidden">

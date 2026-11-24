@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
+import axios from "axios";
 import { ChevronDown, ChevronRight, Download } from "lucide-react";
 import { api } from "../../../lib/api";
 import { Button } from "../../../components/ui/button";
@@ -10,11 +11,17 @@ import { InventoryTransaction, RawMaterial } from "./types";
 
 type HistoryView = "transaction" | "material";
 
+type TransactionPage = {
+  transactions: PosHistoryRecord[];
+  pagination: { page: number; limit: number; total: number; pages: number };
+};
+
 type PosHistoryRecord = {
   id: string;
   transaction_number: string;
   customer_name?: string | null;
   transaction_type: string;
+  table_number?: number | null;
   total: number;
   payment_method: string;
   status: string;
@@ -30,6 +37,7 @@ type PosHistoryRecord = {
     id: string;
     quantity: number;
     total_price: number;
+    name_snapshot?: string | null;
     round_number?: number;
     selling_product: {
       name: string;
@@ -58,6 +66,20 @@ function money(value: number) {
   return `PHP ${Number(value).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
+function getTransactionErrorMessage(error: unknown) {
+  if (axios.isAxiosError(error)) {
+    const responseMessage = (error.response?.data as { message?: unknown } | undefined)?.message;
+    if (typeof responseMessage === "string" && responseMessage.trim()) {
+      return `Unable to load transactions: ${responseMessage}`;
+    }
+    if (error.code === "ECONNABORTED") {
+      return "Unable to load transactions: the request timed out. Try narrowing the date range.";
+    }
+  }
+
+  return "Unable to load transactions. Check your connection and sign-in, then try again.";
+}
+
 export default function TransactionHistory() {
   const [view, setView] = useState<HistoryView>("transaction");
   const [materialId, setMaterialId] = useState("");
@@ -66,6 +88,7 @@ export default function TransactionHistory() {
   const [search, setSearch] = useState("");
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
+  const [transactionPage, setTransactionPage] = useState(1);
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
 
   const materialsQuery = useQuery({
@@ -78,18 +101,20 @@ export default function TransactionHistory() {
   });
 
   const transactionsQuery = useQuery({
-    queryKey: ["pos", "transactions", "inventory-view", transactionType, search, from, to],
+    queryKey: ["pos", "transactions", "inventory-view", transactionType, search, from, to, transactionPage],
     queryFn: async () => {
-      const response = await api.get<{ transactions: PosHistoryRecord[] }>("/api/pos/transactions", {
+      const response = await api.get<TransactionPage>("/api/pos/transactions/unified", {
         params: {
           from: from || undefined,
           to: to || undefined,
           transaction_type: transactionType || undefined,
           search: search || undefined,
-          limit: 100
-        }
+          page: transactionPage,
+          limit: 50
+        },
+        timeout: 60000
       });
-      return response.data.transactions;
+      return response.data;
     },
     enabled: view === "transaction"
   });
@@ -124,14 +149,14 @@ export default function TransactionHistory() {
     if (view === "transaction") {
       const rows = [
         ["Date", "Transaction", "Type", "Total", "Payment", "Cashier", "Items"],
-        ...(transactionsQuery.data ?? []).map((transaction) => [
+        ...(transactionsQuery.data?.transactions ?? []).map((transaction) => [
           new Date(transaction.created_at).toLocaleString(),
           transaction.transaction_number,
           transaction.transaction_type,
           String(transaction.total),
           transaction.payment_method,
           transaction.cashier?.name ?? transaction.cashier?.email ?? "System",
-          transaction.items.map((item) => `${item.selling_product.name} x${item.quantity}`).join("; ")
+          transaction.items.map((item) => `${item.name_snapshot ?? item.selling_product.name} x${item.quantity}`).join("; ")
         ])
       ];
 
@@ -186,11 +211,11 @@ export default function TransactionHistory() {
       </CardHeader>
       <CardContent className="grid gap-4">
         <div className="grid gap-2 md:grid-cols-5">
-          <input className="h-10 rounded-md border border-slate-300 px-3 text-sm" type="date" value={from} onChange={(event) => setFrom(event.target.value)} />
-          <input className="h-10 rounded-md border border-slate-300 px-3 text-sm" type="date" value={to} onChange={(event) => setTo(event.target.value)} />
+          <input className="h-10 rounded-md border border-slate-300 px-3 text-sm" type="date" value={from} onChange={(event) => { setFrom(event.target.value); setTransactionPage(1); }} />
+          <input className="h-10 rounded-md border border-slate-300 px-3 text-sm" type="date" value={to} onChange={(event) => { setTo(event.target.value); setTransactionPage(1); }} />
           {view === "transaction" ? (
             <>
-              <Select value={transactionType} onChange={(event) => setTransactionType(event.target.value)}>
+              <Select value={transactionType} onChange={(event) => { setTransactionType(event.target.value); setTransactionPage(1); }}>
                 <option value="">All types</option>
                 <option value="dine_in">Dine-in</option>
                 <option value="takeout">Takeout</option>
@@ -200,7 +225,7 @@ export default function TransactionHistory() {
                 className="h-10 rounded-md border border-slate-300 px-3 text-sm md:col-span-2"
                 placeholder="Search transaction or customer"
                 value={search}
-                onChange={(event) => setSearch(event.target.value)}
+                onChange={(event) => { setSearch(event.target.value); setTransactionPage(1); }}
               />
             </>
           ) : (
@@ -226,9 +251,13 @@ export default function TransactionHistory() {
         {view === "transaction" && (
           <div className="grid gap-3">
             {transactionsQuery.isLoading && <p className="text-sm text-slate-500">Loading transactions...</p>}
-            {transactionsQuery.isError && <p className="text-sm text-red-700">Unable to load transactions.</p>}
-            {transactionsQuery.data?.length === 0 && <p className="text-sm text-slate-500">No transactions found.</p>}
-            {transactionsQuery.data?.map((transaction) => {
+            {transactionsQuery.isError && (
+              <p className="text-sm text-red-700">
+                {getTransactionErrorMessage(transactionsQuery.error)}
+              </p>
+            )}
+            {transactionsQuery.data?.transactions.length === 0 && <p className="text-sm text-slate-500">No transactions found.</p>}
+            {transactionsQuery.data?.transactions.map((transaction) => {
               const open = expanded[transaction.id] ?? false;
               const itemCount = transaction.items.reduce((sum, item) => sum + item.quantity, 0);
 
@@ -250,7 +279,7 @@ export default function TransactionHistory() {
                             ? `Table ${transaction.table?.table_number ?? "-"} | Guests: ${transaction.unlimited_session?.pax_count ?? 0} | Rounds: ${
                                 transaction.unlimited_session?.rounds.length ?? 0
                               } | Items: ${itemCount}`
-                            : `Customer: ${transaction.customer_name || "Walk-in"} | Payment: ${transaction.payment_method}`}
+                            : `${transaction.transaction_type === "dine_in" ? `Table ${transaction.table_number ?? "-"} | ` : ""}Customer: ${transaction.customer_name || "Walk-in"} | Payment: ${transaction.payment_method}`}
                         </span>
                       </span>
                     </span>
@@ -272,7 +301,7 @@ export default function TransactionHistory() {
                             {transaction.items.map((item) => (
                               <TableRow key={item.id}>
                                 {transaction.transaction_type === "unlimited" && <TableCell>{item.round_number ?? "-"}</TableCell>}
-                                <TableCell className="font-medium">{item.selling_product.name}</TableCell>
+                                <TableCell className="font-medium">{item.name_snapshot ?? item.selling_product.name}</TableCell>
                                 <TableCell>{item.quantity}</TableCell>
                                 <TableCell>{money(item.total_price)}</TableCell>
                               </TableRow>
@@ -291,6 +320,34 @@ export default function TransactionHistory() {
                 </section>
               );
             })}
+            {transactionsQuery.data?.pagination && transactionsQuery.data.pagination.pages > 1 && (
+              <div className="flex flex-col gap-3 border-t border-slate-200 pt-4 sm:flex-row sm:items-center sm:justify-between">
+                <p className="text-sm text-slate-600">
+                  Showing {(transactionPage - 1) * transactionsQuery.data.pagination.limit + 1}–
+                  {Math.min(transactionPage * transactionsQuery.data.pagination.limit, transactionsQuery.data.pagination.total)} of{" "}
+                  {transactionsQuery.data.pagination.total.toLocaleString()} transactions
+                </p>
+                <div className="flex items-center gap-3">
+                  <Button
+                    variant="outline"
+                    disabled={transactionPage <= 1 || transactionsQuery.isFetching}
+                    onClick={() => setTransactionPage((current) => current - 1)}
+                  >
+                    Previous
+                  </Button>
+                  <span className="text-sm text-slate-600">
+                    Page {transactionPage} of {transactionsQuery.data.pagination.pages}
+                  </span>
+                  <Button
+                    variant="outline"
+                    disabled={transactionPage >= transactionsQuery.data.pagination.pages || transactionsQuery.isFetching}
+                    onClick={() => setTransactionPage((current) => current + 1)}
+                  >
+                    Next
+                  </Button>
+                </div>
+              </div>
+            )}
           </div>
         )}
 

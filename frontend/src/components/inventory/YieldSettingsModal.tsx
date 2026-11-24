@@ -108,8 +108,8 @@ export default function YieldSettingsModal({ open, onClose }: YieldSettingsModal
                         <TableCell>
                           <input
                             className="h-9 w-36 rounded-md border border-slate-300 px-2 text-sm"
-                            min="0.001"
-                            step="0.001"
+                            min="1"
+                            step="1"
                             type="number"
                             value={recipeDrafts[ingredient.id]?.quantity ?? ingredient.quantity}
                             onChange={(event) =>
@@ -124,19 +124,7 @@ export default function YieldSettingsModal({ open, onClose }: YieldSettingsModal
                           />
                         </TableCell>
                         <TableCell>
-                          <input
-                            className="h-9 w-32 rounded-md border border-slate-300 px-2 text-sm"
-                            value={recipeDrafts[ingredient.id]?.unit ?? ingredient.unit}
-                            onChange={(event) =>
-                              setRecipeDrafts((current) => ({
-                                ...current,
-                                [ingredient.id]: {
-                                  quantity: current[ingredient.id]?.quantity ?? String(ingredient.quantity),
-                                  unit: event.target.value
-                                }
-                              }))
-                            }
-                          />
+                          {ingredient.unit}
                         </TableCell>
                       </TableRow>
                     ))}

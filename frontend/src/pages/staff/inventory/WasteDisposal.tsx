@@ -1,4 +1,4 @@
-import { FormEvent, useState } from "react";
+import { ChangeEvent, FormEvent, useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Trash2 } from "lucide-react";
 import { api } from "../../../lib/api";
@@ -33,15 +33,44 @@ const reasonLabels: Record<WasteForm["reason"], string> = {
   other: "Other"
 };
 
-export default function WasteDisposal() {
-  const [wasteForm, setWasteForm] = useState<WasteForm>(emptyWasteForm);
+export default function WasteDisposal({
+  initialForm,
+  onPreloadConsumed
+}: {
+  initialForm?: Partial<WasteForm>;
+  onPreloadConsumed?: () => void;
+}) {
+  const [wasteForm, setWasteForm] = useState<WasteForm>({
+    ...emptyWasteForm,
+    ...initialForm,
+    reason: initialForm?.reason ?? emptyWasteForm.reason,
+    notes: initialForm?.notes ?? emptyWasteForm.notes,
+    quantity: initialForm?.quantity ? String(initialForm.quantity) : emptyWasteForm.quantity
+  });
   const queryClient = useQueryClient();
   const { toast } = useToast();
+
+  useEffect(() => {
+    if (!initialForm) {
+      return;
+    }
+
+    setWasteForm({
+      ...emptyWasteForm,
+      raw_material_id: initialForm.raw_material_id ?? "",
+      batch_id: initialForm.batch_id ?? "",
+      quantity: initialForm.quantity ? String(initialForm.quantity) : "",
+      reason: initialForm.reason ?? "expired",
+      notes: initialForm.notes ?? "",
+    });
+  }, [initialForm]);
 
   const materialsQuery = useQuery({
     queryKey: ["inventory", "materials"],
     queryFn: async () => {
-      const response = await api.get<{ materials: RawMaterial[] }>("/api/inventory/materials");
+      const response = await api.get<{
+        materials: Array<RawMaterial & { available_quantity: string | number }>;
+      }>("/api/inventory/materials");
       return response.data.materials;
     }
   });
@@ -67,17 +96,23 @@ export default function WasteDisposal() {
     }
   });
 
+  const selectedBatch = wasteForm.batch_id
+    ? batchesQuery.data?.find((batch) => batch.id === wasteForm.batch_id)
+    : undefined;
+  const maxDisposalQuantity = selectedBatch ? Number(selectedBatch.remaining_quantity) : undefined;
+
   const disposeMutation = useMutation({
     mutationFn: async () =>
       api.post("/api/inventory/waste", {
         raw_material_id: wasteForm.raw_material_id,
         quantity: Number(wasteForm.quantity),
         reason: wasteForm.reason,
-        notes: wasteForm.notes || undefined,
+        notes: wasteForm.notes,
         batch_id: wasteForm.batch_id || undefined
       }),
     onSuccess: () => {
       setWasteForm(emptyWasteForm);
+      onPreloadConsumed?.();
       queryClient.invalidateQueries({ queryKey: ["inventory"] });
       queryClient.invalidateQueries({ queryKey: ["analytics"] });
       toast("Product disposed and inventory updated.");
@@ -95,7 +130,30 @@ export default function WasteDisposal() {
 
   function handleSubmit(event: FormEvent) {
     event.preventDefault();
+
+    if (maxDisposalQuantity !== undefined && Number(wasteForm.quantity) > maxDisposalQuantity) {
+      setWasteForm((current) => ({
+        ...current,
+        quantity: String(maxDisposalQuantity)
+      }));
+      toast(`The selected batch only has ${maxDisposalQuantity} ${selectedMaterial?.unit ?? "units"} left.`);
+      return;
+    }
+
     disposeMutation.mutate();
+  }
+
+  function handleQuantityChange(event: ChangeEvent<HTMLInputElement>) {
+    const nextValue = event.target.value;
+    if (maxDisposalQuantity !== undefined && nextValue !== "") {
+      const numericValue = Number(nextValue);
+      if (!Number.isNaN(numericValue)) {
+        const clampedValue = Math.min(Math.max(Math.round(numericValue), 1), maxDisposalQuantity);
+        setWasteForm((current) => ({ ...current, quantity: String(clampedValue) }));
+        return;
+      }
+    }
+    setWasteForm((current) => ({ ...current, quantity: nextValue }));
   }
 
   return (
@@ -125,7 +183,7 @@ export default function WasteDisposal() {
                 <option value="">Select material</option>
                 {materialsQuery.data?.map((material) => (
                   <option key={material.id} value={material.id}>
-                    {material.name} — {Number(material.current_stock).toLocaleString()} {material.unit} in stock
+                    {material.name} — {Number(material.available_quantity).toLocaleString()} {material.unit} available
                   </option>
                 ))}
               </Select>
@@ -150,16 +208,18 @@ export default function WasteDisposal() {
               Quantity to dispose
               <input
                 required
-                min="0.001"
-                step="0.001"
+                min="1"
+                max={maxDisposalQuantity ?? undefined}
+                step="1"
                 type="number"
                 className="h-10 rounded-md border border-slate-300 px-3"
                 value={wasteForm.quantity}
-                onChange={(event) => setWasteForm((current) => ({ ...current, quantity: event.target.value }))}
+                onChange={handleQuantityChange}
               />
               {selectedMaterial && (
                 <span className="text-xs text-slate-500">
-                  Available: {Number(selectedMaterial.current_stock).toLocaleString()} {selectedMaterial.unit}
+                  Available: {Number(selectedMaterial.available_quantity).toLocaleString()} {selectedMaterial.unit}
+                  {maxDisposalQuantity !== undefined && ` · Selected batch remaining: ${Number(maxDisposalQuantity).toLocaleString()}`}
                 </span>
               )}
             </label>
@@ -182,6 +242,7 @@ export default function WasteDisposal() {
             <label className="grid gap-1 text-sm">
               Notes
               <input
+                required
                 className="h-10 rounded-md border border-slate-300 px-3"
                 placeholder="Additional details..."
                 value={wasteForm.notes}
@@ -215,6 +276,7 @@ export default function WasteDisposal() {
                     <TableHead>Qty</TableHead>
                     <TableHead>Reason</TableHead>
                     <TableHead>Batch</TableHead>
+                    <TableHead>Notes / booking</TableHead>
                     <TableHead>By</TableHead>
                   </TableRow>
                 </TableHeader>
@@ -228,6 +290,7 @@ export default function WasteDisposal() {
                       </TableCell>
                       <TableCell>{transaction.reason ? reasonLabels[transaction.reason as WasteForm["reason"]] ?? transaction.reason : "—"}</TableCell>
                       <TableCell>{transaction.batch?.batch_number ?? "Auto FEFO"}</TableCell>
+                      <TableCell>{transaction.reference ?? "—"}</TableCell>
                       <TableCell>{transaction.user?.name ?? "System"}</TableCell>
                     </TableRow>
                   ))}

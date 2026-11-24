@@ -1,31 +1,44 @@
 import { PaymentGateway } from "../../interfaces/paymentGateway.interface";
 import { FakePaymentGateway } from "./fakePayment.gateway";
+import { PayMongoGateway } from "./paymongo.gateway";
 
-// When real gateway is ready, import it here:
-// import { HitPayGateway } from './hitpay.gateway';
-// import { GCashGateway } from './gcash.gateway';
-
-const USE_REAL_GATEWAY = process.env.USE_REAL_GATEWAY === "true";
-const GATEWAY_TYPE = process.env.PAYMENT_GATEWAY ?? "fake";
+function selectedGatewayType() {
+  const configured = process.env.PAYMENT_GATEWAY?.trim().toLowerCase();
+  if (configured) {
+    return configured;
+  }
+  // Legacy flag: USE_REAL_GATEWAY=true without PAYMENT_GATEWAY still means the fake gateway.
+  return "fake";
+}
 
 export class PaymentGatewayFactory {
   private static instance: PaymentGateway | null = null;
 
+  static isFakeGatewayActive(): boolean {
+    return this.getGateway().gatewayName === "fake_gateway";
+  }
+
   static getGateway(): PaymentGateway {
     if (!this.instance) {
-      if (USE_REAL_GATEWAY) {
-        switch (GATEWAY_TYPE) {
-          // case 'hitpay':
-          //   this.instance = new HitPayGateway();
-          //   break;
-          // case 'gcash':
-          //   this.instance = new GCashGateway();
-          //   break;
-          default:
-            this.instance = new FakePaymentGateway();
+      const gatewayType = selectedGatewayType();
+
+      switch (gatewayType) {
+        case "paymongo": {
+          const gateway = new PayMongoGateway();
+          if (!gateway.isConfigured) {
+            console.error(`[PaymentGateway] ${gateway.configurationProblem} Online payments will fail until it is fixed.`);
+          } else if (gateway.isTestMode && process.env.NODE_ENV === "production") {
+            console.warn("[PaymentGateway] PayMongo is using a TEST secret key in production. No real money will be collected.");
+          }
+          this.instance = gateway;
+          break;
         }
-      } else {
-        this.instance = new FakePaymentGateway();
+        case "fake":
+          this.instance = new FakePaymentGateway();
+          break;
+        default:
+          console.error(`[PaymentGateway] Unknown PAYMENT_GATEWAY "${gatewayType}". Falling back to the fake test gateway.`);
+          this.instance = new FakePaymentGateway();
       }
 
       console.log(`[PaymentGateway] Using ${this.instance.gatewayName} for payments`);

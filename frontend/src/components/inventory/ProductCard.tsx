@@ -12,6 +12,7 @@ export type MenuProduct = {
   imageUrl?: string | null;
   is_available?: boolean;
   recipes?: Array<{
+    status?: string;
     recipe_ingredients: Array<{
       id: string;
       raw_material_id: string;

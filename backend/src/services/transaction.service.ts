@@ -1,6 +1,5 @@
-import { PrismaClient } from "@prisma/client";
-
-const prisma = new PrismaClient();
+import { Prisma } from "@prisma/client";
+import { prisma } from "../lib/prisma";
 
 type Label =
   | "Dine-in Sale"
@@ -32,18 +31,20 @@ export type UnifiedTransaction = {
   subtotal: number;
   tax: number;
   total: number;
+  discount_amount?: number;
+  guest_count?: number;
+  discount_guest_count?: number;
+  discount_base_snapshot?: number | null;
+  discount_rate_snapshot?: number | null;
   payment_method: string;
   cash_received?: number | null;
   change_due?: number | null;
   status: string;
   cashier?: { name: string; email: string } | null;
   created_at: Date;
+  table_number?: number | null;
   items: Array<unknown>;
 };
-
-function roundMoney(value: number) {
-  return Number(value.toFixed(2));
-}
 
 function manilaDateToUtc(dateString: string) {
   return new Date(`${dateString}T00:00:00+08:00`);
@@ -73,6 +74,10 @@ function manilaDateRange(dateFrom?: string, dateTo?: string) {
     gte: dateFrom ? startOfDay(manilaDateToUtc(dateFrom)) : undefined,
     lte: dateTo ? endOfDay(manilaDateToUtc(dateTo)) : undefined
   };
+}
+
+function isInDateRange(date: Date, range: ReturnType<typeof manilaDateRange>) {
+  return (!range?.gte || date >= range.gte) && (!range?.lte || date <= range.lte);
 }
 
 function labelFor(type: UnifiedTransaction["transaction_type"]): Label {
@@ -105,17 +110,29 @@ export async function getUnifiedTransactions(params: {
   from?: string;
   to?: string;
   search?: string;
+  tableId?: string;
   cashierId?: string;
   paymentMethod?: string;
   transactionType?: string;
   page?: number;
   limit?: number;
-}): Promise<{ transactions: UnifiedTransaction[]; pagination: { page: number; limit: number; total: number; pages: number } }> {
+}): Promise<{
+  transactions: UnifiedTransaction[];
+  pagination: { page: number; limit: number; total: number; pages: number };
+  summary: {
+    totalSales: number;
+    totalTransactions: number;
+    averageOrderValue: number;
+    byType: Record<string, { count: number; total: number }>;
+    byPayment: Record<string, { count: number; total: number }>;
+  };
+}> {
   const {
     date,
     from,
     to,
     search = "",
+    tableId,
     cashierId,
     paymentMethod,
     transactionType,
@@ -130,14 +147,14 @@ export async function getUnifiedTransactions(params: {
   const pageNum = Math.max(page, 1);
   const limitNum = Math.min(Math.max(limit, 1), 100);
 
-  const posTransactionTypes = ["dine_in", "takeout"];
-  const includePosTransactions = !transactionType || posTransactionTypes.includes(transactionType);
+  const posTransactionTypes: UnifiedTransaction["transaction_type"][] = ["dine_in", "takeout", "unlimited"];
+  const includePosTransactions = !transactionType || posTransactionTypes.some((type) => type === transactionType);
 
   const includeUnlimitedSessions = !transactionType || transactionType === "unlimited";
-  const includeCateringReservations = !transactionType || ["catering_deposit", "catering_balance", "catering_prepaid"].includes(transactionType);
-  const includeDineInReservations = !transactionType || ["dine_in_deposit", "dine_in_balance", "dine_in_prepaid"].includes(transactionType);
+  const includeCateringReservations = (!transactionType || ["catering_deposit", "catering_balance", "catering_prepaid"].includes(transactionType)) && !cashierId;
+  const includeDineInReservations = (!transactionType || ["dine_in_deposit", "dine_in_balance", "dine_in_prepaid"].includes(transactionType)) && !cashierId;
 
-  const wherePos: any = {
+  const wherePos: Prisma.PosTransactionWhereInput = {
     created_at: createdAt,
     ...(cashierId ? { cashier_id: cashierId } : {}),
     ...(paymentMethod ? { payment_method: paymentMethod } : {})
@@ -154,21 +171,67 @@ export async function getUnifiedTransactions(params: {
     ];
   }
 
+  const reservationDateCondition: Prisma.ReservationWhereInput | undefined = createdAt
+    ? {
+        OR: [
+          { created_at: createdAt },
+          { downpayment_date: createdAt },
+          { full_payment_date: createdAt },
+          { remaining_paid_date: createdAt },
+          { payments: { some: { received_at: createdAt } } }
+        ]
+      }
+    : undefined;
+  const reservationSearchCondition: Prisma.ReservationWhereInput | undefined = search
+    ? {
+        OR: [
+          { booking_id: { contains: search, mode: "insensitive" } },
+          { customer_name: { contains: search, mode: "insensitive" } }
+        ]
+      }
+    : undefined;
+  const cateringDateCondition: Prisma.CateringReservationWhereInput | undefined = createdAt
+    ? {
+        OR: [
+          { created_at: createdAt },
+          { downpayment_date: createdAt },
+          { full_payment_date: createdAt },
+          { remaining_paid_date: createdAt },
+          { payments: { some: { received_at: createdAt } } }
+        ]
+      }
+    : undefined;
+  const cateringSearchCondition: Prisma.CateringReservationWhereInput | undefined = search
+    ? {
+        OR: [
+          { reservation_id: { contains: search, mode: "insensitive" } },
+          { customer_name: { contains: search, mode: "insensitive" } },
+          { inquiry: { inquiry_id: { contains: search, mode: "insensitive" } } },
+          { inquiry: { customer_name: { contains: search, mode: "insensitive" } } },
+          { inquiry: { package_type: { contains: search, mode: "insensitive" } } }
+        ]
+      }
+    : undefined;
+
   const [posTransactions, unlimitedSessions, cateringReservations, dineInReservations] = await Promise.all([
     includePosTransactions
       ? prisma.posTransaction.findMany({
           where: wherePos,
           include: {
             cashier: { select: { id: true, name: true, email: true } },
-            items: { include: { selling_product: true } }
+            items: { include: { selling_product: true } },
+            charges: true,
+            dining_session: { include: { table: true } }
           },
           orderBy: { created_at: "desc" }
         })
       : Promise.resolve([]),
 
     includeUnlimitedSessions
+      && (!paymentMethod || paymentMethod === "cash")
       ? prisma.unlimitedSession.findMany({
           where: {
+            dining_session_id: null,
             ...(cashierId ? { cashier_id: cashierId } : {}),
             created_at: createdAt,
             ...(search
@@ -193,18 +256,11 @@ export async function getUnifiedTransactions(params: {
     includeCateringReservations
       ? prisma.cateringReservation.findMany({
           where: {
-            created_at: createdAt,
-            ...(search
-              ? {
-                  OR: [
-                    { inquiry: { inquiry_id: { contains: search, mode: "insensitive" } } },
-                    { inquiry: { customer_name: { contains: search, mode: "insensitive" } } },
-                    { inquiry: { package_type: { contains: search, mode: "insensitive" } } }
-                  ]
-                }
-              : {})
+            AND: [cateringDateCondition, cateringSearchCondition].filter(
+              (condition): condition is Prisma.CateringReservationWhereInput => Boolean(condition)
+            )
           },
-          include: { inquiry: true, package: true, ingredient_locks: { include: { raw_material: true } } },
+          include: { inquiry: true, package: true, payments: { orderBy: { received_at: "asc" } } },
           orderBy: { created_at: "desc" }
         })
       : Promise.resolve([]),
@@ -212,30 +268,38 @@ export async function getUnifiedTransactions(params: {
     includeDineInReservations
       ? prisma.reservation.findMany({
           where: {
-            created_at: createdAt,
-            ...(search
-              ? {
-                  OR: [
-                    { booking_id: { contains: search, mode: "insensitive" } },
-                    { customer_name: { contains: search, mode: "insensitive" } }
-                  ]
-                }
-              : {})
+            AND: [reservationDateCondition, reservationSearchCondition].filter(
+              (condition): condition is Prisma.ReservationWhereInput => Boolean(condition)
+            )
           },
-          include: { table: true },
+          include: { table: true, payments: { orderBy: { received_at: "asc" } } },
           orderBy: { created_at: "desc" }
         })
       : Promise.resolve([])
   ]);
 
   const unified: UnifiedTransaction[] = [];
+  const tableScopedTransactionIds = new Set<string>();
 
   // POS walk-in sales
   for (const t of posTransactions) {
-    const transactionType = t.transaction_type === "takeout" ? "takeout" : "dine_in";
+    if (tableId) {
+      const snapshot = t.table_ids_snapshot;
+      const snapshotIds = Array.isArray(snapshot)
+        ? snapshot.filter((id): id is string => typeof id === "string")
+        : null;
+      const matchesTable = snapshotIds
+        ? snapshotIds.includes(tableId)
+        : snapshot === null && t.dining_session?.table.id === tableId;
+      if (!matchesTable) continue;
+      tableScopedTransactionIds.add(t.id);
+    }
+
+    const transactionType: UnifiedTransaction["transaction_type"] =
+      t.transaction_type === "takeout" ? "takeout" : t.transaction_type === "unlimited" ? "unlimited" : "dine_in";
 
     unified.push({
-      id: `pos-${t.id}`,
+      id: t.id,
       transaction_number: t.transaction_number,
       reference_booking_id: null,
       customer_name: t.customer_name,
@@ -244,169 +308,321 @@ export async function getUnifiedTransactions(params: {
       subtotal: Number(t.subtotal),
       tax: Number(t.tax),
       total: Number(t.total),
+      discount_amount: Number(t.discount_amount),
+      guest_count: t.guest_count,
+      discount_guest_count: t.discount_guest_count,
+      discount_base_snapshot: t.discount_base_snapshot === null ? null : Number(t.discount_base_snapshot),
+      discount_rate_snapshot: t.discount_rate_snapshot,
       payment_method: t.payment_method,
       cash_received: t.cash_received,
       change_due: t.change_due,
       status: t.status,
       cashier: t.cashier ? { name: t.cashier.name, email: t.cashier.email } : null,
       created_at: t.created_at,
-      items: t.items
+      table_number: t.table_number_snapshot ?? t.dining_session?.table.table_number ?? null,
+      items: [
+        ...t.items,
+        ...t.charges.map((charge) => ({
+          id: charge.id,
+          quantity: charge.quantity,
+          unit_price: Number(charge.unit_price),
+          total_price: Number(charge.total_price),
+          selling_product: {
+            name: charge.name_snapshot,
+            category: "Charge"
+          }
+        }))
+      ]
     });
   }
 
-  // Dine-in reservation deposit/balance/prepaid
-  for (const r of dineInReservations as any[]) {
-    const referenceId = r.booking_id;
+  // Unlimited sessions are stored separately from standard POS sales.
+  for (const session of unlimitedSessions) {
+    const leftoverCharges = session.leftover_items.reduce((total, item) => total + item.charge_amount, 0);
+    const total = Number(session.total_paid) + leftoverCharges;
+    const items = [
+      ...session.rounds.flatMap((round) =>
+        round.items.map((item) => ({
+          id: item.id,
+          quantity: item.quantity,
+          unit_price: Number(item.selling_product.price),
+          total_price: Number(item.selling_product.price) * item.quantity,
+          selling_product: item.selling_product
+        }))
+      ),
+      ...session.leftover_items.map((item) => ({
+        id: item.id,
+        quantity: item.quantity,
+        unit_price: item.quantity > 0 ? item.charge_amount / item.quantity : item.charge_amount,
+        total_price: item.charge_amount,
+        selling_product: item.selling_product
+      }))
+    ];
 
-    const downpayment = Number(r.downpayment_amount ?? 0);
-    const remaining = Number(r.remaining_balance ?? 0);
-    const isPrepaid = remaining <= 0 && r.final_payment_status === "paid";
+    unified.push({
+      id: `unlimited-${session.id}`,
+      transaction_number: `UNL-${session.created_at.toISOString().slice(0, 10).replace(/-/g, "")}-${session.id.slice(-4).toUpperCase()}`,
+      reference_booking_id: null,
+      customer_name: null,
+      transaction_type: "unlimited",
+      label: labelFor("unlimited"),
+      subtotal: Number(session.total_paid),
+      tax: 0,
+      total,
+      payment_method: "cash",
+      cash_received: total,
+      change_due: 0,
+      status: session.status,
+      cashier: session.cashier ? { name: session.cashier.name, email: session.cashier.email } : null,
+      created_at: session.created_at,
+      items
+    });
+  }
 
-    if (downpayment > 0 && r.downpayment_status === "paid") {
-      if (isPrepaid) {
-        unified.push({
-          id: `${r.id}-prepaid`,
-          transaction_number: `PRE-${referenceId}`,
-          reference_booking_id: referenceId,
-          customer_name: r.customer_name,
-          transaction_type: "dine_in_prepaid",
-          label: labelFor("dine_in_prepaid"),
-          subtotal: Number(r.total_price ?? downpayment),
-          tax: Number(r.tax ?? 0),
-          total: Number(r.total_price ?? downpayment),
-          payment_method: r.final_payment_method ?? r.downpayment_method ?? "cash",
-          cash_received: Number(r.total_price ?? downpayment),
-          change_due: 0,
-          status: r.status,
-          cashier: null,
-          created_at: r.downpayment_date ?? r.created_at,
-          items: []
-        });
-      } else {
-        unified.push({
-          id: `${r.id}-deposit`,
-          transaction_number: `DEP-${referenceId}`,
-          reference_booking_id: referenceId,
-          customer_name: r.customer_name,
-          transaction_type: "dine_in_deposit",
-          label: labelFor("dine_in_deposit"),
-          subtotal: downpayment,
-          tax: Number(r.tax ?? 0),
-          total: downpayment,
-          payment_method: r.downpayment_method ?? "cash",
-          cash_received: downpayment,
-          change_due: 0,
-          status: r.status,
-          cashier: null,
-          created_at: r.downpayment_date ?? r.created_at,
-          items: []
-        });
+  const makeReservationItem = (id: string, name: string, category: string, amount: number) => [{
+    id: `${id}-item`,
+    quantity: 1,
+    unit_price: amount,
+    total_price: amount,
+    selling_product: { name, category }
+  }];
+
+  // Dine-in reservation payments include separate balance payments from the ledger.
+  for (const reservation of dineInReservations) {
+    const paymentStages = new Set(reservation.payments.map((payment) => payment.payment_stage));
+    const addPayment = (
+      id: string,
+      transactionNumber: string,
+      type: "dine_in_deposit" | "dine_in_balance" | "dine_in_prepaid",
+      amount: number,
+      method: string,
+      paymentDate: Date,
+      cashReceived?: number | null,
+      changeDue?: number | null
+    ) => {
+      if (amount <= 0 || !isInDateRange(paymentDate, createdAt) || (paymentMethod && paymentMethod !== method)) return;
+
+      unified.push({
+        id,
+        transaction_number: transactionNumber,
+        reference_booking_id: reservation.booking_id,
+        customer_name: reservation.customer_name,
+        transaction_type: type,
+        label: labelFor(type),
+        subtotal: amount,
+        tax: 0,
+        total: amount,
+        payment_method: method,
+        cash_received: cashReceived ?? amount,
+        change_due: changeDue ?? 0,
+        status: "paid",
+        cashier: null,
+        created_at: paymentDate,
+        items: makeReservationItem(
+          id,
+          type === "dine_in_balance" ? `Dine-in balance (${reservation.time})` :
+            type === "dine_in_prepaid" ? `Dine-in prepaid (${reservation.time})` : `Dine-in deposit (${reservation.time})`,
+          "Reservation",
+          amount
+        )
+      });
+    };
+
+    for (const payment of reservation.payments) {
+      const type = payment.payment_stage === "remaining_balance"
+        ? "dine_in_balance"
+        : payment.payment_stage === "full_payment"
+          ? "dine_in_prepaid"
+          : payment.payment_stage === "cancellation"
+            ? null
+            : "dine_in_deposit";
+      if (type) {
+        const prefix = type === "dine_in_balance" ? "BAL" : type === "dine_in_prepaid" ? "PRE" : "DEP";
+        addPayment(
+          `reservation-payment-${payment.id}`,
+          `${prefix}-${reservation.booking_id}-${payment.id.slice(-6).toUpperCase()}`,
+          type,
+          payment.amount,
+          payment.method,
+          payment.received_at,
+          payment.cash_received,
+          payment.change_due
+        );
       }
     }
 
-    // Remaining balance => only show when completed and remaining > 0
-    if (r.status === "completed" && remaining > 0) {
-      unified.push({
-        id: `${r.id}-balance`,
-        transaction_number: `BAL-${referenceId}`,
-        reference_booking_id: referenceId,
-        customer_name: r.customer_name,
-        transaction_type: "dine_in_balance",
-        label: labelFor("dine_in_balance"),
-        subtotal: remaining,
-        tax: 0,
-        total: remaining,
-        payment_method: r.final_payment_method ?? "cash",
-        cash_received: remaining,
-        change_due: 0,
-        status: r.status,
-        cashier: null,
-        created_at: r.remaining_paid_date ?? r.created_at,
-        items: []
-      });
+    const downpayment = Number(reservation.downpayment_amount);
+    if (!paymentStages.has("downpayment") && !paymentStages.has("full_payment") &&
+        reservation.downpayment_status === "paid" && downpayment > 0) {
+      const prepaid = reservation.payment_plan === "full_payment" || downpayment >= Number(reservation.total_price);
+      const type = prepaid ? "dine_in_prepaid" : "dine_in_deposit";
+      const amount = prepaid ? Number(reservation.total_price) : downpayment;
+      addPayment(
+        `${reservation.id}-${prepaid ? "prepaid" : "deposit"}`,
+        `${prepaid ? "PRE" : "DEP"}-${reservation.booking_id}`,
+        type,
+        amount,
+        prepaid
+          ? reservation.final_payment_method ?? reservation.downpayment_method ?? "cash"
+          : reservation.downpayment_method ?? "cash",
+        prepaid
+          ? reservation.full_payment_date ?? reservation.downpayment_date ?? reservation.created_at
+          : reservation.downpayment_date ?? reservation.created_at
+      );
+    }
+
+    if (!paymentStages.has("remaining_balance") &&
+        (reservation.remaining_paid_at_venue || reservation.remaining_paid_date || reservation.final_payment_status === "paid") &&
+        Number(reservation.total_price) > downpayment) {
+      const amount = Number(reservation.total_price) - downpayment;
+      addPayment(
+        `${reservation.id}-balance`,
+        `BAL-${reservation.booking_id}`,
+        "dine_in_balance",
+        amount,
+        reservation.final_payment_method ?? "cash",
+        reservation.remaining_paid_date ?? reservation.final_payment_date ?? reservation.created_at
+      );
     }
   }
 
-  // Catering reservation deposit/balance/prepaid
-  for (const r of cateringReservations as any[]) {
-    const bookingRef = r.reservation_id;
-    const inquiryRef = r.inquiry?.inquiry_id;
-    const referenceId = inquiryRef ?? bookingRef;
+  // Catering reservation payments use the same payment ledger as dine-in bookings.
+  for (const reservation of cateringReservations) {
+    const bookingId = reservation.reservation_id ?? reservation.inquiry?.inquiry_id ?? reservation.id;
+    const referenceId = reservation.inquiry?.inquiry_id ?? bookingId;
+    const customerName = reservation.customer_name ?? reservation.inquiry?.customer_name ?? null;
+    const packageName = reservation.package?.name ?? reservation.inquiry?.package_type ?? "Catering";
+    const paymentStages = new Set(reservation.payments.map((payment) => payment.payment_stage));
+    const addPayment = (
+      id: string,
+      transactionNumber: string,
+      type: "catering_deposit" | "catering_balance" | "catering_prepaid",
+      amount: number,
+      method: string,
+      paymentDate: Date,
+      cashReceived?: number | null,
+      changeDue?: number | null
+    ) => {
+      if (amount <= 0 || !isInDateRange(paymentDate, createdAt) || (paymentMethod && paymentMethod !== method)) return;
 
-    const depositPaid = Number(r.deposit_paid ?? 0);
-    const total = Number(r.total_price ?? 0);
-    const remaining = Math.max(total - depositPaid, 0);
-
-    const isFullyPaid = remaining <= 0 && r.final_payment_status === "paid";
-
-    if (depositPaid > 0) {
-      const type = isFullyPaid && remaining <= 0 ? "catering_prepaid" : "catering_deposit";
       unified.push({
-        id: `${r.id}-deposit`,
-        transaction_number: `DEP-${referenceId}`,
-        reference_booking_id: bookingRef,
-        customer_name: r.inquiry?.customer_name ?? null,
+        id,
+        transaction_number: transactionNumber,
+        reference_booking_id: reservation.reservation_id,
+        customer_name: customerName,
         transaction_type: type,
         label: labelFor(type),
-        subtotal: type === "catering_prepaid" ? total : depositPaid,
+        subtotal: amount,
         tax: 0,
-        total: type === "catering_prepaid" ? total : depositPaid,
-        payment_method: r.downpayment_method ?? "cash",
-        cash_received: depositPaid,
-        change_due: 0,
-        status: r.status,
+        total: amount,
+        payment_method: method,
+        cash_received: cashReceived ?? amount,
+        change_due: changeDue ?? 0,
+        status: "paid",
         cashier: null,
-        created_at: r.downpayment_date ?? r.created_at,
-        items: []
+        created_at: paymentDate,
+        items: makeReservationItem(
+          id,
+          `${packageName} ${type === "catering_balance" ? "balance" : type === "catering_prepaid" ? "prepaid" : "deposit"}`,
+          "Catering",
+          amount
+        )
       });
+    };
+
+    for (const payment of reservation.payments) {
+      const type = payment.payment_stage === "remaining_balance"
+        ? "catering_balance"
+        : payment.payment_stage === "full_payment"
+          ? "catering_prepaid"
+          : payment.payment_stage === "cancellation"
+            ? null
+            : "catering_deposit";
+      if (type) {
+        const prefix = type === "catering_balance" ? "BAL" : type === "catering_prepaid" ? "PRE" : "DEP";
+        addPayment(
+          `catering-payment-${payment.id}`,
+          `${prefix}-${referenceId}-${payment.id.slice(-6).toUpperCase()}`,
+          type,
+          payment.amount,
+          payment.method,
+          payment.received_at,
+          payment.cash_received,
+          payment.change_due
+        );
+      }
     }
 
-    if (r.status === "completed" && remaining > 0) {
-      unified.push({
-        id: `${r.id}-balance`,
-        transaction_number: `BAL-${referenceId}`,
-        reference_booking_id: bookingRef,
-        customer_name: r.inquiry?.customer_name ?? null,
-        transaction_type: "catering_balance",
-        label: labelFor("catering_balance"),
-        subtotal: remaining,
-        tax: 0,
-        total: remaining,
-        payment_method: r.final_payment_method ?? "cash",
-        cash_received: remaining,
-        change_due: 0,
-        status: r.status,
-        cashier: null,
-        created_at: r.remaining_paid_date ?? r.created_at,
-        items: []
-      });
+    const depositPaid = Number(reservation.deposit_paid ?? reservation.downpayment_amount);
+    const isPrepaid = reservation.payment_plan === "full_payment" ||
+      (Number(reservation.remaining_balance) <= 0 && reservation.final_payment_status === "paid" &&
+        depositPaid >= Number(reservation.total_price));
+    if (!paymentStages.has("downpayment") && !paymentStages.has("full_payment") && depositPaid > 0) {
+      const type = isPrepaid ? "catering_prepaid" : "catering_deposit";
+      const amount = isPrepaid ? Number(reservation.total_price) : depositPaid;
+      addPayment(
+        `${reservation.id}-${isPrepaid ? "prepaid" : "deposit"}`,
+        `${isPrepaid ? "PRE" : "DEP"}-${referenceId}`,
+        type,
+        amount,
+        isPrepaid
+          ? reservation.final_payment_method ?? reservation.downpayment_method ?? "cash"
+          : reservation.downpayment_method ?? "cash",
+        isPrepaid
+          ? reservation.full_payment_date ?? reservation.downpayment_date ?? reservation.created_at
+          : reservation.downpayment_date ?? reservation.created_at
+      );
+    }
+
+    if (!paymentStages.has("remaining_balance") &&
+        (reservation.remaining_paid_at_venue || reservation.remaining_paid_date || reservation.final_payment_status === "paid") &&
+        Number(reservation.total_price) > depositPaid) {
+      const amount = Number(reservation.total_price) - depositPaid;
+      addPayment(
+        `${reservation.id}-balance`,
+        `BAL-${referenceId}`,
+        "catering_balance",
+        amount,
+        reservation.final_payment_method ?? "cash",
+        reservation.remaining_paid_date ?? reservation.final_payment_date ?? reservation.created_at
+      );
     }
   }
 
-  // Filter/normalize to only required set for Task 7
-  const requiredTypes: UnifiedTransaction["transaction_type"][] = [
-    "dine_in",
-    "takeout",
-    "unlimited",
-    "dine_in_deposit",
-    "dine_in_balance",
-    "dine_in_prepaid",
-    "catering_deposit",
-    "catering_balance",
-    "catering_prepaid"
-  ];
-
-  const normalized = unified.filter((t) => requiredTypes.includes(t.transaction_type));
+  const normalized = unified.filter((transaction) =>
+    (!paymentMethod || transaction.payment_method === paymentMethod) &&
+    (!createdAt || isInDateRange(transaction.created_at, createdAt)) &&
+    (!tableId || tableScopedTransactionIds.has(transaction.id))
+  );
 
   normalized.sort((a, b) => b.created_at.getTime() - a.created_at.getTime());
 
   const total = normalized.length;
   const pages = Math.ceil(total / limitNum);
   const sliceStart = (pageNum - 1) * limitNum;
+  const byType: Record<string, { count: number; total: number }> = {};
+  const byPayment: Record<string, { count: number; total: number }> = {};
+
+  for (const transaction of normalized) {
+    const typeBucket = byType[transaction.transaction_type] ??= { count: 0, total: 0 };
+    typeBucket.count += 1;
+    typeBucket.total += transaction.total;
+
+    const paymentBucket = byPayment[transaction.payment_method] ??= { count: 0, total: 0 };
+    paymentBucket.count += 1;
+    paymentBucket.total += transaction.total;
+  }
+  const totalSales = normalized.reduce((sum, transaction) => sum + transaction.total, 0);
 
   return {
     transactions: normalized.slice(sliceStart, sliceStart + limitNum),
-    pagination: { page: pageNum, limit: limitNum, total, pages }
+    pagination: { page: pageNum, limit: limitNum, total, pages },
+    summary: {
+      totalSales,
+      totalTransactions: total,
+      averageOrderValue: total > 0 ? totalSales / total : 0,
+      byType,
+      byPayment
+    }
   };
 }
-

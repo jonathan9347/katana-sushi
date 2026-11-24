@@ -6,6 +6,7 @@ type MiniCalendarProps = {
   month: Date;
   selectedDate: string;
   eventsByDate: Map<string, number>;
+  lateEventsByDate?: Map<string, number>;
   framed?: boolean;
   onPreviousMonth: () => void;
   onNextMonth: () => void;
@@ -14,7 +15,7 @@ type MiniCalendarProps = {
 
 const dayLabels = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
-export function MiniCalendar({ month, selectedDate, eventsByDate, framed = true, onPreviousMonth, onNextMonth, onSelectDate }: MiniCalendarProps) {
+export function MiniCalendar({ month, selectedDate, eventsByDate, lateEventsByDate = new Map(), framed = true, onPreviousMonth, onNextMonth, onSelectDate }: MiniCalendarProps) {
   const days = useMemo(() => {
     const first = new Date(month.getFullYear(), month.getMonth(), 1);
     const start = new Date(first);
@@ -59,6 +60,7 @@ export function MiniCalendar({ month, selectedDate, eventsByDate, framed = true,
         {days.map((day) => {
           const dateKey = manilaDateKey(day);
           const eventCount = eventsByDate.get(dateKey) ?? 0;
+          const lateCount = lateEventsByDate.get(dateKey) ?? 0;
           const inMonth = day.getMonth() === month.getMonth();
           const selected = selectedDate === dateKey;
           const isToday = dateKey === todayManilaDateKey();
@@ -77,8 +79,15 @@ export function MiniCalendar({ month, selectedDate, eventsByDate, framed = true,
                 {selected && <span className="rounded-full bg-red-700 px-2 py-0.5 text-[11px] font-bold text-white">Selected</span>}
               </div>
               {eventCount > 0 ? (
-                <div className="mt-3 rounded-full bg-slate-950 px-2 py-1 text-[11px] font-bold text-white">
-                  {eventCount} {eventCount === 1 ? "event" : "events"}
+                <div className="mt-2 grid gap-1">
+                  <div className="rounded-full bg-slate-950 px-2 py-1 text-[11px] font-bold text-white">
+                    {eventCount} {eventCount === 1 ? "event" : "events"}
+                  </div>
+                  {lateCount > 0 && (
+                    <div className="rounded-full bg-red-700 px-2 py-1 text-[10px] font-bold text-white">
+                      {lateCount} late
+                    </div>
+                  )}
                 </div>
               ) : (
                 <div className="mt-3 flex items-center gap-1 text-[11px] text-slate-500">

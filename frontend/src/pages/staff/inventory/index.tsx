@@ -1,30 +1,24 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
-import { Boxes, Calculator, CalendarClock, ClipboardList, Images, PackageSearch, ReceiptText, Scale, Trash2 } from "lucide-react";
+import { ClipboardList, Package, ReceiptText } from "lucide-react";
 import SectionNav, { SectionNavTab } from "../../../components/layout/SectionNav";
 import BatchManagement from "./BatchManagement";
-import CateringOptionPhotos from "./CateringOptionPhotos";
-import ConversionRulesEditor from "./ConversionRulesEditor";
-import LowStockAlert from "./LowStockAlert";
+import InventoryMovements from "./InventoryMovements";
+import InventoryReservations from "./InventoryReservations";
 import MaterialsList from "./MaterialsList";
 import SellingProductsList from "./SellingProductsList";
-import TransactionHistory from "./TransactionHistory";
 import WasteDisposal from "./WasteDisposal";
 import YieldEstimator from "./YieldEstimator";
-import { StaffRole } from "./types";
+import { MaterialBatch, StaffRole } from "./types";
 
-type InventoryTab = "materials" | "menu-products" | "catering-photos" | "yield" | "low-stock" | "batches" | "waste" | "transactions" | "conversion-rules";
+type InventoryTab = "stock" | "reservations" | "movements";
+type StockView = "materials" | "batches" | "waste" | "menu-products" | "yield";
+type MaterialsStockFilter = "all" | "issues" | "low" | "negative" | "expiring";
 
-const tabs: Array<SectionNavTab<InventoryTab> & { adminOnly?: boolean }> = [
-  { id: "materials", label: "Materials", icon: <Boxes className="h-4 w-4" /> },
-  { id: "menu-products", label: "Menu Products", icon: <PackageSearch className="h-4 w-4" /> },
-  { id: "catering-photos", label: "Catering Photos", icon: <Images className="h-4 w-4" />, adminOnly: true },
-  { id: "yield", label: "Yield Estimator", icon: <Calculator className="h-4 w-4" /> },
-  { id: "low-stock", label: "Low Stock Alerts", icon: <ClipboardList className="h-4 w-4" /> },
-  { id: "batches", label: "Batches & Expiry", icon: <CalendarClock className="h-4 w-4" /> },
-  { id: "waste", label: "Waste Disposal", icon: <Trash2 className="h-4 w-4" /> },
-  { id: "transactions", label: "Transactions", icon: <ReceiptText className="h-4 w-4" /> },
-  { id: "conversion-rules", label: "Conversion Rules", icon: <Scale className="h-4 w-4" />, adminOnly: true }
+const tabs: Array<SectionNavTab<InventoryTab>> = [
+  { id: "stock", label: "Stock", icon: <Package className="h-4 w-4" /> },
+  { id: "reservations", label: "Reservations", icon: <ClipboardList className="h-4 w-4" /> },
+  { id: "movements", label: "Movements", icon: <ReceiptText className="h-4 w-4" /> }
 ];
 
 function getStoredRole(): StaffRole {
@@ -36,12 +30,32 @@ function getStoredRole(): StaffRole {
 }
 
 export default function InventoryPage({ readOnly = false }: { readOnly?: boolean }) {
-  const [activeTab, setActiveTab] = useState<InventoryTab>("materials");
+  const [activeTab, setActiveTab] = useState<InventoryTab>("stock");
+  const [stockView, setStockView] = useState<StockView>("materials");
+  const [materialsStockFilter, setMaterialsStockFilter] = useState<MaterialsStockFilter>("all");
+  const [batchesExpiringOnly, setBatchesExpiringOnly] = useState(false);
+  const [wastePreload, setWastePreload] = useState<{
+    raw_material_id: string;
+    batch_id?: string;
+    quantity?: string;
+    reason?: "spoilage" | "expired" | "prep_waste" | "damaged" | "other";
+    notes?: string;
+  } | null>(null);
   const role = getStoredRole();
   const allowed = role === "admin" || role === "inventory_manager" || (readOnly && role === "chef");
-  const visibleTabs = readOnly
-    ? tabs.filter((tab) => tab.id === "materials")
-    : tabs.filter((tab) => !tab.adminOnly || role === "admin");
+  const visibleTabs = readOnly ? tabs.filter((tab) => tab.id === "stock") : tabs;
+
+  const handleQuickDispose = (batch: MaterialBatch) => {
+    setActiveTab("stock");
+    setStockView("waste");
+    setWastePreload({
+      raw_material_id: batch.raw_material.id,
+      batch_id: batch.id,
+      quantity: String(Number(batch.remaining_quantity) || 0),
+      reason: "expired",
+      notes: `Expired batch ${batch.batch_number} was disposed after review.`
+    });
+  };
 
   if (!allowed) {
     return (
@@ -49,7 +63,7 @@ export default function InventoryPage({ readOnly = false }: { readOnly?: boolean
         <h1 className="text-2xl font-semibold text-slate-950">Inventory access required</h1>
         <p className="max-w-md text-slate-600">Sign in with an admin or inventory manager account to manage stock.</p>
         <Link className="text-red-700 underline" to="/staff/login">
-          Go to staff login
+          Sign in
         </Link>
       </main>
     );
@@ -60,29 +74,71 @@ export default function InventoryPage({ readOnly = false }: { readOnly?: boolean
       <div className="grid w-full gap-5">
         <div className="flex flex-col gap-2 md:flex-row md:items-end md:justify-between">
           <div>
-            <p className="text-sm font-medium uppercase text-red-700">Staff</p>
+            <p className="text-sm font-medium uppercase text-red-700">Inventory</p>
             <h1 className="text-3xl font-semibold text-slate-950">Inventory Management</h1>
           </div>
           <p className="text-sm text-slate-500">Signed in as {role.replace("_", " ")}</p>
         </div>
 
-        <div className="grid gap-5 lg:grid-cols-[240px_minmax(0,1fr)] lg:items-start">
-          <aside className="lg:sticky lg:top-6">
-            <SectionNav activeTab={activeTab} orientation="vertical" tabs={visibleTabs} onTabChange={setActiveTab} />
-          </aside>
-
-          <section className="min-w-0">
-            {activeTab === "materials" && <MaterialsList role={role} />}
-            {activeTab === "menu-products" && <SellingProductsList role={role} />}
-            {activeTab === "catering-photos" && role === "admin" && <CateringOptionPhotos />}
-            {activeTab === "yield" && <YieldEstimator />}
-            {activeTab === "low-stock" && <LowStockAlert />}
-            {activeTab === "batches" && <BatchManagement />}
-            {activeTab === "waste" && <WasteDisposal />}
-            {activeTab === "transactions" && <TransactionHistory />}
-            {activeTab === "conversion-rules" && role === "admin" && <ConversionRulesEditor />}
-          </section>
-        </div>
+        <section className="grid min-w-0 gap-4">
+          <SectionNav activeTab={activeTab} tabs={visibleTabs} onTabChange={setActiveTab} />
+          <div className="min-w-0">
+            {activeTab === "stock" && (
+              <div className="grid gap-4">
+                {!readOnly && (
+                  <div className="flex flex-wrap gap-2">
+                    {([
+                      ["materials", "Materials"],
+                      ["batches", "Batches & Expiry"],
+                      ["waste", "Waste Disposal"],
+                      ["menu-products", "Menu Products"],
+                      ["yield", "Yield Estimator"]
+                    ] as const).map(([view, label]) => (
+                      <button
+                        key={view}
+                        type="button"
+                        onClick={() => {
+                          setStockView(view);
+                          if (view !== "waste") {
+                            setWastePreload(null);
+                          }
+                        }}
+                        className={`rounded-md px-3 py-2 text-sm font-semibold ${stockView === view ? "bg-red-700 text-white" : "border border-slate-300 bg-white text-slate-700"}`}
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                )}
+                {stockView === "materials" && (
+                  <MaterialsList
+                    role={role}
+                    onNavigateStockView={setStockView}
+                    onOpenReservations={() => setActiveTab("reservations")}
+                    initialStockFilter={materialsStockFilter}
+                  />
+                )}
+                {stockView === "batches" && (
+                  <BatchManagement
+                    initialExpiringOnly={batchesExpiringOnly}
+                    onExpiringOnlyChange={setBatchesExpiringOnly}
+                    onQuickDispose={handleQuickDispose}
+                  />
+                )}
+                {stockView === "waste" && (
+                  <WasteDisposal
+                    initialForm={wastePreload ?? undefined}
+                    onPreloadConsumed={() => setWastePreload(null)}
+                  />
+                )}
+                {stockView === "menu-products" && !readOnly && <SellingProductsList role={role} />}
+                {stockView === "yield" && !readOnly && <YieldEstimator />}
+              </div>
+            )}
+            {activeTab === "reservations" && !readOnly && <InventoryReservations />}
+            {activeTab === "movements" && !readOnly && <InventoryMovements />}
+          </div>
+        </section>
       </div>
     </main>
   );

@@ -1,12 +1,27 @@
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, ReactNode, useEffect, useId, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
-import { Banknote, CheckCircle2, Landmark, Send, ShieldCheck, Smartphone } from "lucide-react";
+import { Banknote, Check, CheckCircle2, Clock3, Copy, CreditCard, Landmark, LoaderCircle, Send, ShieldCheck, ShoppingBag, Smartphone, X } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
+import { Dialog } from "../../components/ui/dialog";
+import BackToHome from "../../components/layout/BackToHome";
 import { api, resolveImageUrl } from "../../lib/api";
 import { getApiErrorMessage } from "../../lib/errors";
-import { createPaymentIntent, verifyPayment, buildReservationReference, type PaymentMethod } from "../../lib/payment";
-import { todayManilaDateKey } from "../../lib/dateTime";
-import { defaultSystemSettings, downpaymentLabel, fetchSystemSettings, getDownpaymentRate, getTaxRate, taxLabel } from "../../lib/systemSettings";
+import {
+  clearCustomerPaymentAttempt,
+  createPaymentIntent,
+  formatPayMongoMethods,
+  getOrCreateCustomerPaymentAttempt,
+  paymentReturnUrl,
+  redirectToHostedCheckout,
+  saveCustomerPaymentIntentReference,
+  usePaymentConfig,
+  verifyPayment,
+  type PaymentMethod
+} from "../../lib/payment";
+import { isFutureManilaReservationTime, todayManilaDateKey } from "../../lib/dateTime";
+import { defaultSystemSettings, fetchSystemSettings } from "../../lib/systemSettings";
+import "./CateringReservation.css";
+import "./ReservationForm.css";
 
 type CateringPackage = {
   id: string;
@@ -18,9 +33,21 @@ type CateringPackage = {
   maxPax: number;
   items: {
     pricingType?: "flat" | "range" | "quote";
+    pricingModel?: "tier" | "per_unit" | "fixed" | "quote";
     flatPrice?: number;
+    fixedPrice?: number;
     minPrice?: number;
     maxPrice?: number;
+    pricePerUnit?: number;
+    pricePerKg?: number;
+    unit?: string;
+    minimum?: number;
+    step?: number;
+    maximum?: number;
+    minKg?: number;
+    stepKg?: number;
+    maxKg?: number;
+    fixedPax?: number;
     inclusions?: Array<string | { name: string; description?: string }>;
     galleryImages?: string[];
   } | null;
@@ -29,104 +56,342 @@ type CateringPackage = {
 
 type SuccessState = {
   reservationId: string;
-  downpaymentAmount: number;
+  packageTotal: number;
+  paidAmount: number;
   remainingBalance: number;
-  paymentMethod: string;
+  paymentPlan: "downpayment" | "full_payment";
 };
+
+type CateringModalProps = {
+  title: string;
+  onClose: () => void;
+  children: ReactNode;
+};
+
+function CateringModal({ title, onClose, children }: CateringModalProps) {
+  const titleId = useId();
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const onCloseRef = useRef(onClose);
+
+  useEffect(() => {
+    onCloseRef.current = onClose;
+  }, [onClose]);
+
+  useEffect(() => {
+    const dialog = dialogRef.current;
+    if (!dialog) return;
+
+    const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+
+    const getFocusableElements = () => Array.from(
+      dialog.querySelectorAll<HTMLElement>(
+        'button:not([disabled]), input:not([disabled]), [href], select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+      )
+    );
+
+    getFocusableElements()[0]?.focus();
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        onCloseRef.current();
+        return;
+      }
+      if (event.key !== "Tab") return;
+
+      const focusableElements = getFocusableElements();
+      const first = focusableElements[0];
+      const last = focusableElements[focusableElements.length - 1];
+      if (!first || !last) {
+        event.preventDefault();
+      } else if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("keydown", handleKeyDown);
+      document.body.style.overflow = previousOverflow;
+      previousFocus?.focus();
+    };
+  }, []);
+
+  return (
+    <div
+      className="fixed inset-0 z-[70] flex items-center justify-center bg-black/60 px-4 py-6"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) onClose();
+      }}
+    >
+      <div
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+        className="flex max-h-[90dvh] w-full max-w-2xl flex-col overflow-hidden rounded-2xl border border-[var(--customer-border)] bg-[var(--customer-surface)] text-[var(--customer-text)] shadow-2xl"
+      >
+        <header className="flex shrink-0 items-center justify-between border-b border-[var(--customer-border)] px-5 py-4">
+          <h2 id={titleId} className="text-lg font-bold">{title}</h2>
+          <button
+            type="button"
+            aria-label="Close dialog"
+            onClick={onClose}
+            className="rounded-lg p-2 text-[var(--customer-muted)] transition hover:bg-[var(--customer-surface-2)] hover:text-[var(--customer-text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-katana-red"
+          >
+            <X className="h-5 w-5" />
+          </button>
+        </header>
+        {children}
+      </div>
+    </div>
+  );
+}
+
+const EMPTY_CATERING_PACKAGES: CateringPackage[] = [];
 
 function money(value: number) {
   return new Intl.NumberFormat("en-PH", { style: "currency", currency: "PHP", minimumFractionDigits: 2 }).format(value);
 }
 
-const stations = [
-  { id: "sushi_station", name: "Sushi Station", summary: "Maki, sushi, and nigiri selections" },
-  { id: "sashimi_bar", name: "Sashimi Bar", summary: "Whole tuna sashimi service" },
-  { id: "tempura_live", name: "Tempura Live", summary: "Live tempura station" }
-];
-
 function today() {
   return todayManilaDateKey();
 }
 
-function getStationType(item: CateringPackage) {
-  if (item.stationType) {
-    return item.stationType;
-  }
+function earliestEventDate() {
+  const minimum = new Date(`${today()}T00:00:00.000Z`);
+  minimum.setUTCDate(minimum.getUTCDate() + 1);
+  return minimum.toISOString().slice(0, 10);
+}
 
-  if (item.id.includes("sashimi")) {
+function getStationType(item: CateringPackage) {
+  const stationType = item.stationType?.trim().toLowerCase().replace(/[\s-]+/g, "_");
+  const packageIdentity = `${item.id} ${item.name} ${item.description ?? ""}`.toLowerCase();
+
+  if (stationType === "sashimi_bar" || stationType === "sashimi") {
+    const minimum = item.items?.minimum ?? item.items?.minKg;
+    const maximum = item.items?.maximum ?? item.items?.maxKg;
+    const isWholeTuna = packageIdentity.includes("whole tuna") ||
+      item.id.toLowerCase().includes("whole_tuna") ||
+      (minimum === 20 && maximum === 40);
+    if (isWholeTuna) {
+      return "whole_tuna";
+    }
+    if (isPerUnitPackage(item)) {
+      const hasTuna = /\btuna\b/.test(packageIdentity);
+      const hasSalmon = /\bsalmon\b/.test(packageIdentity);
+      if (hasTuna !== hasSalmon) {
+        return hasTuna ? "tuna_add_on" : "salmon_add_on";
+      }
+    }
     return "sashimi_bar";
   }
 
-  if (item.id.includes("tempura")) {
+  if (stationType) {
+    return stationType;
+  }
+
+  if (
+    packageIdentity.includes("whole_tuna") ||
+    packageIdentity.includes("whole tuna") ||
+    item.id.includes("sashimi_20") ||
+    item.id.includes("sashimi_30")
+  ) {
+    return "whole_tuna";
+  }
+
+  if (item.id.toLowerCase().includes("sashimi") && isPerUnitPackage(item)) {
+    const hasTuna = /\btuna\b/.test(packageIdentity);
+    const hasSalmon = /\bsalmon\b/.test(packageIdentity);
+    if (hasTuna !== hasSalmon) {
+      return hasTuna ? "tuna_add_on" : "salmon_add_on";
+    }
+  }
+
+  const packageDetails = `${packageIdentity} ${item.description ?? ""}`.toLowerCase();
+  if (packageDetails.includes("tempura")) {
     return "tempura_live";
   }
 
-  return "sushi_station";
+  return stationType ?? "sushi_station";
 }
 
-function getPackagePrice(item?: CateringPackage) {
+function isPerUnitPackage(item?: CateringPackage) {
+  return Boolean(
+    item?.items?.pricingModel === "per_unit" ||
+    item?.items?.pricingType === "range" ||
+    item?.items?.pricePerUnit !== undefined ||
+    item?.items?.pricePerKg !== undefined
+  );
+}
+
+function getStationName(id: string) {
+  const names: Record<string, string> = {
+    sushi_station: "Sushi Station",
+    sashimi_bar: "Sashimi Bar",
+    whole_tuna: "Sashimi Bar",
+    tuna_add_on: "Tuna by kilo",
+    salmon_add_on: "Salmon by kilo",
+    tempura_live: "Tempura Live"
+  };
+  return names[id] ?? id.split(/[_\s-]+/).map((part) => `${part.charAt(0).toUpperCase()}${part.slice(1)}`).join(" ");
+}
+
+function getMinimumQuantity(item: CateringPackage) {
+  return ["tuna_add_on", "salmon_add_on"].includes(getStationType(item))
+    ? 2
+    : item.items?.minimum ?? item.items?.minKg ?? 1;
+}
+
+function getPackageDescription(item: CateringPackage) {
+  const stationType = getStationType(item);
+  if (stationType === "tuna_add_on" || stationType === "salmon_add_on") {
+    const maximum = item.items?.maximum ?? item.items?.maxKg ?? 40;
+    const rate = item.items?.pricePerUnit ?? item.items?.pricePerKg ?? 0;
+    return `${item.name} add-on, 1-${maximum} kg at ${money(rate)}/kg.`;
+  }
+  if (stationType === "whole_tuna") {
+    return "Whole tuna sold by weight, 20-40 kg at PHP 1,200/kg. Can be booked on its own or alongside other catering packages.";
+  }
+  return item.description ?? item.name;
+}
+
+function getPackagePrice(item?: CateringPackage, quantity?: number) {
   if (!item?.items) {
     return 0;
   }
 
-  if (item.items.pricingType === "flat") {
-    return item.items.flatPrice ?? 0;
+  if (item.items.pricingModel === "per_unit" || item.items.pricingType === "range") {
+    const rate = item.items.pricePerUnit ?? item.items.pricePerKg ?? 0;
+    return rate * (quantity ?? 0);
   }
 
-  if (item.items.pricingType === "range") {
-    return item.items.minPrice ?? 0;
+  if (item.items.pricingModel === "fixed" || item.items.pricingType === "flat") {
+    return item.items.fixedPrice ?? item.items.flatPrice ?? 0;
   }
 
-  return 0;
+  return item.items.flatPrice ?? item.items.minPrice ?? 0;
 }
 
 function getPackagePriceLabel(item: CateringPackage) {
-  if (item.items?.pricingType === "flat") {
-    return money(item.items.flatPrice ?? 0);
+  if (item.items?.pricingModel === "per_unit" || item.items?.pricingType === "range") {
+    const rate = item.items.pricePerUnit ?? item.items.pricePerKg ?? 0;
+    return `From ${money(rate * getMinimumQuantity(item))} · ${money(rate)}/${item.items.unit ?? "kg"}`;
   }
 
-  if (item.items?.pricingType === "range") {
-    return `${money(item.items.minPrice ?? 0)}-${money(item.items.maxPrice ?? 0)}`;
+  if (item.items?.pricingModel === "fixed") {
+    const pax = item.items.fixedPax;
+    return `Fixed package${pax ? ` - ${pax} pax` : ""} - ${money(item.items.fixedPrice ?? item.items.flatPrice ?? 0)}`;
+  }
+
+  if (item.items?.pricingType === "flat" || item.items?.pricingModel === "tier") {
+    return money(item.items.flatPrice ?? item.items.fixedPrice ?? item.items.minPrice ?? 0);
   }
 
   return "Custom quote";
 }
 
-function getPackageImage(item: CateringPackage) {
-  return resolveImageUrl(item.items?.galleryImages?.[0] ?? item.imageUrl);
+function getStationPriceLabel(options: CateringPackage[], selectedPackage?: CateringPackage) {
+  const perUnitOptions = options.filter((item) =>
+    item.items?.pricingModel === "per_unit" || item.items?.pricingType === "range"
+  );
+  if (perUnitOptions.length > 0) {
+    const startingPrices = perUnitOptions.map((item) => {
+      const rate = item.items?.pricePerUnit ?? item.items?.pricePerKg ?? 0;
+      const minimum = getMinimumQuantity(item);
+      return rate * minimum;
+    });
+    return `From ${money(Math.min(...startingPrices))}`;
+  }
+
+  if (selectedPackage) {
+    return getPackagePriceLabel(selectedPackage);
+  }
+
+  const prices = options.flatMap((item) => {
+    if (item.items?.pricingModel === "fixed" && item.items.fixedPrice !== undefined) {
+      return [item.items.fixedPrice];
+    }
+    if ((item.items?.pricingType === "flat" || item.items?.pricingModel === "tier") && item.items.flatPrice !== undefined) {
+      return [item.items.flatPrice];
+    }
+    if (item.items?.pricingType === "range" && item.items.minPrice !== undefined) {
+      return [item.items.minPrice];
+    }
+    return [];
+  });
+  const hasQuoteOption = options.some((item) => item.items?.pricingType === "quote");
+
+  if (prices.length > 0) {
+    const label = `From ${money(Math.min(...prices))}`;
+    return hasQuoteOption ? `${label} · custom quote available` : label;
+  }
+
+  return "Custom quote";
+}
+
+function getPackageImages(item: CateringPackage) {
+  const galleryImages = (item.items?.galleryImages ?? [])
+    .map((image) => resolveImageUrl(image))
+    .filter((image): image is string => Boolean(image))
+    .slice(0, 3);
+
+  if (galleryImages.length > 0) {
+    return galleryImages;
+  }
+
+  const fallbackImage = resolveImageUrl(item.imageUrl);
+  return fallbackImage ? [fallbackImage] : [];
 }
 
 export default function CateringReservation() {
-  const [step, setStep] = useState(1);
   const [form, setForm] = useState<{
     event_date: string;
+    event_time: string;
     venue_address: string;
     station_types: string[];
     package_by_station: { [stationId: string]: string };
+    package_quantities: Record<string, string>;
     customer_name: string;
     customer_phone: string;
     customer_email: string;
     event_type: string;
+    event_type_other: string;
     payment_method: PaymentMethod;
-    payment_plan: "initial_only" | "full_payment";
+    payment_plan: "" | "downpayment" | "full_payment";
     acknowledged: boolean;
   }>({
-    event_date: today(),
+    event_date: earliestEventDate(),
+    event_time: "",
     venue_address: "",
-    station_types: ["sushi_station"],
+    station_types: [],
     package_by_station: {},
+    package_quantities: {},
     customer_name: "",
     customer_phone: "",
     customer_email: "",
     event_type: "",
+    event_type_other: "",
     payment_method: "cash",
-    payment_plan: "initial_only",
+    payment_plan: "",
     acknowledged: false
   });
   const [notice, setNotice] = useState("");
-  const [paymentNotice, setPaymentNotice] = useState("");
   const [isProcessingPayment, setIsProcessingPayment] = useState(false);
+  const paymentConfigQuery = usePaymentConfig();
+  const hostedCheckout = paymentConfigQuery.data?.hostedCheckout === true;
+  const onlineMethodsLabel = formatPayMongoMethods(paymentConfigQuery.data?.methods ?? []);
+  const [detailsOpen, setDetailsOpen] = useState(false);
+  const [cateringModal, setCateringModal] = useState<"inclusions" | "addons" | null>(null);
   const [success, setSuccess] = useState<SuccessState | null>(null);
+  const [successCopied, setSuccessCopied] = useState(false);
+  const successDialogRef = useRef<HTMLElement | null>(null);
+  const paymentInFlightRef = useRef(false);
 
   const packagesQuery = useQuery({
     queryKey: ["catering-packages"],
@@ -141,632 +406,1188 @@ export default function CateringReservation() {
   });
 
   const systemSettings = systemSettingsData ?? defaultSystemSettings;
-  const packages = packagesQuery.data ?? [];
+  const packages = packagesQuery.data ?? EMPTY_CATERING_PACKAGES;
+  const catalogStations = useMemo(() => {
+    const stationTypes = Array.from(new Set(packages.map(getStationType)));
+    return stationTypes.map((id) => ({
+      id,
+      name: getStationName(id)
+    }));
+  }, [packages]);
+  const stations = useMemo(() => catalogStations.filter((station) =>
+    !["tuna_add_on", "salmon_add_on", "sashimi_bar"].includes(station.id)
+  ), [catalogStations]);
+  const addOnStations = useMemo(() => catalogStations.filter((station) =>
+    ["tuna_add_on", "salmon_add_on"].includes(station.id)
+  ), [catalogStations]);
+  const allStations = useMemo(() => [...stations, ...addOnStations], [stations, addOnStations]);
   const packagesByStation = useMemo(() => {
     const map: { [k: string]: CateringPackage[] } = {};
-    stations.forEach((s) => {
+    allStations.forEach((s) => {
       map[s.id] = packages.filter((item) => getStationType(item) === s.id);
     });
     return map;
-  }, [packages]);
+  }, [packages, allStations]);
 
   const selectedPackageByStation: { [k: string]: CateringPackage | undefined } = {};
-  stations.forEach((s) => {
+  allStations.forEach((s) => {
     const pkgId = form.package_by_station[s.id];
-    selectedPackageByStation[s.id] = (packagesByStation[s.id] ?? []).find((p) => p.id === pkgId) ?? (packagesByStation[s.id] ?? [])[0];
+    selectedPackageByStation[s.id] = (packagesByStation[s.id] ?? []).find((p) => p.id === pkgId);
   });
 
-  useEffect(() => {
-    // ensure a default package is selected for each selected station
-    stations.forEach((s) => {
-      if (form.station_types.includes(s.id) && !form.package_by_station[s.id]) {
-        const firstPkg = (packagesByStation[s.id] ?? [])[0];
-        if (firstPkg) {
-          setForm((curr) => ({ ...curr, package_by_station: { ...curr.package_by_station, [s.id]: firstPkg.id } }));
-        }
-      }
-    });
-  }, [packagesByStation, form.station_types]);
-
-  useEffect(() => {
-    window.scrollTo({ top: 0, behavior: "smooth" });
-  }, [step]);
-
-  const headcountNumber = Math.max(selectedPackageByStation[form.station_types[0]]?.minPax ?? systemSettings.minimum_catering_pax, systemSettings.minimum_catering_pax);
+  const selectedPackages = form.station_types
+    .map((stationId) => selectedPackageByStation[stationId])
+    .filter((item): item is CateringPackage => Boolean(item));
+  const selectedBasePackages = selectedPackages.filter((item) =>
+    ["sushi_station", "tempura_live"].includes(getStationType(item))
+  );
+  const selectedStationCount = selectedPackages.filter((item) =>
+    !["tuna_add_on", "salmon_add_on"].includes(getStationType(item))
+  ).length;
+  const hasEligibleAddonStation = selectedBasePackages.length > 0;
+  const headcountNumber = selectedBasePackages.length > 0
+    ? Math.max(
+      systemSettings.minimum_catering_pax,
+      ...form.station_types.map((stationId) => {
+        const selectedPackage = selectedPackageByStation[stationId];
+        return selectedPackage && ["sushi_station", "tempura_live"].includes(getStationType(selectedPackage))
+          ? getStationType(selectedPackage) === "tempura_live"
+            ? selectedPackage.items?.fixedPax ?? selectedPackage.minPax
+            : selectedPackage.minPax
+          : 0;
+      })
+    )
+    : null;
   const subtotal = useMemo(() => {
-    return stations.reduce((sum, s) => {
+    return allStations.reduce((sum, s) => {
       if (!form.station_types.includes(s.id)) return sum;
       const pkg = selectedPackageByStation[s.id];
-      return sum + getPackagePrice(pkg);
+      const quantity = pkg && isPerUnitPackage(pkg)
+        ? Number(form.package_quantities[pkg.id]) || undefined
+        : undefined;
+      return sum + getPackagePrice(pkg, quantity);
     }, 0);
-  }, [form.station_types, packagesByStation, JSON.stringify(form.package_by_station)]);
-  const tax = Number((subtotal * getTaxRate(systemSettings)).toFixed(2));
-  const totalPrice = Number((subtotal + tax).toFixed(2));
+  }, [form.station_types, packagesByStation, form.package_by_station, form.package_quantities]);
+  const hasQuoteOnlyOptions = selectedPackages.some((item) => item?.items?.pricingType === "quote");
+  const hasPricedOptions = selectedPackages.some((item) => item?.items?.pricingType !== "quote");
+  const isZeroQuoteOnlyReservation = hasQuoteOnlyOptions;
   const isFullPayment = form.payment_plan === "full_payment";
-  const paymentAmount = Number((isFullPayment ? totalPrice : Number((totalPrice * getDownpaymentRate(systemSettings)).toFixed(2))).toFixed(2));
-  const remaining = Number((totalPrice - paymentAmount).toFixed(2));
-  const [summaryOpen, setSummaryOpen] = useState(false);
-  const stationCount = form.station_types.length;
-  const subtotalTotal = Number((subtotal * stationCount).toFixed(2));
-  const taxTotal = Number((subtotalTotal * getTaxRate(systemSettings)).toFixed(2));
-  const totalPriceTotal = Number((subtotalTotal + taxTotal).toFixed(2));
-  const paymentAmountTotal = Number((isFullPayment ? totalPriceTotal : Number((totalPriceTotal * getDownpaymentRate(systemSettings)).toFixed(2))).toFixed(2));
+  const isDownpayment = form.payment_plan === "downpayment";
+  const subtotalTotal = Number(subtotal.toFixed(2));
+  const totalPriceTotal = subtotalTotal;
+  const addonSubtotalTotal = Number(selectedPackages
+    .filter((item) => ["tuna_add_on", "salmon_add_on"].includes(getStationType(item)))
+    .reduce((sum, item) => {
+      const quantity = Number(form.package_quantities[item.id]) || 0;
+      return sum + getPackagePrice(item, quantity);
+    }, 0).toFixed(2));
+  const packageSubtotalTotal = Number((totalPriceTotal - addonSubtotalTotal).toFixed(2));
+  const paymentAmountTotal = isZeroQuoteOnlyReservation
+    ? 0
+    : isFullPayment
+      ? totalPriceTotal
+      : isDownpayment
+        ? Number((totalPriceTotal * 0.5).toFixed(2))
+        : 0;
   const remainingTotal = Number((totalPriceTotal - paymentAmountTotal).toFixed(2));
 
   function setField(field: keyof typeof form, value: any) {
     setForm((current) => ({ ...current, [field]: value }));
   }
 
-  function canProceedToStep2() {
-    return (
-      form.customer_name.trim().length > 0 &&
-      /^09\d{9}$/.test(form.customer_phone) &&
-      form.customer_email.trim().length > 0 &&
-      form.event_date >= today() &&
-      form.venue_address.trim().length >= 5 &&
-      form.event_type.length > 0
-    );
+  useEffect(() => {
+    if (!paymentConfigQuery.data) return;
+    const method: PaymentMethod = paymentConfigQuery.data.hostedCheckout ? "paymongo" : "cash";
+    setForm((current) => (current.payment_method === method ? current : { ...current, payment_method: method }));
+  }, [paymentConfigQuery.data]);
+
+  function toggleAddon(stationId: string, selected: boolean) {
+    const packageOption = packagesByStation[stationId]?.[0];
+    if (!packageOption) return;
+
+    setForm((current) => {
+      const stationTypes = selected
+        ? Array.from(new Set([...current.station_types, stationId]))
+        : current.station_types.filter((id) => id !== stationId);
+      const packageByStation = { ...current.package_by_station };
+      const packageQuantities = { ...current.package_quantities };
+
+      if (selected) {
+        packageByStation[stationId] = packageOption.id;
+        if (!packageQuantities[packageOption.id] || Number(packageQuantities[packageOption.id]) < getMinimumQuantity(packageOption)) {
+          packageQuantities[packageOption.id] = String(getMinimumQuantity(packageOption));
+        }
+      } else {
+        delete packageByStation[stationId];
+      }
+
+      return {
+        ...current,
+        station_types: stationTypes,
+        package_by_station: packageByStation,
+        package_quantities: packageQuantities
+      };
+    });
   }
 
-  function canProceedToStep3() {
-    return form.station_types.length > 0 && form.station_types.every((sid) => Boolean(form.package_by_station[sid]));
+  const addonSelectionSummary = selectedPackages
+    .filter((item) => ["tuna_add_on", "salmon_add_on"].includes(getStationType(item)))
+    .map((item) => `${getStationType(item) === "tuna_add_on" ? "tuna" : "salmon"} ${form.package_quantities[item.id] ?? getMinimumQuantity(item)} kg`)
+    .join(", ");
+
+  function getBookingDetailsError() {
+    if (form.event_date < earliestEventDate()) {
+      return "Catering events must be booked at least one day in advance.";
+    }
+    if (!isFutureManilaReservationTime(form.event_date, form.event_time)) {
+      return "Choose a future event date and time.";
+    }
+
+    if (!form.event_type) {
+      return "Choose an event type.";
+    }
+
+    if (form.event_type === "Others" && !form.event_type_other.trim()) {
+      return "Please specify the event type.";
+    }
+
+    if (form.event_type === "Others" && /[<>]/.test(form.event_type_other)) {
+      return "Event type must be plain text.";
+    }
+
+    if (form.station_types.length === 0) {
+      return "Choose at least one catering station.";
+    }
+
+    if (form.station_types.some((stationId) => !selectedPackageByStation[stationId])) {
+      return "Choose an option for each selected station.";
+    }
+
+    const selectedStationTypes = selectedPackages.map((item) => item ? getStationType(item) : "");
+    const hasBasePackage = selectedStationTypes.some((id) => id === "sushi_station" || id === "tempura_live");
+    if (
+      selectedStationTypes.some((id) => id === "tuna_add_on" || id === "salmon_add_on") &&
+      !hasBasePackage
+    ) {
+      return "Tuna and Salmon add-ons must be added to a station package.";
+    }
+    for (const item of selectedPackages) {
+      if (!item || !isPerUnitPackage(item)) continue;
+      const quantity = Number(form.package_quantities[item.id]);
+      const minimum = getMinimumQuantity(item);
+      const maximum = item.items?.maximum ?? item.items?.maxKg;
+      const step = item.items?.step ?? item.items?.stepKg ?? 1;
+      if (
+        !Number.isInteger(quantity) ||
+        typeof minimum !== "number" ||
+        !Number.isFinite(step) ||
+        step <= 0 ||
+        quantity < minimum ||
+        (typeof maximum === "number" && quantity > maximum) ||
+        Math.abs((quantity - minimum) / step - Math.round((quantity - minimum) / step)) > 1e-9
+      ) {
+        return `Enter a valid ${item.items?.unit ?? "kg"} quantity for ${item.name}.`;
+      }
+    }
+
+    if (hasQuoteOnlyOptions || !hasPricedOptions || totalPriceTotal <= 0) {
+      return "Choose priced catering options to submit a reservation. Custom quotes are handled through catering inquiries.";
+    }
+
+    const hasWholeTuna = selectedStationTypes.includes("whole_tuna");
+    const hasMixedStationSelection = selectedStationTypes.some((id) => id !== "whole_tuna");
+    if (hasWholeTuna && hasMixedStationSelection) {
+      return "Whole Tuna can only be booked by itself.";
+    }
+
+    if (!form.payment_plan) {
+      return "Choose a payment option.";
+    }
+
+    if (!form.acknowledged) {
+      return "Please confirm that you understand staff approval is required.";
+    }
+
+    return null;
+  }
+
+  /**
+   * PayMongo flow: save the request first (awaiting payment), then send the
+   * customer to PayMongo's checkout. The server records the payment from
+   * PayMongo's webhook, so closing the tab after paying is safe.
+   */
+  async function submitAndPayWithPayMongo(
+    bookingPayload: Record<string, unknown>,
+    reservationReference: string,
+    paymentPurpose: "downpayment" | "full_payment"
+  ) {
+    if (paymentConfigQuery.data?.available === false) {
+      throw new Error("Online payment is temporarily unavailable. Please try again later or contact us.");
+    }
+
+    const booking = await api.post<{
+      reservation_id: string;
+      paid_amount: number;
+      remaining_balance: number;
+      package_total: number;
+      initial_payment_due: number;
+      payment_plan: "downpayment" | "full_payment";
+    }>("/api/catering/reservations", {
+      ...bookingPayload,
+      payment_method: "paymongo",
+      reservation_id: reservationReference
+    });
+    const reservationId = booking.data.reservation_id;
+
+    if (booking.data.initial_payment_due <= 0) {
+      clearCustomerPaymentAttempt("catering", reservationId);
+      setSuccess({
+        reservationId,
+        packageTotal: booking.data.package_total,
+        paidAmount: booking.data.paid_amount,
+        remainingBalance: booking.data.remaining_balance,
+        paymentPlan: booking.data.payment_plan
+      });
+      setDetailsOpen(false);
+      return;
+    }
+
+    try {
+      const intent = await createPaymentIntent({
+        amount: booking.data.initial_payment_due,
+        paymentMethod: "paymongo",
+        bookingId: reservationId,
+        reservationType: "catering",
+        purpose: paymentPurpose,
+        successUrl: paymentReturnUrl()
+      });
+      if (intent.alreadyPaid) {
+        window.location.assign(`/payment/return?reference=${encodeURIComponent(intent.referenceId)}`);
+        return;
+      }
+      if (!intent.success || !intent.paymentUrl) {
+        throw new Error(intent.message || "Unable to open the PayMongo checkout.");
+      }
+      saveCustomerPaymentIntentReference("catering", reservationId, intent.referenceId);
+      redirectToHostedCheckout(intent.paymentUrl);
+    } catch (error) {
+      throw new Error(
+        `Your request ${reservationId} is saved, but the payment page could not open: ${getApiErrorMessage(error, "please try again")}. You can pay from the booking status page.`
+      );
+    }
   }
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (paymentInFlightRef.current) {
+      return;
+    }
+
+    paymentInFlightRef.current = true;
     setNotice("");
-    setPaymentNotice("");
     setIsProcessingPayment(true);
 
     if (!/^09\d{9}$/.test(form.customer_phone)) {
       setNotice("Enter a valid Philippine mobile number starting with 09.");
       setIsProcessingPayment(false);
+      paymentInFlightRef.current = false;
       return;
     }
 
-    if (!form.acknowledged) {
-      setNotice("Please acknowledge that payment is required to confirm this reservation.");
+    const bookingDetailsError = getBookingDetailsError();
+    if (bookingDetailsError) {
+      setNotice(bookingDetailsError);
       setIsProcessingPayment(false);
-      return;
-    }
-
-    // ensure packages selected for all chosen stations
-    const missing = form.station_types.find((sid) => !form.package_by_station[sid]);
-    if (missing) {
-      setNotice("Please select a package for each chosen station.");
-      setIsProcessingPayment(false);
+      paymentInFlightRef.current = false;
       return;
     }
 
     try {
-      const reservationReference = buildReservationReference("CAT");
-      const description = form.station_types.map((sid) => selectedPackageByStation[sid]?.name ?? sid).join(" + ");
-      const paymentIntent = await createPaymentIntent({
-        amount: paymentAmountTotal,
-        paymentMethod: form.payment_method,
-        bookingId: reservationReference,
-        reservationType: "catering",
-        description: `Catering reservation deposit for ${description}`
-      });
+      const bookingPayload = {
+        customer_name: form.customer_name,
+        customer_phone: form.customer_phone,
+        customer_email: form.customer_email,
+        event_date: form.event_date,
+        event_time: form.event_time,
+        event_type_other: form.event_type === "Others" ? form.event_type_other.trim() : null,
+        package_quantities: Object.fromEntries(
+          selectedPackages
+            .filter((item): item is CateringPackage => Boolean(item) && isPerUnitPackage(item))
+            .map((item) => [item.id, Number(form.package_quantities[item.id])])
+        ),
+        headcount: headcountNumber,
+        venue_address: form.venue_address,
+        package_id: form.package_by_station[form.station_types[0]] ?? "",
+        package_ids: form.station_types.map((stationId) => form.package_by_station[stationId]).filter(Boolean),
+        payment_method: form.payment_method,
+        payment_plan: form.payment_plan,
+        event_type: form.event_type
+      };
+      const attempt = await getOrCreateCustomerPaymentAttempt(
+        "catering",
+        bookingPayload,
+        undefined,
+        form.payment_plan
+      );
+      const paymentPurpose = form.payment_plan === "full_payment" ? "full_payment" : "downpayment";
 
-      if (!paymentIntent.success) {
-        throw new Error(paymentIntent.message || "Unable to start payment.");
+      if (form.payment_method === "paymongo") {
+        await submitAndPayWithPayMongo(bookingPayload, attempt.bookingId, paymentPurpose);
+        return;
       }
 
+      const intent = await createPaymentIntent({
+        amount: paymentAmountTotal,
+        paymentMethod: form.payment_method,
+        bookingId: attempt.bookingId,
+        reservationType: "catering",
+        purpose: paymentPurpose,
+        idempotencyKey: attempt.idempotencyKey,
+        description: `${paymentPurpose === "full_payment" ? "Package payment" : "Package downpayment"} for catering ${attempt.bookingId}`
+      });
+      if (!intent.success) {
+        throw new Error(intent.message || "Unable to start the initial payment.");
+      }
+      saveCustomerPaymentIntentReference("catering", attempt.bookingId, intent.referenceId);
       const verification = await verifyPayment({
-        referenceId: paymentIntent.referenceId,
-        bookingId: reservationReference,
+        referenceId: intent.referenceId,
+        bookingId: attempt.bookingId,
         gatewayData: {
           amount: paymentAmountTotal,
           paymentMethod: form.payment_method,
-          paymentPlan: form.payment_plan,
-          reservationType: "catering"
+          purpose: paymentPurpose,
+          reservationType: "catering",
+          paymentPlan: paymentPurpose
         }
       });
-
       if (!verification.success || verification.status !== "paid") {
-        throw new Error(verification.message || "Payment verification failed.");
+        throw new Error(verification.message || "Initial payment could not be verified. Your reservation was not submitted.");
       }
 
-      const response = await api.post<{ reservation_id: string; downpayment_amount: number; remaining_balance: number; payment_method: string }>(
+      const response = await api.post<{
+        reservation_id: string;
+        paid_amount: number;
+        remaining_balance: number;
+        package_total: number;
+        payment_plan: "downpayment" | "full_payment";
+      }>(
         "/api/catering/reservations",
         {
-          customer_name: form.customer_name,
-          customer_phone: form.customer_phone,
-          customer_email: form.customer_email,
-          event_date: form.event_date,
-          headcount: headcountNumber,
-          venue_address: form.venue_address,
-          package_id: form.package_by_station[form.station_types[0]] ?? "",
-          payment_method: form.payment_method,
-          payment_plan: form.payment_plan,
-          payment_transaction_id: verification.transactionId,
-          reservation_id: reservationReference,
-          event_type: form.event_type
+          ...bookingPayload,
+          reservation_id: attempt.bookingId,
+          payment_transaction_id: verification.transactionId
         }
       );
 
+      clearCustomerPaymentAttempt("catering", attempt.bookingId);
       setSuccess({
         reservationId: response.data.reservation_id,
-        downpaymentAmount: response.data.downpayment_amount,
+        packageTotal: response.data.package_total,
+        paidAmount: response.data.paid_amount,
         remainingBalance: response.data.remaining_balance,
-        paymentMethod: response.data.payment_method
+        paymentPlan: response.data.payment_plan
       });
-      setPaymentNotice(paymentIntent.instructions ?? "Payment completed with fake gateway.");
+      setDetailsOpen(false);
     } catch (error) {
       setNotice(getApiErrorMessage(error, "Unable to create catering reservation. Please verify your details and try again."));
     } finally {
+      paymentInFlightRef.current = false;
       setIsProcessingPayment(false);
     }
   }
 
+  async function copySuccessId() {
+    if (!success) return;
+    await navigator.clipboard.writeText(success.reservationId);
+    setSuccessCopied(true);
+    window.setTimeout(() => setSuccessCopied(false), 1800);
+  }
+
+  function closeSuccess() {
+    setSuccess(null);
+    setSuccessCopied(false);
+  }
+
+  useEffect(() => {
+    if (!success) return;
+    successDialogRef.current?.focus();
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") closeSuccess();
+    };
+    document.addEventListener("keydown", closeOnEscape);
+    return () => document.removeEventListener("keydown", closeOnEscape);
+  }, [success]);
+
   if (success) {
     return (
-      <main className="px-4 py-8 md:py-10">
-        <section className="customer-shell max-w-lg">
-          <div className="customer-card overflow-hidden">
-            <div className="border-b border-katana-border px-6 py-5">
-              <h1 className="flex items-center gap-2 font-display text-2xl font-bold text-white">
-                <ShieldCheck className="h-5 w-5 text-emerald-400" /> Catering Reservation Sent
-              </h1>
+      <div
+        className="customer-pickup-success-backdrop"
+        onMouseDown={(event) => {
+          if (event.target === event.currentTarget) closeSuccess();
+        }}
+      >
+        <section
+          ref={successDialogRef}
+          className="customer-pickup-success"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="catering-success-title"
+          tabIndex={-1}
+        >
+          <button type="button" className="customer-pickup-success-close" aria-label="Close dialog" onClick={closeSuccess}><X aria-hidden="true" /></button>
+          <div className="customer-pickup-success-icon" style={{ background: "#dcfce7", color: "#1f7a45" }}>
+            <CheckCircle2 aria-hidden="true" />
+          </div>
+          <p className="customer-pickup-success-eyebrow">CATERING RESERVATION</p>
+          <h2 id="catering-success-title">Your request is sent.</h2>
+          <p className="customer-pickup-success-copy">Staff will review your catering request and confirm the next steps. A payment has been recorded and any remaining balance will be settled before the event.</p>
+          <div className="customer-pickup-reference-chip">
+            <strong>{success.reservationId}</strong>
+            <button type="button" onClick={() => void copySuccessId()}><Copy aria-hidden="true" /> Copy</button>
+          </div>
+          {successCopied && <p className="customer-pickup-copy-message" role="status">Reference copied</p>}
+          <div className="customer-pickup-success-details">
+            <div className="customer-pickup-success-detail"><span>Package total</span><strong>{money(success.packageTotal)}</strong></div>
+            <div className="customer-pickup-success-detail"><span>Initial payment</span><strong>{money(success.paidAmount)}</strong></div>
+            <div className="customer-pickup-success-detail"><span>Remaining balance</span><strong>{money(success.remainingBalance)}</strong></div>
+          </div>
+          <div className="mt-4 text-left">
+            <p className="mb-2 text-xs font-semibold uppercase tracking-[0.16em] text-[#6b7280]">Initial payment received</p>
+            <div className="mb-2 flex items-center justify-between text-sm text-[var(--customer-text)]">
+              <span>{success.packageTotal > 0 ? Math.round((success.paidAmount / success.packageTotal) * 100) : 0}%</span>
+              <strong>{money(success.paidAmount)}</strong>
             </div>
-            <div className="space-y-5 p-6 text-sm text-neutral-300">
-              <p className="rounded-xl border border-emerald-500/20 bg-emerald-500/10 px-4 py-3 font-semibold text-emerald-300">Reservation ID: {success.reservationId}</p>
-              <p>Downpayment paid: <span className="font-semibold text-emerald-300">{money(success.downpaymentAmount)}</span></p>
-              <p>Remaining balance: <span className="font-semibold text-white">{money(success.remainingBalance)}</span></p>
-              <p>Payment method: <span className="font-semibold text-white">{success.paymentMethod.toUpperCase()}</span></p>
-              <p>Your reservation is now pending staff approval. You can check the status using the reservation ID.</p>
-              <div className="grid gap-3">
-                <Link className="customer-btn-primary text-center" to={`/reservation/status?bookingId=${success.reservationId}`}>
-                  View Reservation Status
-                </Link>
-                <Link className="customer-btn-secondary text-center" to="/">
-                  Back to Home
-                </Link>
-              </div>
+            <div role="progressbar" aria-label="Package amount paid" aria-valuemin={0} aria-valuemax={100} aria-valuenow={success.packageTotal > 0 ? Math.min(100, Math.round((success.paidAmount / success.packageTotal) * 100)) : 0} className="h-2 overflow-hidden rounded-full bg-emerald-950/15">
+              <div className="h-full bg-emerald-500" style={{ width: `${success.packageTotal > 0 ? Math.min(100, (success.paidAmount / success.packageTotal) * 100) : 0}%` }} />
             </div>
           </div>
+          <button type="button" className="customer-pickup-success-primary" onClick={() => {
+            setSuccess(null);
+            setSuccessCopied(false);
+            setForm((current) => ({
+              ...current,
+              event_date: earliestEventDate(),
+              event_time: "",
+              venue_address: "",
+              station_types: [],
+              package_by_station: {},
+              package_quantities: {},
+              customer_name: "",
+              customer_phone: "",
+              customer_email: "",
+              event_type: "",
+              event_type_other: "",
+              payment_method: "cash",
+              payment_plan: "",
+              acknowledged: false
+            }));
+          }}>MAKE ANOTHER BOOKING</button>
+          <Link className="customer-pickup-success-link" to={`/reservation/status?bookingId=${encodeURIComponent(success.reservationId)}`} onClick={() => setSuccess(null)}>View reservation status →</Link>
         </section>
-      </main>
+      </div>
     );
   }
 
   return (
-    <main className="px-0 py-0 md:px-4 md:py-10">
-      <section className="mx-auto flex min-h-[calc(100vh-4rem)] w-full items-start justify-center md:max-w-6xl md:items-center md:px-6">
-        <div className={`w-full md:max-w-4xl ${step === 2 ? "pb-28 md:pb-32" : ""}`}>
-          <form onSubmit={handleSubmit} className="overflow-hidden border-0 bg-transparent shadow-none md:rounded-2xl md:border md:border-katana-border md:bg-katana-surface/90 md:shadow-card md:backdrop-blur">
-            <div className="border-b border-katana-border px-4 py-5 md:px-6">
-              <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-                <div>
-                  <p className="customer-kicker">Step {step} of 3</p>
-                  <h2 className="mt-2 font-display text-xl font-bold text-white md:text-2xl">
-                    {step === 1 ? "Basic Information" : step === 2 ? "Package or Station" : "Payment"}
-                  </h2>
-                </div>
-                <div className="rounded-full border border-katana-border bg-katana-elevated px-4 py-2 text-sm font-semibold text-neutral-300">
-                  Catering reservation
-                </div>
-              </div>
-              <div className="mt-6">
-                <div className="flex items-center justify-center gap-0 md:gap-4 md:grid md:grid-cols-3">
-                  {[
-                    { label: "Information", active: step >= 1 },
-                    { label: "Package", active: step >= 2 },
-                    { label: "Payment", active: step >= 3 }
-                  ].map((item, index) => (
-                    <div key={item.label} className="flex items-center gap-0 md:gap-3">
-                      <div className="flex flex-col items-center">
-                        <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full border text-sm font-bold md:h-9 md:w-9 ${item.active ? "border-katana-red bg-katana-red text-white" : "border-katana-border bg-katana-elevated text-neutral-400"}`}>
-                          {index + 1}
-                        </div>
-                      </div>
-                      <span className={`hidden text-sm font-semibold md:block ${item.active ? "text-white" : "text-neutral-400"}`}>{item.label}</span>
-                      {index < 2 && <span className={`w-8 h-px bg-katana-border md:flex-1 md:block md:w-auto md:h-px`} />}
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </div>
-            <div className="space-y-4 px-3 py-5 md:space-y-5 md:p-6">
-            {step === 1 && (
-            <div className="grid gap-4 sm:grid-cols-2">
-              <label className="block">
-                <span className="customer-label">Event Date *</span>
-                <input className="customer-input" type="date" min={today()} value={form.event_date} onChange={(event) => setField("event_date", event.target.value)} required />
-              </label>
-              <label className="block">
-                <span className="customer-label">Your Name *</span>
-                <input className="customer-input" value={form.customer_name} onChange={(event) => setField("customer_name", event.target.value)} required />
-              </label>
-              <label className="block">
-                <span className="customer-label">Phone *</span>
-                <input className="customer-input" inputMode="tel" placeholder="09123456789" value={form.customer_phone} onChange={(event) => setField("customer_phone", event.target.value)} required />
-              </label>
-              <label className="block">
-                <span className="customer-label">Email *</span>
-                <input className="customer-input" type="email" value={form.customer_email} onChange={(event) => setField("customer_email", event.target.value)} required />
-              </label>
-              <label className="block sm:col-span-2">
-                <span className="customer-label">Venue Address *</span>
-                <textarea className="min-h-24 customer-input" placeholder="Complete event venue address" value={form.venue_address} onChange={(event) => setField("venue_address", event.target.value)} required />
-              </label>
-              <label className="block sm:col-span-2">
-                <span className="customer-label">Type of Event *</span>
-                <select className="customer-input" value={form.event_type} onChange={(event) => setField("event_type", event.target.value)} required>
-                  <option value="">Select event type</option>
-                  <option value="Wedding">Wedding</option>
-                  <option value="Birthday">Birthday</option>
-                  <option value="Corporate Event">Corporate Event</option>
-                  <option value="Private Party">Private Party</option>
-                  <option value="Graduation">Graduation</option>
-                  <option value="Other">Other</option>
-                </select>
-              </label>
-            </div>
-            )}
-
-            {step === 2 && (
-            <>
+    <main className="w-full px-4 pt-3 pb-24 md:px-6 md:pb-4 lg:px-3 lg:pb-3">
+      <section className="w-full">
+        <div className="w-full">
+          <form className="w-full">
+            <div className="grid w-full items-start gap-6 min-[1001px]:grid-cols-[minmax(0,1fr)_400px] min-[1001px]:gap-3">
             <div>
-              <h3 className="text-xs font-bold uppercase tracking-[0.18em] text-katana-muted">Choose a station</h3>
-              <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-1 md:gap-4 md:mt-4">
-                {stations.map((station) => {
-                  const isSelected = form.station_types.includes(station.id);
-                  const selectedPkg = selectedPackageByStation[station.id];
-                  const options = packagesByStation[station.id] ?? [];
+            <BackToHome className="mb-3" />
+            <div className="space-y-6">
+            <p className="text-sm text-neutral-300">Pick a package size under each station, then add Tuna or Salmon by the kilo if you like.</p>
 
-                  return (
-                    <div
-                      key={station.id}
-                      role="button"
-                      tabIndex={0}
-                      onClick={() => {
-                        if (isSelected) {
-                          setField("station_types", form.station_types.filter((s) => s !== station.id));
-                        } else {
-                          setField("station_types", [...form.station_types, station.id]);
-                        }
-                      }}
-                      className={`cursor-pointer rounded-2xl border p-4 transition ${
-                        isSelected ? "border-katana-red bg-katana-red/10 shadow-sm" : "border-katana-border bg-katana-elevated hover:border-katana-red/40"
-                      }`}
-                    >
-                      <div className="flex items-start gap-3">
-                        <div className={`mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-full border ${
-                          isSelected ? "border-katana-red bg-katana-red text-white" : "border-katana-border bg-katana-surface text-katana-muted"
-                        }`}>
-                          {isSelected ? <CheckCircle2 className="h-5 w-5" /> : <span className="h-2.5 w-2.5 rounded-full bg-current" />}
-                        </div>
-                        <div className="min-w-0 flex-1">
-                          <div className="flex items-center justify-between gap-3">
-                            <div>
-                              <p className="text-sm font-bold text-white md:text-base">{station.name}</p>
-                              <p className="mt-1 text-xs text-neutral-300 md:text-sm">{station.summary}</p>
-                            </div>
-                            <div className="ml-2 text-right">
-                              <p className="text-sm font-semibold text-katana-red">{selectedPkg ? getPackagePriceLabel(selectedPkg) : ""}</p>
-                            </div>
+            <section className="space-y-6" aria-label="Catering stations and add-ons">
+              {packagesQuery.isPending && <p className="text-sm text-neutral-300" role="status">Loading catering stations...</p>}
+              {packagesQuery.isError && (
+                <div className="text-sm text-katana-red" role="alert">
+                  <p>Catering stations could not be loaded.</p>
+                  <button type="button" className="mt-1 underline" onClick={() => void packagesQuery.refetch()}>Retry</button>
+                </div>
+              )}
+              {packagesQuery.isSuccess && (
+                <div className="space-y-8">
+                  {stations.map((station) => {
+                    const options = packagesByStation[station.id] ?? [];
+                    const selectedPackage = selectedPackageByStation[station.id];
+                    const inclusions = options.find((option) => option.items?.inclusions?.length)?.items?.inclusions ?? [];
+                    const subtitle = station.id === "sushi_station"
+                      ? `${options.length} package options`
+                      : station.id === "whole_tuna"
+                        ? "20–40 kg per booking"
+                        : `Fixed package${options[0]?.items?.fixedPax ? ` · ${options[0].items.fixedPax} pax` : ""}`;
+
+                    return (
+                      <section key={station.id} aria-label={station.name}>
+                        <div className="flex items-center justify-between gap-3 border-b-2 border-katana-red pb-2">
+                          <div>
+                            <h2 className="text-xl font-bold text-[var(--customer-text)]">{station.name}</h2>
+                            <p className="mt-1 text-sm text-[var(--customer-muted)]">{subtitle}</p>
                           </div>
-                          <div className="mt-3 flex items-center gap-3">
-                            {isSelected ? (
-                              <details className="ml-auto w-full rounded-lg" open onClick={(e) => e.stopPropagation()}>
-                                <summary className="cursor-pointer text-sm font-semibold text-white">Choose an option</summary>
-                                <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
-                                  {options.map((item) => {
-                                    const imageSrc = getPackageImage(item);
-                                    const optionSelected = selectedPkg?.id === item.id;
+                          {station.id === "sushi_station" && inclusions.length > 0 && (
+                            <button
+                              type="button"
+                              onClick={() => setCateringModal("inclusions")}
+                              className="shrink-0 rounded-full border border-katana-red px-4 py-2 text-sm font-semibold text-katana-red transition hover:bg-katana-red hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-katana-red"
+                            >
+                              View inclusions
+                            </button>
+                          )}
+                        </div>
+                        {options.length === 0 ? (
+                          <p className="mt-3 text-sm text-[var(--customer-muted)]">No package options are currently available.</p>
+                        ) : (
+                          <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
+                            {options.map((item) => {
+                              const images = getPackageImages(item);
+                              const optionSelected = selectedPackage?.id === item.id;
+                              const isQuantityPackage = isPerUnitPackage(item);
+                              const quantityValue = form.package_quantities[item.id] ?? "";
+                              const quantity = Number(quantityValue);
+                              const hasQuantity = quantityValue !== "" && Number.isFinite(quantity);
+                              const minimum = getMinimumQuantity(item);
+                              const maximum = item.items?.maximum ?? item.items?.maxKg;
+                              const step = item.items?.step ?? item.items?.stepKg ?? 1;
+                              const title = station.id === "sushi_station"
+                                ? `${item.minPax}–${item.maxPax} pax`
+                                : station.id === "whole_tuna"
+                                  ? "Whole Tuna"
+                                  : item.description ?? item.name;
+                              const paxLabel = station.id === "whole_tuna"
+                                ? `${minimum}-${maximum ?? 40} kg`
+                                : item.items?.fixedPax
+                                  ? `Fixed ${item.items.fixedPax} pax`
+                                  : `${item.minPax}–${item.maxPax} pax`;
 
-                                    return (
-                                      <button
-                                        key={item.id}
-                                        type="button"
-                                        onClick={(e) => {
-                                          e.stopPropagation();
-                                          setForm((curr) => ({ ...curr, package_by_station: { ...curr.package_by_station, [station.id]: item.id } }));
-                                        }}
-                                        className={`group overflow-hidden rounded-2xl border text-left transition ${
-                                          optionSelected ? "border-katana-red bg-katana-red/10 shadow-sm" : "border-katana-border bg-katana-surface hover:border-katana-red/50"
-                                        }`}
-                                      >
-                                        <div className="relative aspect-[4/3] overflow-hidden bg-katana-elevated">
-                                          {imageSrc ? (
-                                            <img
-                                              src={imageSrc}
-                                              alt={item.description ?? item.name}
-                                              className="h-full w-full object-cover transition duration-300 group-hover:scale-105"
-                                              loading="lazy"
-                                              decoding="async"
-                                            />
-                                          ) : (
-                                            <div className="flex h-full w-full items-center justify-center bg-katana-elevated text-xs font-bold uppercase tracking-[0.18em] text-katana-muted">
-                                              No photo
-                                            </div>
-                                          )}
-                                          {optionSelected && (
-                                            <span className="absolute right-3 top-3 inline-flex h-8 w-8 items-center justify-center rounded-full bg-katana-red text-white shadow-lg">
-                                              <CheckCircle2 className="h-5 w-5" />
-                                            </span>
-                                          )}
-                                        </div>
-                                        <div className="grid min-h-[116px] gap-3 p-4">
-                                          <div className="min-w-0">
-                                            <p className="break-words text-sm font-bold text-white md:text-base">{item.description ?? item.name}</p>
-                                            <p className="mt-1 text-xs uppercase tracking-wide text-katana-muted">{item.minPax}-{item.maxPax} pax</p>
-                                          </div>
-                                          <p className="self-end text-sm font-bold text-katana-red">{getPackagePriceLabel(item)}</p>
-                                        </div>
-                                      </button>
-                                    );
-                                  })}
-                                  {options.length === 0 && (
-                                    <p className="rounded-2xl border border-katana-border bg-katana-elevated p-4 text-sm text-neutral-300">Loading station options...</p>
+                              return (
+                                <div
+                                  key={item.id}
+                                  className={`relative overflow-hidden rounded-2xl border bg-[var(--customer-surface)] transition ${
+                                    optionSelected ? "border-katana-red ring-1 ring-katana-red" : "border-[var(--customer-border)] hover:border-katana-red/60"
+                                  }`}
+                                >
+                                  <button
+                                    type="button"
+                                    aria-pressed={optionSelected}
+                                    aria-label={`${title}, ${paxLabel}, ${getPackagePriceLabel(item)}`}
+                                    onClick={() => setForm((current) => {
+                                      const currentlySelected = current.package_by_station[station.id] === item.id &&
+                                        current.station_types.includes(station.id);
+                                      const stationTypes = currentlySelected
+                                        ? current.station_types.filter((id) => id !== station.id)
+                                        : Array.from(new Set([...current.station_types, station.id]));
+                                      const packageByStation = { ...current.package_by_station };
+                                      if (currentlySelected) {
+                                        delete packageByStation[station.id];
+                                      } else {
+                                        packageByStation[station.id] = item.id;
+                                      }
+                                      const quantities = { ...current.package_quantities };
+                                      if (!currentlySelected && isQuantityPackage && !quantities[item.id]) {
+                                        quantities[item.id] = String(minimum);
+                                      }
+                                      return {
+                                        ...current,
+                                        station_types: stationTypes,
+                                        package_by_station: packageByStation,
+                                        package_quantities: quantities
+                                      };
+                                    })}
+                                    className="group flex w-full flex-col rounded-2xl text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-katana-red"
+                                  >
+                                    <div className="relative flex h-24 w-full shrink-0 items-center justify-center gap-2 overflow-hidden bg-katana-red/10 p-3">
+                                      {images.length > 0 ? images.slice(0, 2).map((image, index) => (
+                                        <img
+                                          key={image}
+                                          src={image}
+                                          alt=""
+                                          className="block h-full min-h-0 min-w-0 flex-1 rounded-lg object-cover"
+                                          loading="lazy"
+                                          decoding="async"
+                                        />
+                                      )) : (
+                                        <span className="text-xs font-semibold uppercase tracking-wide text-[var(--customer-muted)]">
+                                          {station.name}
+                                        </span>
+                                      )}
+                                      {optionSelected && (
+                                        <span className="absolute right-3 top-3 inline-flex h-7 w-7 items-center justify-center rounded-full bg-katana-red text-white">
+                                          <Check className="h-4 w-4" aria-hidden="true" />
+                                        </span>
+                                      )}
+                                    </div>
+                                    <div className="relative z-10 grid min-h-28 w-full shrink-0 content-between gap-2 bg-[var(--customer-surface)] p-4">
+                                      <div>
+                                        <p className="text-base font-bold text-[var(--customer-text)]">{title}</p>
+                                        <p className="mt-1 text-xs uppercase tracking-wide text-[var(--customer-muted)]">{paxLabel}</p>
+                                      </div>
+                                      <p className="text-sm font-bold text-katana-red">{getPackagePriceLabel(item)}</p>
+                                    </div>
+                                  </button>
+                                  {optionSelected && isQuantityPackage && (
+                                    <div className="grid gap-2 border-t border-[var(--customer-border)] p-3">
+                                      <span className="text-xs font-semibold text-[var(--customer-muted)]">Quantity ({item.items?.unit ?? "kg"})</span>
+                                      <div className="flex items-center gap-2">
+                                        <button
+                                          type="button"
+                                          aria-label={`Decrease ${item.name} quantity`}
+                                          disabled={!hasQuantity || quantity <= minimum}
+                                          onClick={() => setForm((current) => ({
+                                            ...current,
+                                            package_quantities: {
+                                              ...current.package_quantities,
+                                              [item.id]: String(Math.max(minimum, quantity - step))
+                                            }
+                                          }))}
+                                          className="h-10 w-10 rounded-lg border border-[var(--customer-border)] text-lg font-bold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-katana-red disabled:opacity-40"
+                                        >−</button>
+                                        <input
+                                          className="customer-input h-10 py-1 text-center"
+                                          type="number"
+                                          min={minimum}
+                                          max={maximum}
+                                          step={step}
+                                          inputMode="numeric"
+                                          aria-label={`${item.name} quantity`}
+                                          value={quantityValue}
+                                          onChange={(event) => {
+                                            const value = event.target.value;
+                                            const parsed = Number(value);
+                                            setForm((current) => ({
+                                              ...current,
+                                              package_quantities: {
+                                                ...current.package_quantities,
+                                                [item.id]: value && Number.isFinite(parsed) && maximum !== undefined
+                                                  ? String(Math.min(parsed, maximum))
+                                                  : value
+                                              }
+                                            }));
+                                          }}
+                                          onBlur={() => {
+                                            if (!quantityValue) return;
+                                            const bounded = Math.max(minimum, Math.min(maximum ?? Number.POSITIVE_INFINITY, Number(quantityValue)));
+                                            setForm((current) => ({
+                                              ...current,
+                                              package_quantities: { ...current.package_quantities, [item.id]: String(bounded) }
+                                            }));
+                                          }}
+                                        />
+                                        <button
+                                          type="button"
+                                          aria-label={`Increase ${item.name} quantity`}
+                                          disabled={hasQuantity && maximum !== undefined && quantity >= maximum}
+                                          onClick={() => setForm((current) => ({
+                                            ...current,
+                                            package_quantities: {
+                                              ...current.package_quantities,
+                                              [item.id]: String(Math.min(maximum ?? Number.POSITIVE_INFINITY, (hasQuantity ? quantity : minimum - step) + step))
+                                            }
+                                          }))}
+                                          className="h-10 w-10 rounded-lg border border-[var(--customer-border)] text-lg font-bold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-katana-red disabled:opacity-40"
+                                        >+</button>
+                                      </div>
+                                    </div>
                                   )}
                                 </div>
-                              </details>
-                            ) : null}
+                              );
+                            })}
                           </div>
+                        )}
+                      </section>
+                    );
+                  })}
 
-                          {isSelected && station.id === "sushi_station" && selectedPkg?.items?.inclusions?.length ? (
-                            <details className="mt-3 rounded-xl border border-katana-border bg-katana-elevated text-sm text-neutral-300" onClick={(e) => e.stopPropagation()}>
-                              <summary className="cursor-pointer px-4 py-3 font-bold text-white">Sushi station products</summary>
-                              <div className="grid gap-2 border-t border-katana-border px-4 py-3 sm:grid-cols-2">
-                                {selectedPkg.items.inclusions.map((inclusion) => (
-                                  <p key={typeof inclusion === "string" ? inclusion : inclusion.name}>
-                                    {typeof inclusion === "string" ? inclusion : inclusion.name}
-                                  </p>
-                                ))}
-                              </div>
-                            </details>
-                          ) : null}
-                        </div>
+                  <div className="flex flex-wrap items-center justify-between gap-4 rounded-2xl border border-dashed border-katana-red/60 bg-katana-red/5 p-4">
+                    <div>
+                      <h2 className="font-bold text-[var(--customer-text)]">Add-ons</h2>
+                      <p className="mt-1 text-sm text-[var(--customer-muted)]">
+                        {addonSelectionSummary || "Tuna and Salmon by the kilo. Needs a Sushi Station or Tempura Live package."}
+                      </p>
+                      {!hasEligibleAddonStation && (
+                        <p className="mt-1 text-xs text-katana-red">Select Sushi Station or Tempura Live to add Tuna or Salmon.</p>
+                      )}
+                    </div>
+                    <button
+                      type="button"
+                      disabled={!hasEligibleAddonStation || addOnStations.length === 0}
+                      onClick={() => setCateringModal("addons")}
+                      className="customer-btn-primary shrink-0 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      Add-ons
+                    </button>
+                  </div>
+                </div>
+              )}
+            </section>
+            </div>
+            </div>
+            <aside
+              id="catering-mobile-details"
+              className="catering-booking-panel"
+            >
+              <header className="catering-booking-header">
+                <h2 className="text-lg font-bold">Event and booking details</h2>
+                <p>{selectedStationCount} {selectedStationCount === 1 ? "station" : "stations"} · {money(totalPriceTotal)}</p>
+              </header>
+              <div className="catering-booking-body">
+                <section className="catering-booking-event-fields">
+                  <h3>Event</h3>
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <label className="block">
+                      <span className="customer-label">Event Date *</span>
+                      <input className="customer-input py-2.5" type="date" min={earliestEventDate()} value={form.event_date} onChange={(event) => setField("event_date", event.target.value)} required />
+                    </label>
+                    <label className="block">
+                      <span className="customer-label">Event Time *</span>
+                      <input className="customer-input py-2.5" type="time" value={form.event_time} onChange={(event) => setField("event_time", event.target.value)} required />
+                    </label>
+                    <label className="block sm:col-span-2">
+                      <span className="customer-label">Type of Event *</span>
+                      <select className="customer-input py-2.5" value={form.event_type} onChange={(event) => setField("event_type", event.target.value)} required>
+                        <option value="">Select event type</option>
+                        <option value="Wedding">Wedding</option>
+                        <option value="Birthday">Birthday</option>
+                        <option value="Corporate Event">Corporate Event</option>
+                        <option value="Private Party">Private Party</option>
+                        <option value="Graduation">Graduation</option>
+                        <option value="Others">Others</option>
+                      </select>
+                    </label>
+                    {form.event_type === "Others" && (
+                      <label className="block sm:col-span-2">
+                        <span className="customer-label">Please specify *</span>
+                        <input className="customer-input py-2.5" maxLength={60} value={form.event_type_other} onChange={(event) => setField("event_type_other", event.target.value)} required />
+                      </label>
+                    )}
+                  </div>
+                </section>
+
+                <section className="catering-booking-order">
+                  <h3>Your order</h3>
+                  {selectedPackages.length === 0 ? (
+                    <div className="catering-booking-empty">
+                      <span aria-hidden="true"><ShoppingBag /></span>
+                      <p>Select a station package to begin your order.</p>
+                    </div>
+                  ) : (
+                    <div className="space-y-3">
+                      {selectedPackages.map((item) => {
+                        const type = getStationType(item);
+                        const isAddon = type === "tuna_add_on" || type === "salmon_add_on";
+                        const quantity = Number(form.package_quantities[item.id]) || 0;
+                        const rate = item.items?.pricePerUnit ?? item.items?.pricePerKg ?? 0;
+                        const linePrice = getPackagePrice(item, isPerUnitPackage(item) ? quantity : undefined);
+                        const title = isAddon
+                          ? `${item.name} add-on`
+                          : type === "whole_tuna"
+                            ? "Whole Tuna"
+                            : allStations.find((station) => station.id === type)?.name ?? item.name;
+                        const detail = isAddon
+                          ? `${quantity} kg × ${money(rate)}/kg`
+                          : type === "whole_tuna"
+                            ? `${quantity} kg × ${money(rate)}/kg`
+                            : item.items?.fixedPax
+                              ? `${item.items.fixedPax} pax`
+                              : item.description ?? `${item.minPax}–${item.maxPax} pax`;
+
+                        return (
+                          <div key={item.id} className="catering-booking-order-line">
+                            <div className="min-w-0">
+                              <p className="font-semibold text-[var(--customer-text)]">{title}</p>
+                              <p className="mt-0.5 text-xs text-[var(--customer-muted)]">{detail}</p>
+                            </div>
+                            <span className="shrink-0 font-bold text-[var(--customer-text)]">{money(linePrice)}</span>
+                          </div>
+                        );
+                      })}
+                      <div className="flex items-center justify-between gap-3 text-sm">
+                        <span className="text-[var(--customer-muted)]">Headcount</span>
+                        <span className="font-bold">{headcountNumber === null ? "Not applicable" : `${headcountNumber} pax`}</span>
                       </div>
                     </div>
+                  )}
+                </section>
+
+                {isZeroQuoteOnlyReservation && (
+                  <p className="rounded-lg border border-amber-300/30 bg-amber-300/10 px-3 py-2 text-sm font-semibold text-amber-100">
+                    This option needs a custom quote. Select priced packages here or send a catering inquiry.
+                  </p>
+                )}
+
+                <section className="catering-booking-payment">
+                  <h3>Payment option</h3>
+                  {isZeroQuoteOnlyReservation ? (
+                    <p className="mt-2 text-xs text-[var(--customer-muted)]">Custom-quote options must be arranged through a catering inquiry.</p>
+                  ) : !hasPricedOptions ? (
+                    <p className="mt-2 text-xs text-[var(--customer-muted)]">Select a priced option to see payment choices.</p>
+                  ) : (
+                    <div className="mt-2 grid grid-cols-2 gap-2" role="group" aria-label="Catering payment plan">
+                      {([
+                        { value: "downpayment", title: "Pay 50% now", subtitle: "Balance due later", amount: Number((totalPriceTotal * 0.5).toFixed(2)), selected: isDownpayment },
+                        { value: "full_payment", title: "Pay in full", subtitle: "No balance later", amount: totalPriceTotal, selected: isFullPayment }
+                      ] as const).map((option) => (
+                        <button
+                          key={option.value}
+                          type="button"
+                          aria-pressed={option.selected}
+                          onClick={() => setField("payment_plan", option.value)}
+                          className={`catering-booking-payment-option${option.selected ? " is-selected" : ""}`}
+                        >
+                          <span className="block text-sm font-bold">{option.title}</span>
+                          <span className="mt-1 block text-xs text-[var(--customer-muted)]">{option.subtitle}</span>
+                          <span className="mt-2 block text-sm font-bold text-katana-red">{money(option.amount)}</span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </section>
+
+                {paymentAmountTotal > 0 && hostedCheckout && (
+                  <section className="catering-booking-payment-method">
+                    <h3>Payment method</h3>
+                    <div className="mt-2">
+                      <div className="catering-booking-online-option" aria-label="Pay online with PayMongo">
+                        <CreditCard className="h-4 w-4 shrink-0" aria-hidden="true" />
+                        <span>
+                          <strong>Pay online</strong>
+                          <small>{onlineMethodsLabel || "QR Ph, card, GCash, or Maya"} via PayMongo</small>
+                        </span>
+                        {paymentConfigQuery.data?.testMode && <em>Test mode</em>}
+                      </div>
+                    </div>
+                  </section>
+                )}
+
+                {paymentAmountTotal > 0 && !hostedCheckout && (
+                  <section className="catering-booking-payment-method">
+                    <h3>Payment method</h3>
+                    <div className="mt-2 grid grid-cols-3 gap-2">
+                      {([
+                        { id: "cash", label: "Cash", icon: <Banknote className="h-4 w-4" aria-hidden="true" />, disabled: false },
+                        { id: "gcash", label: "GCash", icon: <Smartphone className="h-4 w-4" aria-hidden="true" />, disabled: true },
+                        { id: "bank_transfer", label: "BPI", icon: <Landmark className="h-4 w-4" aria-hidden="true" />, disabled: true }
+                      ] as const).map((option) => (
+                        <button
+                          type="button"
+                          key={option.id}
+                          aria-pressed={form.payment_method === option.id}
+                          onClick={() => !option.disabled && setField("payment_method", option.id)}
+                          disabled={option.disabled}
+                          className={`catering-booking-method-option${form.payment_method === option.id ? " is-selected" : ""}${option.disabled ? " is-disabled" : ""}`}
+                        >
+                          <span className="flex items-center gap-1">{option.icon}{option.label}</span>
+                          {option.disabled && <span className="text-[9px] uppercase tracking-wide">Coming soon</span>}
+                        </button>
+                      ))}
+                    </div>
+                  </section>
+                )}
+
+              </div>
+              <footer className="catering-booking-actions">
+                <section className="catering-booking-price-summary">
+                  <h3>Price breakdown</h3>
+                  <div><span>Package subtotal</span><strong>{money(packageSubtotalTotal)}</strong></div>
+                  <div><span>Add-ons</span><strong>{money(addonSubtotalTotal)}</strong></div>
+                  <div><span>Initial payment required to submit</span><strong>{money(paymentAmountTotal)}</strong></div>
+                  {!isZeroQuoteOnlyReservation && (
+                    <div><span>Balance due later before added fees</span><strong>{money(remainingTotal)}</strong></div>
+                  )}
+                  <div className="catering-booking-price-total">
+                    <span>Total</span><strong>{money(totalPriceTotal)}</strong>
+                  </div>
+                </section>
+                <label className="catering-booking-ack">
+                  <input checked={form.acknowledged} className="mt-1 h-4 w-4 accent-katana-red" type="checkbox" onChange={(event) => setField("acknowledged", event.target.checked)} />
+                  I understand this reservation is pending staff approval.
+                </label>
+                <button
+                  type="button"
+                  aria-haspopup="dialog"
+                  onClick={() => {
+                    const bookingDetailsError = getBookingDetailsError();
+                    if (bookingDetailsError) {
+                      setNotice(bookingDetailsError);
+                      return;
+                    }
+                    setNotice("");
+                    setDetailsOpen(true);
+                  }}
+                  onPointerDown={(event) => {
+                    const bounds = event.currentTarget.getBoundingClientRect();
+                    event.currentTarget.style.setProperty("--booking-ripple-x", `${event.clientX - bounds.left}px`);
+                    event.currentTarget.style.setProperty("--booking-ripple-y", `${event.clientY - bounds.top}px`);
+                  }}
+                  className="catering-booking-submit customer-btn-primary"
+                  disabled={selectedStationCount === 0 || !form.acknowledged || isProcessingPayment}
+                >
+                  {isProcessingPayment
+                    ? <LoaderCircle className="catering-booking-spinner" aria-hidden="true" />
+                    : <Send className="h-4 w-4" aria-hidden="true" />}
+                  {isProcessingPayment ? "Submitting..." : "Review request"}
+                </button>
+                <p className="text-center text-xs text-[var(--customer-muted)]">
+                  Staff may add a mobilization fee for the remaining balance.
+                </p>
+                {notice && <p className="rounded-md bg-red-50 px-3 py-2 text-sm font-medium text-katana-red" role="alert">{notice}</p>}
+              </footer>
+            </aside>
+          </div>
+        </form>
+        {cateringModal === "inclusions" && (
+          <CateringModal title="Sushi Station inclusions" onClose={() => setCateringModal(null)}>
+            <div className="min-h-0 overflow-y-auto p-5">
+              {(() => {
+                const inclusions = packagesByStation.sushi_station
+                  ?.find((item) => item.items?.inclusions?.length)
+                  ?.items?.inclusions ?? [];
+                return inclusions.length > 0 ? (
+                  <ul className="grid gap-3 text-sm text-[var(--customer-text)] sm:grid-cols-2">
+                    {inclusions.map((inclusion) => (
+                      <li key={typeof inclusion === "string" ? inclusion : inclusion.name} className="flex items-start gap-2">
+                        <Check className="mt-0.5 h-4 w-4 shrink-0 text-katana-red" aria-hidden="true" />
+                        <span>{typeof inclusion === "string" ? inclusion : inclusion.name}</span>
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p className="text-sm text-[var(--customer-muted)]">Inclusion details are not available for this station.</p>
+                );
+              })()}
+              <div className="mt-6 flex justify-end border-t border-[var(--customer-border)] pt-4">
+                <button type="button" className="customer-btn-primary px-6 py-2.5" onClick={() => setCateringModal(null)}>Close</button>
+              </div>
+            </div>
+          </CateringModal>
+        )}
+        {cateringModal === "addons" && (
+          <CateringModal title="Add-ons" onClose={() => setCateringModal(null)}>
+            <div className="flex min-h-0 flex-1 flex-col">
+              <div className="min-h-0 flex-1 space-y-3 overflow-y-auto p-5">
+                {!hasEligibleAddonStation ? (
+                  <p className="rounded-xl border border-katana-red/40 bg-katana-red/10 p-4 text-sm">
+                    Add-ons require a Sushi Station or Tempura Live package.
+                  </p>
+                ) : addOnStations.length === 0 ? (
+                  <p className="text-sm text-[var(--customer-muted)]">No add-ons are currently available.</p>
+                ) : addOnStations.map((station) => {
+                  const item = packagesByStation[station.id]?.[0];
+                  if (!item) return null;
+                  const selected = form.station_types.includes(station.id);
+                  const minimum = getMinimumQuantity(item);
+                  const maximum = item.items?.maximum ?? item.items?.maxKg ?? 40;
+                  const step = item.items?.step ?? item.items?.stepKg ?? 1;
+                  const quantityValue = form.package_quantities[item.id] ?? String(minimum);
+                  const quantity = Number(quantityValue) || minimum;
+                  const rate = item.items?.pricePerUnit ?? item.items?.pricePerKg ?? 0;
+
+                  return (
+                    <section
+                      key={station.id}
+                      className={`rounded-xl border p-4 transition ${selected ? "border-katana-red bg-katana-red/10" : "border-[var(--customer-border)]"}`}
+                    >
+                      <div className="flex items-start justify-between gap-4">
+                        <label className="flex min-w-0 cursor-pointer items-start gap-3">
+                          <input
+                            type="checkbox"
+                            checked={selected}
+                            onChange={(event) => toggleAddon(station.id, event.target.checked)}
+                            className="mt-1 h-4 w-4 accent-katana-red focus-visible:ring-2 focus-visible:ring-katana-red"
+                          />
+                          <span>
+                            <span className="block font-bold">{station.name === "Tuna by kilo" ? "Tuna" : "Salmon"}</span>
+                            <span className="mt-1 block text-xs text-[var(--customer-muted)]">{minimum}–{maximum} kg</span>
+                          </span>
+                        </label>
+                        <span className="shrink-0 text-sm font-bold text-katana-red">{money(rate)}/kg</span>
+                      </div>
+                      {selected && (
+                        <div className="mt-4 flex flex-wrap items-center gap-2 pl-7">
+                          <button
+                            type="button"
+                            aria-label={`Decrease ${item.name} add-on quantity`}
+                            disabled={quantity <= minimum}
+                            onClick={() => setForm((current) => ({
+                              ...current,
+                              package_quantities: { ...current.package_quantities, [item.id]: String(Math.max(minimum, quantity - step)) }
+                            }))}
+                            className="h-10 w-10 rounded-lg border border-[var(--customer-border)] text-lg font-bold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-katana-red disabled:opacity-40"
+                          >−</button>
+                          <input
+                            type="number"
+                            min={minimum}
+                            max={maximum}
+                            step={step}
+                            inputMode="numeric"
+                            aria-label={`${item.name} add-on quantity`}
+                            value={quantityValue}
+                            onChange={(event) => {
+                              const value = event.target.value;
+                              const parsed = Number(value);
+                              setForm((current) => ({
+                                ...current,
+                                package_quantities: {
+                                  ...current.package_quantities,
+                                  [item.id]: value && Number.isFinite(parsed) ? String(Math.min(parsed, maximum)) : value
+                                }
+                              }));
+                            }}
+                            onBlur={() => {
+                              if (!quantityValue) return;
+                              const bounded = Math.max(minimum, Math.min(maximum, Number(quantityValue)));
+                              setForm((current) => ({
+                                ...current,
+                                package_quantities: { ...current.package_quantities, [item.id]: String(bounded) }
+                              }));
+                            }}
+                            className="customer-input h-10 w-24 py-1 text-center"
+                          />
+                          <button
+                            type="button"
+                            aria-label={`Increase ${item.name} add-on quantity`}
+                            disabled={quantity >= maximum}
+                            onClick={() => setForm((current) => ({
+                              ...current,
+                              package_quantities: { ...current.package_quantities, [item.id]: String(Math.min(maximum, quantity + step)) }
+                            }))}
+                            className="h-10 w-10 rounded-lg border border-[var(--customer-border)] text-lg font-bold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-katana-red disabled:opacity-40"
+                          >+</button>
+                          <span className="ml-1 text-sm text-[var(--customer-muted)]">{quantity} kg · {money(quantity * rate)}</span>
+                        </div>
+                      )}
+                    </section>
                   );
                 })}
               </div>
+              <footer className="flex shrink-0 items-center justify-between gap-4 border-t border-[var(--customer-border)] p-5">
+                <span className="font-bold">{money(addonSubtotalTotal)}</span>
+                <button type="button" className="customer-btn-primary px-6 py-2.5" onClick={() => setCateringModal(null)}>Done</button>
+              </footer>
             </div>
-            </>
-            )}            {step === 3 && (
-            <>
-            <div className="rounded-xl border border-katana-border bg-katana-elevated p-5">
-              <div className="flex items-center justify-between">
-                <h3 className="text-sm font-bold uppercase tracking-wide text-white">Booking summary</h3>
-                <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-neutral-300">
-                  <span className="rounded-full border border-katana-border bg-katana-surface px-3 py-1 text-neutral-200">{isFullPayment ? "Full payment" : `${systemSettings.default_downpayment_percent}% initial`}</span>
-                </div>
+          </CateringModal>
+        )}
+        <Dialog
+          open={detailsOpen}
+          title="Your contact details"
+          onClose={() => !isProcessingPayment && setDetailsOpen(false)}
+          overlayClassName="!items-center !px-3 !py-4 sm:!px-5"
+          panelClassName="!max-h-[calc(100vh-32px)] !max-w-[430px] !overflow-hidden !rounded-[24px] !border-0 !bg-white !p-0 !shadow-[0_24px_80px_rgba(36,26,28,0.12)] [&>div:first-child]:!hidden [&>div:last-child]:!bg-white [&>div:last-child]:!p-0 [&>div:last-child]:!overflow-y-auto"
+        >
+          <div className="catering-contact-modal">
+            <header className="catering-contact-header">
+              <div className="catering-contact-header-copy">
+                <p className="catering-contact-kicker">Almost done</p>
+                <h2 className="catering-contact-title">Contact details</h2>
+                <p className="catering-contact-subtitle">So we can reach you about your event.</p>
               </div>
-              <div className="mt-4 space-y-3 text-sm text-neutral-300">
-                <div className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-3">
-                  <span className="text-left">Basic info</span>
-                  <span className="break-words text-right font-semibold text-white">{form.customer_name || "-"}</span>
-                </div>
-                <div className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-3">
-                  <span className="text-left">Phone</span>
-                  <span className="break-words text-right font-semibold text-white">{form.customer_phone || "-"}</span>
-                </div>
-                <div className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-3">
-                  <span className="text-left">Venue</span>
-                  <span className="break-words text-right font-semibold text-white">{form.venue_address || "-"}</span>
-                </div>
-                <div className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-3">
-                  <span className="text-left">Station</span>
-                  <span className="break-words text-right font-semibold text-white">{form.station_types.map((id) => stations.find((s) => s.id === id)?.name).filter(Boolean).join(", ") || "-"}</span>
-                </div>
-                <div className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-3">
-                  <span className="text-left">Option</span>
-                  <span className="break-words text-right font-semibold text-white">{form.station_types.map((id) => selectedPackageByStation[id]?.description ?? selectedPackageByStation[id]?.name).filter(Boolean).join(", ") || "-"}</span>
-                </div>
-                <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3">
-                  <span className="text-left">Headcount</span>
-                  <span className="text-right">{headcountNumber} pax</span>
-                </div>
-                <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3">
-                    <span className="text-left">Subtotal</span>
-                    <span className="text-right">{money(subtotalTotal)}</span>
-                </div>
-                  <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3">
-                    <span className="text-left">{taxLabel(systemSettings)}</span>
-                    <span className="text-right">{money(taxTotal)}</span>
-                </div>
-                  <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 text-base font-bold text-white">
-                    <span className="text-left">Total</span>
-                    <span className="text-right">{money(totalPriceTotal)}</span>
-                </div>
-                  <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 text-sm text-neutral-300">
-                    <span className="text-left">{isFullPayment ? "Amount now" : downpaymentLabel(systemSettings)}</span>
-                    <span className="text-right">{money(paymentAmountTotal)}</span>
-                </div>
-                  <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 text-sm text-neutral-300">
-                    <span className="text-left">{isFullPayment ? "Remaining balance" : "Remaining balance"}</span>
-                    <span className="text-right">{money(remainingTotal)}</span>
-                </div>
-              </div>
-            </div>
-
-            <div className="rounded-xl border border-katana-border bg-katana-elevated p-5">
-              <h3 className="text-sm font-bold uppercase tracking-wide text-white">Payment option</h3>
-              <div className="mt-4 grid gap-3 sm:grid-cols-2">
-                <button
-                  type="button"
-                  onClick={() => setField("payment_plan", "initial_only")}
-                  className={`rounded-2xl border px-4 py-4 text-left text-sm font-bold ${form.payment_plan === "initial_only" ? "border-katana-red bg-katana-red/15 text-white" : "border-katana-border bg-katana-surface text-neutral-300"}`}
-                >
-                      <p className="font-semibold">{systemSettings.default_downpayment_percent}% initial</p>
-                      <p className="mt-2 text-sm text-neutral-300">Pay {money(paymentAmountTotal)} now. Remaining {money(remainingTotal)} due at event.</p>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setField("payment_plan", "full_payment")}
-                  className={`rounded-2xl border px-4 py-4 text-left text-sm font-bold ${form.payment_plan === "full_payment" ? "border-katana-red bg-katana-red/15 text-white" : "border-katana-border bg-katana-surface text-neutral-300"}`}
-                >
-                  <p className="font-semibold">100% full</p>
-                  <p className="mt-2 text-sm text-neutral-300">Pay {money(paymentAmountTotal)} now and owe nothing later.</p>
-                </button>
-              </div>
-            </div>
-
-            <div className="rounded-xl border border-katana-border bg-katana-elevated p-5">
-              <h3 className="text-sm font-bold uppercase tracking-wide text-white">Payment method</h3>
-              <div className="mt-4 grid gap-3 sm:grid-cols-3">
-                {([
-                  { id: "cash", label: "Cash", icon: <Banknote className="h-4 w-4" />, disabled: false },
-                  { id: "gcash", label: "GCash", icon: <Smartphone className="h-4 w-4" />, disabled: true },
-                  { id: "bank_transfer", label: "BPI", icon: <Landmark className="h-4 w-4" />, disabled: true }
-                ] as const).map((option) => (
-                  <button
-                    type="button"
-                    key={option.id}
-                    onClick={() => !option.disabled && setField("payment_method", option.id)}
-                    disabled={option.disabled}
-                    className={`flex min-h-[74px] flex-col items-center justify-center gap-1 rounded-2xl border px-4 py-3 text-sm font-bold ${
-                      form.payment_method === option.id
-                        ? "border-katana-red bg-katana-red text-white"
-                        : option.disabled
-                          ? "cursor-not-allowed border-katana-border bg-katana-surface text-neutral-500 opacity-70"
-                          : "border-katana-border bg-katana-elevated text-neutral-300"
-                    }`}
-                  >
-                    <span className="flex items-center gap-2">{option.icon}{option.label}</span>
-                    {option.disabled && <span className="text-[11px] font-semibold uppercase tracking-wide text-neutral-500">Coming soon</span>}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            <label className="flex items-start gap-3 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm font-semibold text-amber-900">
-              <input
-                checked={form.acknowledged}
-                className="mt-1 h-4 w-4 accent-red-700"
-                type="checkbox"
-                onChange={(event) => setField("acknowledged", event.target.checked)}
-              />
-              I agree that payment is required to confirm this catering reservation.
-            </label>
-
-            <button
-              className="customer-btn-primary flex w-full gap-2 disabled:cursor-not-allowed disabled:opacity-70"
-              disabled={isProcessingPayment}
-            >
-              <Send className="h-4 w-4" /> {isProcessingPayment ? "Processing payment..." : `Pay ${money(paymentAmountTotal)}`}
-            </button>
-            {paymentNotice && <p className="rounded-md bg-emerald-50 px-3 py-2 text-sm font-medium text-emerald-700">{paymentNotice}</p>}
-            </>
-            )}
-
-            {step !== 2 && (
-            <div className="flex flex-col gap-3 sm:flex-row sm:justify-between">
               <button
                 type="button"
-                onClick={() => setStep((current) => Math.max(1, current - 1))}
-                className="customer-btn-secondary"
-                disabled={step === 1}
+                aria-label="Close dialog"
+                className="catering-contact-close"
+                onClick={() => !isProcessingPayment && setDetailsOpen(false)}
+                disabled={isProcessingPayment}
+              >
+                <X aria-hidden="true" />
+              </button>
+            </header>
+            <form className="catering-contact-form" onSubmit={handleSubmit}>
+              <div className="catering-contact-grid">
+                <label className="catering-contact-field">
+                  <span>Your name <span aria-hidden="true">*</span></span>
+                  <input
+                    className="customer-input catering-contact-input"
+                    autoComplete="name"
+                    maxLength={120}
+                    value={form.customer_name}
+                    onChange={(event) => setField("customer_name", event.target.value)}
+                    required
+                  />
+                </label>
+                <label className="catering-contact-field">
+                  <span>Phone number <span aria-hidden="true">*</span></span>
+                  <input
+                    className="customer-input catering-contact-input"
+                    type="tel"
+                    inputMode="numeric"
+                    autoComplete="tel"
+                    pattern="09[0-9]{9}"
+                    maxLength={11}
+                    placeholder="09123456789"
+                    value={form.customer_phone}
+                    onChange={(event) => setField("customer_phone", event.target.value.replace(/\D/g, "").slice(0, 11))}
+                    required
+                  />
+                </label>
+              </div>
+              <label className="catering-contact-field catering-contact-field-full">
+                <span>Email <span aria-hidden="true">*</span></span>
+                <input
+                  className="customer-input catering-contact-input"
+                  type="email"
+                  autoComplete="email"
+                  maxLength={254}
+                  value={form.customer_email}
+                  onChange={(event) => setField("customer_email", event.target.value)}
+                  required
+                />
+              </label>
+              <label className="catering-contact-field catering-contact-field-full">
+                <span>Venue address <span aria-hidden="true">*</span></span>
+                <textarea
+                  className="customer-input catering-contact-input catering-contact-textarea"
+                  autoComplete="street-address"
+                  minLength={5}
+                  maxLength={500}
+                  placeholder="Complete event venue address"
+                  value={form.venue_address}
+                  onChange={(event) => setField("venue_address", event.target.value)}
+                  required
+                />
+              </label>
+              <div className="catering-contact-summary-box">
+                <div className="catering-contact-summary-row catering-contact-summary-header-row">
+                  <span className="catering-contact-summary-name">{form.station_types.map((id) => allStations.find((station) => station.id === id)?.name).filter(Boolean).join(", ") || "No station selected"}</span>
+                  <span className="catering-contact-summary-total">Total {money(totalPriceTotal)}</span>
+                </div>
+                <div className="catering-contact-summary-row">
+                  <span>{form.payment_plan === "full_payment" ? "Full package payment" : "50% of package total"} {hostedCheckout ? "paid now on PayMongo" : "required before submission"}</span>
+                  <span className="catering-contact-summary-amount">{money(paymentAmountTotal)}</span>
+                </div>
+                {!isZeroQuoteOnlyReservation && (
+                  <div className="catering-contact-summary-row">
+                    <span>Remaining package balance before any staff-added fee</span>
+                    <span className="catering-contact-summary-balance">{money(remainingTotal)}</span>
+                  </div>
+                )}
+              </div>
+              {notice && <p className="catering-contact-notice" role="alert">{notice}</p>}
+              <button
+                type="submit"
+                className="catering-contact-submit"
+                disabled={isProcessingPayment}
+              >
+                {isProcessingPayment
+                  ? hostedCheckout ? "Opening secure checkout..." : "Processing payment..."
+                  : isZeroQuoteOnlyReservation
+                    ? "Select priced packages"
+                    : paymentAmountTotal > 0
+                      ? hostedCheckout ? `Continue to payment (${money(paymentAmountTotal)})` : "Pay and submit request"
+                      : "Choose a payment option"}
+              </button>
+              <button
+                type="button"
+                className="catering-contact-back-link"
+                onClick={() => setDetailsOpen(false)}
+                disabled={isProcessingPayment}
               >
                 Back
               </button>
-              {step < 3 ? (
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (step === 1 && !canProceedToStep2()) {
-                      setNotice("Please complete your basic information and venue address before continuing.");
-                      return;
-                    }
-
-                    setNotice("");
-                    setStep((current) => current + 1);
-                  }}
-                  className="customer-btn-primary"
-                >
-                  Next
-                </button>
-              ) : null}
-            </div>
-            )}
-            {notice && <p className="rounded-md bg-red-50 px-3 py-2 text-sm font-medium text-katana-red">{notice}</p>}
+            </form>
           </div>
-        </form>
-      </div>
-      {step === 2 && <div className="h-28 md:hidden" />}
-
-        {/* Floating collapsible summary card (step 2 only) */}
-        {step === 2 ? (
-          <div className="fixed bottom-4 left-4 right-4 z-40 md:right-6 md:left-auto md:w-96 md:bottom-6">
-          <div className="mx-auto md:ml-auto">
-              <div className={`rounded-xl border border-[#e8a978] bg-[#f7c8a7] shadow-lg transition-all ${summaryOpen ? "max-h-[36rem]" : "max-h-14 overflow-hidden summary-collapsed"}`}>
-              <div className="flex items-center justify-between gap-3 px-4 py-3">
-                <div className="min-w-0 flex-1">
-                  {!summaryOpen ? (
-                    <p className="text-sm font-semibold text-slate-900">Your package summary</p>
-                  ) : (
-                    <div className="space-y-1">
-                      <p className="text-sm font-semibold text-slate-900">Your package summary</p>
-                      <p className="text-xs whitespace-normal break-words text-slate-700 summary-text">{stationCount} station{stationCount > 1 ? "s" : ""} selected • {form.station_types.map((id) => selectedPackageByStation[id]?.description ?? selectedPackageByStation[id]?.name).filter(Boolean).join(", ") || "No option"}</p>
-                    </div>
-                  )}
-                </div>
-                <div className="flex shrink-0 items-center gap-3">
-                  {summaryOpen ? (
-                    <div className="text-right">
-                      <div className="text-sm font-bold text-slate-900">{money(paymentAmountTotal)}</div>
-                      <div className="text-xs text-slate-700">{isFullPayment ? "Pay now" : "Downpayment"}</div>
-                    </div>
-                  ) : null}
-                  <button type="button" onClick={() => setSummaryOpen((s) => !s)} className="rounded-full border border-[#d78d57] bg-[#fff2e8] px-3 py-2 text-sm font-semibold text-slate-900">
-                    {summaryOpen ? "Close" : "View"}
-                  </button>
-                </div>
-              </div>
-              {summaryOpen ? (
-                <div className="border-t border-[#e8a978] px-4 py-4">
-                  <div className="space-y-3 text-sm text-slate-800">
-                    <div className="grid grid-cols-[minmax(0,5rem)_minmax(0,1fr)] items-start gap-3 sm:grid-cols-[minmax(0,6rem)_minmax(0,1fr)]">
-                      <span className="text-left">Stations</span>
-                      <span className="break-words text-left font-semibold text-slate-900 sm:text-right">{form.station_types.map((id) => stations.find((s) => s.id === id)?.name).filter(Boolean).join(", ") || "-"}</span>
-                    </div>
-                    <div className="grid grid-cols-[minmax(0,5rem)_minmax(0,1fr)] items-start gap-3 sm:grid-cols-[minmax(0,6rem)_minmax(0,1fr)]">
-                      <span className="text-left">Option</span>
-                      <span className="break-words text-left font-semibold text-slate-900 sm:text-right">{form.station_types.map((id) => selectedPackageByStation[id]?.description ?? selectedPackageByStation[id]?.name).filter(Boolean).join(", ") || "-"}</span>
-                    </div>
-                    <div className="grid grid-cols-[minmax(0,5rem)_minmax(0,1fr)] items-center gap-3 sm:grid-cols-[minmax(0,6rem)_minmax(0,1fr)]">
-                      <span>Subtotal</span>
-                      <span className="text-left sm:text-right">{money(subtotalTotal)}</span>
-                    </div>
-                    <div className="grid grid-cols-[minmax(0,5rem)_minmax(0,1fr)] items-center gap-3 sm:grid-cols-[minmax(0,6rem)_minmax(0,1fr)]">
-                      <span>{taxLabel(systemSettings)}</span>
-                      <span className="text-left sm:text-right">{money(taxTotal)}</span>
-                    </div>
-                    <div className="grid grid-cols-[minmax(0,5rem)_minmax(0,1fr)] items-center gap-3 sm:grid-cols-[minmax(0,6rem)_minmax(0,1fr)] text-base font-bold text-slate-900">
-                      <span>Total</span>
-                      <span className="text-left sm:text-right">{money(totalPriceTotal)}</span>
-                    </div>
-                    <div className="grid gap-2">
-                      <div className="flex gap-2">
-                        <button type="button" onClick={() => setStep((c) => Math.max(1, c - 1))} className="customer-btn-secondary w-full">Back</button>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            if (!canProceedToStep3()) {
-                              setNotice("Please select a package for each chosen station.");
-                              return;
-                            }
-                            setNotice("");
-                            setStep(3);
-                            setSummaryOpen(false);
-                          }}
-                          className="customer-btn-primary w-full"
-                        >
-                          Next
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              ) : null}
-              </div>
-            </div>
-          </div>
-        ) : null}
+        </Dialog>
+        </div>
       </section>
     </main>
   );

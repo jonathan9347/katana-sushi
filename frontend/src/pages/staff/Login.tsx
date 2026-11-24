@@ -1,7 +1,45 @@
+import axios from "axios";
 import { FormEvent, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { api } from "../../lib/api";
+import {
+  ArrowRight,
+  Boxes,
+  CalendarCheck2,
+  Eye,
+  EyeOff,
+  LockKeyhole,
+  Mail,
+  Monitor
+} from "lucide-react";
 import { Button } from "../../components/ui/button";
+import { api } from "../../lib/api";
+import "./Login.css";
+
+type LoginFieldErrors = {
+  email?: string;
+  password?: string;
+};
+
+function loginErrorMessage(error: unknown) {
+  if (axios.isAxiosError<{ message?: unknown }>(error)) {
+    if (error.response?.status === 401) {
+      return "Invalid email or password. Please try again.";
+    }
+
+    const responseMessage = error.response?.data?.message;
+    if (typeof responseMessage === "string" && responseMessage.trim()) {
+      return responseMessage;
+    }
+
+    if (!error.response) {
+      return error.code === "ECONNABORTED" || error.code === "ETIMEDOUT"
+        ? "The sign-in request timed out. Please try again."
+        : "Unable to reach the sign-in server. Check your connection and try again.";
+    }
+  }
+
+  return "Unable to sign in. Please try again.";
+}
 
 function defaultRouteForRole(role: string) {
   const normalized = role.toLowerCase();
@@ -28,14 +66,24 @@ function defaultRouteForRole(role: string) {
   return "/staff/dashboard";
 }
 
+function validEmail(value: string) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim());
+}
+
 export default function Login() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [fieldErrors, setFieldErrors] = useState<LoginFieldErrors>({});
   const [message, setMessage] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [shake, setShake] = useState(false);
+  const [logoFailed, setLogoFailed] = useState(false);
   const navigate = useNavigate();
 
   async function loginWithCredentials(emailValue: string, passwordValue: string) {
     setMessage("");
+    setIsSubmitting(true);
 
     try {
       const response = await api.post<{ token: string; user: { id: string; email: string; role: string; name: string } }>(
@@ -46,83 +94,182 @@ export default function Login() {
       localStorage.setItem("katana_token", response.data.token);
       localStorage.setItem("katana_role", response.data.user.role.toLowerCase());
       localStorage.setItem("katana_user", JSON.stringify(response.data.user));
-      setMessage(`Logged in as ${response.data.user.name}`);
       navigate(defaultRouteForRole(response.data.user.role));
-    } catch {
-      setMessage("Invalid credentials. Please try again.");
+    } catch (error) {
+      setMessage(loginErrorMessage(error));
+    } finally {
+      setIsSubmitting(false);
     }
   }
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    const nextErrors: LoginFieldErrors = {};
+
+    if (!validEmail(email)) {
+      nextErrors.email = "Enter a valid email address.";
+    }
+    if (!password.trim()) {
+      nextErrors.password = "Enter your password.";
+    }
+
+    setFieldErrors(nextErrors);
+    setMessage("");
+
+    if (Object.keys(nextErrors).length > 0) {
+      setShake(true);
+      window.setTimeout(() => setShake(false), 450);
+      return;
+    }
+
     await loginWithCredentials(email, password);
   }
 
   return (
-    <main className="flex min-h-screen items-center justify-center bg-[radial-gradient(circle_at_top_left,_#fff7ed,_#f8fafc_55%,_#f1f5f9_100%)] px-6 py-10 text-slate-900">
-      <div className="w-full max-w-xl">
-        <div className="overflow-hidden rounded-[32px] border border-slate-200 bg-white shadow-[0_30px_80px_-30px_rgba(15,23,42,0.35)]">
-          <div className="bg-[linear-gradient(135deg,_#fff7ed_0%,_#fff_55%,_#fef2f2_100%)] px-8 py-8 sm:px-10 sm:py-10">
-            <div className="flex items-center gap-3">
-              <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-red-600 text-2xl text-white">🍣</div>
-              <div>
-                <p className="text-[11px] font-semibold uppercase tracking-[0.35em] text-red-600">Katana Sushi</p>
-                <p className="text-sm font-medium text-slate-600">Staff portal</p>
-              </div>
+    <main className="staff-login-page">
+      <section className="staff-login-brand" aria-label="Katana Sushi sign-in">
+        <div className="staff-login-sun" aria-hidden="true" />
+        <div className="staff-login-waves" aria-hidden="true" />
+        <div className="staff-login-brand-inner">
+          <div className="staff-login-brand-mark">
+            {logoFailed ? (
+              <span className="staff-login-logo-fallback" aria-hidden="true">K</span>
+            ) : (
+              <img
+                src="/images/katana-logo.jpg"
+                alt="Katana Sushi logo"
+                width="52"
+                height="52"
+                onError={() => setLogoFailed(true)}
+              />
+            )}
+            <div>
+              <p className="staff-login-brand-name">Katana Sushi</p>
+              <p className="staff-login-brand-subtitle">Team sign-in</p>
             </div>
-
-            <h1 className="mt-6 text-3xl font-black tracking-[0.02em] text-slate-950 sm:text-4xl" style={{ fontFamily: '"Iowan Old Style", "Palatino Linotype", "Book Antiqua", serif' }}>
-              Staff login
-            </h1>
-            <p className="mt-3 max-w-md text-sm leading-6 text-slate-600">
-              Enter your email and password to continue managing your daily service flow.
-            </p>
           </div>
 
-          <form onSubmit={handleSubmit} className="px-8 py-8 sm:px-10 sm:py-10">
-            <div className="space-y-5">
-              <label className="block text-sm text-slate-700">
-                <span className="mb-2 block font-medium text-slate-800">Email address</span>
-                <input
-                  className="w-full rounded-[20px] border border-slate-200 bg-slate-50 px-5 py-4 text-slate-950 outline-none transition focus:border-red-700 focus:ring-2 focus:ring-red-100"
-                  type="email"
-                  value={email}
-                  onChange={(event) => setEmail(event.target.value)}
-                />
-              </label>
-
-              <label className="block text-sm text-slate-700">
-                <span className="mb-2 block font-medium text-slate-800">Password</span>
-                <input
-                  className="w-full rounded-[20px] border border-slate-200 bg-slate-50 px-5 py-4 text-slate-950 outline-none transition focus:border-red-700 focus:ring-2 focus:ring-red-100"
-                  type="password"
-                  value={password}
-                  onChange={(event) => setPassword(event.target.value)}
-                />
-              </label>
-            </div>
-
-            <div className="mt-8 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-              <Button type="submit" className="w-full sm:w-auto" variant="default" size="md">
-                Sign in now
-              </Button>
-              <Link to="/" className="text-sm font-semibold text-slate-500 transition hover:text-slate-900">
-                Return to public site
-              </Link>
-            </div>
-
-            {message && (
-              <div className="mt-6 rounded-[20px] border border-red-200 bg-red-50 px-4 py-4 text-sm text-red-700">
-                {message}
-              </div>
-            )}
-
-            <p className="mt-8 text-sm text-slate-500">
-              Need help? Contact your manager to reset your login access.
+          <div className="staff-login-brand-copy">
+            <p className="staff-login-eyebrow">One team. Every service.</p>
+            <h1>Service starts here.</h1>
+            <p className="staff-login-description">
+              Your daily tools for keeping every Katana Sushi service running smoothly.
             </p>
-          </form>
+            <ul className="staff-login-features">
+              <li><CalendarCheck2 aria-hidden="true" /><span>Review and approve bookings</span></li>
+              <li><Boxes aria-hidden="true" /><span>Keep stock and expiry in check</span></li>
+              <li><Monitor aria-hidden="true" /><span>Run a seamless point of sale</span></li>
+            </ul>
+          </div>
+          <p className="staff-login-brand-footer">Thoughtful service, made together.</p>
         </div>
-      </div>
+      </section>
+
+      <section className="staff-login-content" aria-label="Sign in">
+        <div className={`staff-login-card${shake ? " staff-login-card-shake" : ""}`} data-testid="staff-login-card">
+          <div className="staff-login-card-heading">
+            <span className="staff-login-card-kicker">Welcome back</span>
+            <h2>Sign in to your account</h2>
+            <p>Use your account credentials to continue.</p>
+          </div>
+
+          <form onSubmit={handleSubmit} noValidate>
+            <div className="staff-login-fields">
+              <div className="staff-login-field">
+                <label htmlFor="staff-login-email">Email address</label>
+                <div className={`staff-login-input-wrap${fieldErrors.email ? " has-error" : ""}`}>
+                  <Mail aria-hidden="true" />
+                  <input
+                    id="staff-login-email"
+                    type="email"
+                    autoComplete="username"
+                    placeholder="you@katanasushi.com"
+                    value={email}
+                    aria-invalid={Boolean(fieldErrors.email)}
+                    aria-describedby={fieldErrors.email ? "staff-login-email-error" : undefined}
+                    onChange={(event) => {
+                      setEmail(event.target.value);
+                      setFieldErrors((current) => ({ ...current, email: undefined }));
+                      setMessage("");
+                    }}
+                  />
+                </div>
+                {fieldErrors.email && <p className="staff-login-field-error" id="staff-login-email-error">{fieldErrors.email}</p>}
+              </div>
+
+              <div className="staff-login-field">
+                <label htmlFor="staff-login-password">Password</label>
+                <div className={`staff-login-input-wrap${fieldErrors.password ? " has-error" : ""}`}>
+                  <LockKeyhole aria-hidden="true" />
+                  <input
+                    id="staff-login-password"
+                    type={showPassword ? "text" : "password"}
+                    autoComplete="current-password"
+                    placeholder="Enter your password"
+                    value={password}
+                    aria-invalid={Boolean(fieldErrors.password)}
+                    aria-describedby={fieldErrors.password ? "staff-login-password-error" : undefined}
+                    onChange={(event) => {
+                      setPassword(event.target.value);
+                      setFieldErrors((current) => ({ ...current, password: undefined }));
+                      setMessage("");
+                    }}
+                  />
+                  <button
+                    type="button"
+                    className="staff-login-password-toggle"
+                    aria-label={showPassword ? "Hide password" : "Show password"}
+                    onClick={() => setShowPassword((visible) => !visible)}
+                  >
+                    {showPassword ? <EyeOff aria-hidden="true" /> : <Eye aria-hidden="true" />}
+                  </button>
+                </div>
+                {fieldErrors.password && <p className="staff-login-field-error" id="staff-login-password-error">{fieldErrors.password}</p>}
+              </div>
+            </div>
+
+            <div className="staff-login-options">
+              <label className="staff-login-remember">
+                <input type="checkbox" />
+                <span>Keep me signed in</span>
+              </label>
+              <button
+                type="button"
+                className="staff-login-forgot"
+                onClick={() => setMessage("Contact your manager to reset your login access.")}
+              >
+                Forgot password?
+              </button>
+            </div>
+
+            {message && <p className="staff-login-server-message" role="alert">{message}</p>}
+
+            <Button
+              type="submit"
+              className="staff-login-submit"
+              size="md"
+              disabled={isSubmitting}
+            >
+              {isSubmitting ? (
+                <>
+                  <span className="staff-login-spinner" aria-hidden="true" />
+                  Signing in…
+                </>
+              ) : (
+                <>
+                  Sign in now
+                  <ArrowRight aria-hidden="true" />
+                </>
+              )}
+            </Button>
+          </form>
+
+          <div className="staff-login-card-footer">
+            <span>Need help?</span> Contact your manager to reset your login access.
+          </div>
+        </div>
+        <Link to="/" className="staff-login-public-link">Return to public site</Link>
+      </section>
     </main>
   );
 }
