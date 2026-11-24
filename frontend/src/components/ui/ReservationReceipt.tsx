@@ -166,6 +166,7 @@ function formatPaymentMethod(method?: string | null) {
   if (method === "bank_transfer") return "BPI";
   if (method === "gcash") return "GCash";
   if (method === "cash") return "Cash";
+  if (method === "paymongo") return "PayMongo (online)";
   return method ?? "N/A";
 }
 

@@ -1,13 +1,20 @@
 import { FormEvent, useEffect, useState } from "react";
 import { Link, useLocation, useSearchParams } from "react-router-dom";
-import { CalendarPlus, Check, CheckCircle2, Clock3, Search, XCircle } from "lucide-react";
+import { CalendarPlus, Check, CheckCircle2, Clock3, CreditCard, LoaderCircle, Search, XCircle } from "lucide-react";
 import BackToHome from "../../components/layout/BackToHome";
 import { api } from "../../lib/api";
 import { formatManilaDate, formatManilaDateTime, formatTime12, manilaDateKey, todayManilaDateKey } from "../../lib/dateTime";
 import { formatCateringEventType } from "../../lib/reservationDetails";
 import { formatCateringPackageSnapshots } from "../../lib/cateringPackageSnapshot";
 import { getApiErrorMessage } from "../../lib/errors";
-import { createPaymentIntent, verifyPayment } from "../../lib/payment";
+import {
+  createPaymentIntent,
+  formatPayMongoMethods,
+  paymentReturnUrl,
+  redirectToHostedCheckout,
+  usePaymentConfig,
+  verifyPayment
+} from "../../lib/payment";
 
 type StatusResult = {
   status: string;
@@ -56,7 +63,9 @@ export default function ReservationStatus() {
   });
   const [result, setResult] = useState<StatusResult | null>(null);
   const [message, setMessage] = useState("");
-  const paymentMethod = "cash" as const;
+  const paymentConfigQuery = usePaymentConfig();
+  const hostedCheckout = paymentConfigQuery.data?.hostedCheckout === true;
+  const paymentMethod = hostedCheckout ? "paymongo" as const : "cash" as const;
   const [isPaying, setIsPaying] = useState(false);
 
   const statusIcon =
@@ -144,6 +153,28 @@ export default function ReservationStatus() {
       const purpose = stage === "initial"
         ? result.payment_plan === "full_payment" ? "full_payment" : "downpayment"
         : "balance";
+
+      if (hostedCheckout) {
+        // PayMongo: the server sets the amount, reuses an open checkout, and records the payment itself.
+        const checkout = await createPaymentIntent({
+          amount,
+          paymentMethod: "paymongo",
+          bookingId: reference,
+          reservationType: "catering",
+          purpose,
+          successUrl: paymentReturnUrl()
+        });
+        if (checkout.alreadyPaid) {
+          await checkStatus();
+          return;
+        }
+        if (!checkout.success || !checkout.paymentUrl) {
+          throw new Error(checkout.message || "Unable to open the PayMongo checkout.");
+        }
+        redirectToHostedCheckout(checkout.paymentUrl);
+        return;
+      }
+
       const intent = await createPaymentIntent({
         amount,
         paymentMethod,
@@ -329,6 +360,18 @@ export default function ReservationStatus() {
         : []
     : [];
 
+  const todayKey = todayManilaDateKey();
+  const onlinePayment = hostedCheckout && result?.is_catering
+    ? result.status === "pending_approval" && result.downpayment_status !== "paid" && Number(result.initial_payment_due ?? 0) > 0
+      ? { stage: "initial" as const, amount: Number(result.initial_payment_due), label: result.payment_plan === "full_payment" ? "Pay package in full" : "Pay 50% downpayment" }
+      : ["approved", "confirmed"].includes(result.status) &&
+          Number(result.remaining_balance ?? 0) > 0 &&
+          Boolean(result.date) &&
+          manilaDateKey(result.date as string) > todayKey
+        ? { stage: "balance" as const, amount: Number(result.remaining_balance), label: "Pay remaining balance" }
+        : null
+    : null;
+
   const venueDetails = result && result.is_catering
     ? [
         result.venue_type ? ["Venue address", result.venue_type] : null,
@@ -453,6 +496,24 @@ export default function ReservationStatus() {
                         </span>
                       </div>
                     ))}
+                  </div>
+                )}
+
+                {onlinePayment && (
+                  <div className="mt-4 rounded-[14px] border border-[#ead9da] bg-white p-3">
+                    <button
+                      type="button"
+                      className="flex w-full items-center justify-center gap-2 rounded-[12px] bg-[#b3262f] px-4 py-3 text-[11px] font-extrabold uppercase tracking-[0.14em] text-white shadow-[0_10px_18px_rgba(179,38,47,0.18)] transition hover:bg-[#9f2029] disabled:cursor-wait disabled:opacity-70"
+                      onClick={() => void payCateringBalance(onlinePayment.stage)}
+                      disabled={isPaying}
+                    >
+                      {isPaying ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <CreditCard className="h-4 w-4" />}
+                      {isPaying ? "Opening checkout..." : `${onlinePayment.label} · ₱${onlinePayment.amount.toFixed(2)}`}
+                    </button>
+                    <p className="mt-2 text-center text-[11px] text-[#8d7a7d]">
+                      {formatPayMongoMethods(paymentConfigQuery.data?.methods ?? []) || "QR Ph, card, GCash, or Maya"} via PayMongo
+                      {paymentConfigQuery.data?.testMode ? " · test mode" : ""}
+                    </p>
                   </div>
                 )}
 

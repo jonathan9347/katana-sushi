@@ -1,6 +1,6 @@
 import { FormEvent, ReactNode, useEffect, useId, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
-import { Banknote, Check, CheckCircle2, Clock3, Copy, Landmark, LoaderCircle, Send, ShieldCheck, ShoppingBag, Smartphone, X } from "lucide-react";
+import { Banknote, Check, CheckCircle2, Clock3, Copy, CreditCard, Landmark, LoaderCircle, Send, ShieldCheck, ShoppingBag, Smartphone, X } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { Dialog } from "../../components/ui/dialog";
 import BackToHome from "../../components/layout/BackToHome";
@@ -9,8 +9,12 @@ import { getApiErrorMessage } from "../../lib/errors";
 import {
   clearCustomerPaymentAttempt,
   createPaymentIntent,
+  formatPayMongoMethods,
   getOrCreateCustomerPaymentAttempt,
+  paymentReturnUrl,
+  redirectToHostedCheckout,
   saveCustomerPaymentIntentReference,
+  usePaymentConfig,
   verifyPayment,
   type PaymentMethod
 } from "../../lib/payment";
@@ -379,6 +383,9 @@ export default function CateringReservation() {
   });
   const [notice, setNotice] = useState("");
   const [isProcessingPayment, setIsProcessingPayment] = useState(false);
+  const paymentConfigQuery = usePaymentConfig();
+  const hostedCheckout = paymentConfigQuery.data?.hostedCheckout === true;
+  const onlineMethodsLabel = formatPayMongoMethods(paymentConfigQuery.data?.methods ?? []);
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [cateringModal, setCateringModal] = useState<"inclusions" | "addons" | null>(null);
   const [success, setSuccess] = useState<SuccessState | null>(null);
@@ -487,6 +494,12 @@ export default function CateringReservation() {
   function setField(field: keyof typeof form, value: any) {
     setForm((current) => ({ ...current, [field]: value }));
   }
+
+  useEffect(() => {
+    if (!paymentConfigQuery.data) return;
+    const method: PaymentMethod = paymentConfigQuery.data.hostedCheckout ? "paymongo" : "cash";
+    setForm((current) => (current.payment_method === method ? current : { ...current, payment_method: method }));
+  }, [paymentConfigQuery.data]);
 
   function toggleAddon(stationId: string, selected: boolean) {
     const packageOption = packagesByStation[stationId]?.[0];
@@ -598,6 +611,72 @@ export default function CateringReservation() {
     return null;
   }
 
+  /**
+   * PayMongo flow: save the request first (awaiting payment), then send the
+   * customer to PayMongo's checkout. The server records the payment from
+   * PayMongo's webhook, so closing the tab after paying is safe.
+   */
+  async function submitAndPayWithPayMongo(
+    bookingPayload: Record<string, unknown>,
+    reservationReference: string,
+    paymentPurpose: "downpayment" | "full_payment"
+  ) {
+    if (paymentConfigQuery.data?.available === false) {
+      throw new Error("Online payment is temporarily unavailable. Please try again later or contact us.");
+    }
+
+    const booking = await api.post<{
+      reservation_id: string;
+      paid_amount: number;
+      remaining_balance: number;
+      package_total: number;
+      initial_payment_due: number;
+      payment_plan: "downpayment" | "full_payment";
+    }>("/api/catering/reservations", {
+      ...bookingPayload,
+      payment_method: "paymongo",
+      reservation_id: reservationReference
+    });
+    const reservationId = booking.data.reservation_id;
+
+    if (booking.data.initial_payment_due <= 0) {
+      clearCustomerPaymentAttempt("catering", reservationId);
+      setSuccess({
+        reservationId,
+        packageTotal: booking.data.package_total,
+        paidAmount: booking.data.paid_amount,
+        remainingBalance: booking.data.remaining_balance,
+        paymentPlan: booking.data.payment_plan
+      });
+      setDetailsOpen(false);
+      return;
+    }
+
+    try {
+      const intent = await createPaymentIntent({
+        amount: booking.data.initial_payment_due,
+        paymentMethod: "paymongo",
+        bookingId: reservationId,
+        reservationType: "catering",
+        purpose: paymentPurpose,
+        successUrl: paymentReturnUrl()
+      });
+      if (intent.alreadyPaid) {
+        window.location.assign(`/payment/return?reference=${encodeURIComponent(intent.referenceId)}`);
+        return;
+      }
+      if (!intent.success || !intent.paymentUrl) {
+        throw new Error(intent.message || "Unable to open the PayMongo checkout.");
+      }
+      saveCustomerPaymentIntentReference("catering", reservationId, intent.referenceId);
+      redirectToHostedCheckout(intent.paymentUrl);
+    } catch (error) {
+      throw new Error(
+        `Your request ${reservationId} is saved, but the payment page could not open: ${getApiErrorMessage(error, "please try again")}. You can pay from the booking status page.`
+      );
+    }
+  }
+
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (paymentInFlightRef.current) {
@@ -651,6 +730,12 @@ export default function CateringReservation() {
         form.payment_plan
       );
       const paymentPurpose = form.payment_plan === "full_payment" ? "full_payment" : "downpayment";
+
+      if (form.payment_method === "paymongo") {
+        await submitAndPayWithPayMongo(bookingPayload, attempt.bookingId, paymentPurpose);
+        return;
+      }
+
       const intent = await createPaymentIntent({
         amount: paymentAmountTotal,
         paymentMethod: form.payment_method,
@@ -1159,7 +1244,23 @@ export default function CateringReservation() {
                   )}
                 </section>
 
-                {paymentAmountTotal > 0 && (
+                {paymentAmountTotal > 0 && hostedCheckout && (
+                  <section className="catering-booking-payment-method">
+                    <h3>Payment method</h3>
+                    <div className="mt-2">
+                      <div className="catering-booking-online-option" aria-label="Pay online with PayMongo">
+                        <CreditCard className="h-4 w-4 shrink-0" aria-hidden="true" />
+                        <span>
+                          <strong>Pay online</strong>
+                          <small>{onlineMethodsLabel || "QR Ph, card, GCash, or Maya"} via PayMongo</small>
+                        </span>
+                        {paymentConfigQuery.data?.testMode && <em>Test mode</em>}
+                      </div>
+                    </div>
+                  </section>
+                )}
+
+                {paymentAmountTotal > 0 && !hostedCheckout && (
                   <section className="catering-booking-payment-method">
                     <h3>Payment method</h3>
                     <div className="mt-2 grid grid-cols-3 gap-2">
@@ -1451,7 +1552,7 @@ export default function CateringReservation() {
                   <span className="catering-contact-summary-total">Total {money(totalPriceTotal)}</span>
                 </div>
                 <div className="catering-contact-summary-row">
-                  <span>50% of package total required before submission</span>
+                  <span>{form.payment_plan === "full_payment" ? "Full package payment" : "50% of package total"} {hostedCheckout ? "paid now on PayMongo" : "required before submission"}</span>
                   <span className="catering-contact-summary-amount">{money(paymentAmountTotal)}</span>
                 </div>
                 {!isZeroQuoteOnlyReservation && (
@@ -1468,11 +1569,11 @@ export default function CateringReservation() {
                 disabled={isProcessingPayment}
               >
                 {isProcessingPayment
-                  ? "Processing payment..."
+                  ? hostedCheckout ? "Opening secure checkout..." : "Processing payment..."
                   : isZeroQuoteOnlyReservation
                     ? "Select priced packages"
                     : paymentAmountTotal > 0
-                      ? "Pay and submit request"
+                      ? hostedCheckout ? `Continue to payment (${money(paymentAmountTotal)})` : "Pay and submit request"
                       : "Choose a payment option"}
               </button>
               <button

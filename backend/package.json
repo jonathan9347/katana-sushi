@@ -16,7 +16,8 @@
     "db:ready": "npm run prisma:generate && npm run db:migrate && npm run build",
     "prisma:seed": "npm run db:seed",
     "prisma:seed:prod": "prisma db seed --schema=prisma/schema.prisma",
-    "inventory:reconcile": "ts-node-dev --transpile-only --exit-child src/scripts/reconcile-inventory.ts"
+    "inventory:reconcile": "ts-node-dev --transpile-only --exit-child src/scripts/reconcile-inventory.ts",
+    "paymongo:webhook": "ts-node-dev --transpile-only --exit-child src/scripts/paymongo-webhook.ts"
   },
   "prisma": {
     "seed": "ts-node-dev --transpile-only --exit-child prisma/seed.ts"

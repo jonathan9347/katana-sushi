@@ -123,7 +123,38 @@ class PaymentIntentStore {
     return this.fromDatabase(persisted);
   }
 
-  async markPaid(referenceId: string, transactionId: string, paidAt: Date) {
+  async findOpenForBooking(bookingId: string, purpose: string, paymentMethod: string) {
+    const persisted = await prisma.paymentIntent.findMany({
+      where: {
+        booking_id: bookingId,
+        purpose,
+        payment_method: paymentMethod,
+        status: { in: ["created", "pending"] }
+      }
+    });
+    return persisted.map((intent) => this.fromDatabase(intent));
+  }
+
+  async findByGatewayReference(gatewayReference: string) {
+    const persisted = await prisma.paymentIntent.findFirst({
+      where: { gateway_reference: gatewayReference },
+      orderBy: { created_at: "desc" }
+    });
+    return persisted ? this.fromDatabase(persisted) : null;
+  }
+
+  /**
+   * Marks an intent paid. Hosted-checkout payments are confirmed by the provider,
+   * so they may also settle an intent we had already expired locally: the money
+   * was captured and must be recorded. Those keep the checkout session id as the
+   * gateway reference and release their idempotency key so a newer attempt keeps it.
+   */
+  async markPaid(
+    referenceId: string,
+    transactionId: string,
+    paidAt: Date,
+    options: { hostedCheckout?: boolean } = {}
+  ) {
     const intent = await this.get(referenceId);
 
     if (!intent) {
@@ -131,14 +162,16 @@ class PaymentIntentStore {
     }
 
     if (intent.status !== "succeeded") {
+      const reopening = Boolean(options.hostedCheckout) && ["expired", "failed"].includes(intent.status);
       await prisma.paymentIntent.updateMany({
         where: {
           reference_id: referenceId,
-          status: { in: ["created", "pending"] }
+          status: { in: options.hostedCheckout ? ["created", "pending", "expired", "failed"] : ["created", "pending"] }
         },
         data: {
           status: "succeeded",
-          gateway_reference: transactionId,
+          ...(options.hostedCheckout ? {} : { gateway_reference: transactionId }),
+          ...(reopening ? { idempotency_key: null } : {}),
           transaction_id: transactionId,
           paid_at: paidAt
         }

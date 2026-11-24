@@ -1,21 +1,37 @@
+export type GatewayPaymentMethod = "cash" | "gcash" | "bank_transfer" | "paymongo";
+
 export interface PaymentGateway {
   readonly gatewayName: string;
+  /** True when the customer completes payment on a page hosted by the provider (redirect + webhook). */
+  readonly isHostedCheckout: boolean;
+  /** True when no real money moves (fake gateway or provider test keys). */
+  readonly isTestMode: boolean;
 
   createPaymentIntent(params: CreatePaymentIntentParams): Promise<PaymentIntentResult>;
   verifyPayment(params: VerifyPaymentParams): Promise<VerifyPaymentResult>;
   processRefund(params: RefundParams): Promise<RefundResult>;
+  /** Returns the hosted checkout URL again while that checkout can still be paid. */
+  resumePaymentIntent?(gatewayReference: string): Promise<{ paymentUrl: string } | null>;
+  /** Stops a hosted checkout from accepting payment. */
+  cancelPaymentIntent?(gatewayReference: string): Promise<void>;
 }
 
 export interface CreatePaymentIntentParams {
   amount: number;
-  paymentMethod: "cash" | "gcash" | "bank_transfer";
+  paymentMethod: GatewayPaymentMethod;
   bookingId: string;
   reservationType: "dine_in" | "catering" | "takeout";
   purpose?: "downpayment" | "full_payment" | "balance";
   idempotencyKey?: string;
   description?: string;
+  /** Hosted checkout: where the provider sends the customer after paying. */
   successUrl?: string;
+  /** Hosted checkout: where the provider sends the customer after cancelling. */
   failureUrl?: string;
+  /** Hosted checkout: our reference, generated before the provider session exists. */
+  referenceId?: string;
+  lineItemName?: string;
+  customer?: { name?: string; email?: string; phone?: string };
 }
 
 export interface PaymentIntentResult {
@@ -23,22 +39,30 @@ export interface PaymentIntentResult {
   qrCode?: string;
   paymentUrl?: string;
   referenceId: string;
+  /** Provider-side identifier (for PayMongo, the checkout session id). */
+  gatewayReference?: string;
   instructions?: string;
   expiresAt?: Date;
+  alreadyPaid?: boolean;
+  message?: string;
+  httpStatus?: number;
 }
 
 export interface VerifyPaymentParams {
   referenceId: string;
   bookingId: string;
+  gatewayReference?: string;
   gatewayData?: any;
 }
 
 export interface VerifyPaymentResult {
   success: boolean;
-  status: "paid" | "pending" | "failed" | "refunded";
+  status: "paid" | "pending" | "failed" | "refunded" | "expired";
   amount: number;
   transactionId: string;
   paidAt?: Date;
+  /** Hosted checkout: the channel the customer used, e.g. gcash, card, qrph, paymaya. */
+  paymentChannel?: string;
   message?: string;
 }
 

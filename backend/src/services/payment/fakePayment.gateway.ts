@@ -11,6 +11,8 @@ import { FakePaymentService } from "../fakePayment.service";
 
 export class FakePaymentGateway implements PaymentGateway {
   readonly gatewayName = "fake_gateway";
+  readonly isHostedCheckout = false;
+  readonly isTestMode = true;
   private readonly fakePaymentService = new FakePaymentService();
 
   private get configuredDelayMs() {

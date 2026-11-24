@@ -41,6 +41,7 @@ function renderActions(actions: ReservationDetailsModalProps["actions"]) {
 function methodLabel(method: string) {
   if (method === "bank_transfer") return "BPI";
   if (method === "gcash") return "GCash";
+  if (method === "paymongo") return "PayMongo (online)";
   return "Cash";
 }
 

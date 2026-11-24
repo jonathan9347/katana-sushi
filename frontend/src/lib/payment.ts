@@ -1,6 +1,7 @@
+import { useQuery } from "@tanstack/react-query";
 import { api } from "./api";
 
-export type PaymentMethod = "cash" | "gcash" | "bank_transfer";
+export type PaymentMethod = "cash" | "gcash" | "bank_transfer" | "paymongo";
 export type ReservationType = "dine_in" | "catering" | "takeout";
 
 export type PaymentIntentRequest = {
@@ -22,7 +23,17 @@ export type PaymentIntentResponse = {
   referenceId: string;
   instructions?: string;
   expiresAt?: string;
+  alreadyPaid?: boolean;
   message?: string;
+};
+
+export type PaymentConfig = {
+  gateway: string;
+  /** True when customers pay on PayMongo's hosted checkout page. */
+  hostedCheckout: boolean;
+  testMode: boolean;
+  available: boolean;
+  methods: string[];
 };
 
 export type PaymentVerifyRequest = {
@@ -33,7 +44,7 @@ export type PaymentVerifyRequest = {
 
 export type PaymentVerificationResponse = {
   success: boolean;
-  status: "paid" | "pending" | "failed" | "refunded";
+  status: "paid" | "pending" | "failed" | "refunded" | "expired";
   amount: number;
   transactionId: string;
   paidAt?: string;
@@ -164,6 +175,56 @@ export async function createPaymentIntent(params: PaymentIntentRequest) {
 export async function verifyPayment(params: PaymentVerifyRequest) {
   const response = await api.post<PaymentVerificationResponse>("/api/payments/verify", params);
   return response.data;
+}
+
+export async function getPaymentConfig() {
+  const response = await api.get<PaymentConfig>("/api/payments/config");
+  return response.data;
+}
+
+export function usePaymentConfig() {
+  return useQuery({
+    queryKey: ["payment-config"],
+    queryFn: getPaymentConfig,
+    staleTime: 5 * 60 * 1000,
+    retry: 1
+  });
+}
+
+/** Where PayMongo sends the customer back after paying or cancelling. */
+export function paymentReturnUrl() {
+  return `${window.location.origin}/payment/return`;
+}
+
+/** Leaves the site for the PayMongo checkout page. */
+export function redirectToHostedCheckout(paymentUrl: string) {
+  const url = new URL(paymentUrl);
+  if (url.protocol !== "https:" || !url.hostname.endsWith("paymongo.com")) {
+    throw new Error("Unexpected payment page. Please try again.");
+  }
+  window.location.assign(url.toString());
+}
+
+export const PAYMONGO_METHOD_LABELS: Record<string, string> = {
+  qrph: "QR Ph",
+  card: "Card",
+  gcash: "GCash",
+  paymaya: "Maya",
+  grab_pay: "GrabPay",
+  billease: "BillEase",
+  dob: "Online banking"
+};
+
+export function formatPayMongoMethods(methods: string[]) {
+  return methods.map((method) => PAYMONGO_METHOD_LABELS[method] ?? method).join(", ");
+}
+
+export function formatPaymentMethodLabel(method?: string | null) {
+  if (method === "bank_transfer") return "BPI";
+  if (method === "gcash") return "GCash";
+  if (method === "cash") return "Cash";
+  if (method === "paymongo") return "PayMongo (online)";
+  return method ?? "N/A";
 }
 
 export async function getPaymentStatus(referenceId: string) {

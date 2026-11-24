@@ -23,8 +23,11 @@ Backend:
 - `JWT_SECRET`
 - `JWT_EXPIRES_IN`
 - `FRONTEND_URL`
-- `PAYMENT_GATEWAY`
-- `USE_REAL_GATEWAY`
+- `PAYMENT_GATEWAY` (`fake` or `paymongo`)
+- `PAYMONGO_SECRET_KEY`
+- `PAYMONGO_WEBHOOK_SECRET`
+- `PAYMONGO_PAYMENT_METHODS` (optional)
+- `PAYMONGO_CHECKOUT_TTL_MINUTES` (optional)
 - `FAKE_PAYMENT_MODE`
 - `FAKE_PAYMENT_DELAY_MS`
 - `REDIS_URL`
@@ -62,7 +65,7 @@ not use a built-in fallback secret.
 ## Payments and Authentication
 
 - The fake payment gateway is for testing only. In production, create-intent, status, and verify requests return `503` while the fake gateway is active.
-- Do not enable customer payments in production until a real payment gateway is implemented and configured.
+- Customer payments use PayMongo when `PAYMENT_GATEWAY=paymongo`. See "PayMongo payments" in `DEPLOY.md` for the flow, webhook setup, and going live.
 - If staff login reports that authentication is unavailable, configure `JWT_SECRET` in the backend environment. Never use a shared or hard-coded JWT secret.
 
 ## Common Errors
@@ -124,4 +127,3 @@ If it fails:
 
 - Decide whether reservation time slots need a gap between bookings.
 - Correct inconsistent recipe/material unit mappings before relying on catering ingredient locks; do not guess unit conversions.
-- Replace the fake gateway with a real provider before enabling customer payments in production.

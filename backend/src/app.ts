@@ -13,7 +13,10 @@ import { z } from "zod";
 import { NotificationService } from "./services/notification.service";
 import { emailService } from "./services/email.service";
 import { generateTransactionNumber } from "./utils/transactionNumber";
+import { jsonBodyParser } from "./lib/jsonBody";
 import paymentRoutes from "./routes/payment.routes";
+import { PaymentGatewayFactory } from "./services/payment/paymentGateway.factory";
+import { registerPaymentHooks, PayableBookingCheck, PaymentPurpose } from "./services/payment/paymentHooks";
 import diningPosRoutes from "./routes/diningPos.routes";
 import { seedDemoData } from "./services/demoSeed.service";
 import { assertDevelopmentDatabase } from "./lib/seedSafety";
@@ -750,7 +753,7 @@ app.use(
 );
 app.use(morgan("dev"));
 app.use(cookieParser());
-app.use(express.json());
+app.use(jsonBodyParser());
 app.use(
   "/images",
   express.static(path.resolve(__dirname, "..", "..", "frontend", "public", "images"), {
@@ -773,6 +776,16 @@ app.use(
     }
   })
 );
+// Retired: this public route marked a dine-in reservation paid without any
+// verified payment, so anyone with a booking ID could clear its balance.
+// Staff record dine-in payments through /api/staff/reservations/:id/record-payment.
+// Registered before the database check because it never touches the database.
+app.post("/api/reservations/:bookingId/pay-remaining", (_req, res) => {
+  return res.status(410).json({
+    message: "Online payment is not available for dine-in reservations. Please settle the balance at the restaurant."
+  });
+});
+
 app.use("/api", (req, res, next) => {
   const database = getDatabaseStatus();
 
@@ -901,11 +914,18 @@ const cateringReservationBodySchema = z.object({
   package_quantities: z.record(z.string(), z.coerce.number().positive()).optional(),
   sashimi_quantity_kg: z.number().int().positive().optional(),
   payment_plan: z.enum(["downpayment", "full_payment"]),
-  payment_method: z.enum(["cash", "gcash", "bank_transfer"]),
-  payment_transaction_id: z.string().trim().min(1),
+  payment_method: z.enum(["cash", "gcash", "bank_transfer", "paymongo"]),
+  payment_transaction_id: z.string().trim().min(1).optional(),
   reservation_id: z.string().optional(),
   special_requests: z.string().optional()
 }).superRefine((data, ctx) => {
+  if (data.payment_method !== "paymongo" && !data.payment_transaction_id) {
+    ctx.addIssue({
+      path: ["payment_transaction_id"],
+      code: z.ZodIssueCode.custom,
+      message: "A verified payment is required before submitting this booking."
+    });
+  }
   if (data.event_type === "Others" && !data.event_type_other) {
     ctx.addIssue({
       path: ["event_type_other"],
@@ -3290,16 +3310,27 @@ app.post("/api/catering/reservations", async (req, res, next) => {
       isFullPayment ? "full_payment" : "downpayment"
     );
 
+    const awaitsHostedPayment = body.payment_method === "paymongo" && !body.payment_transaction_id;
+    if (body.payment_method === "paymongo" && !PaymentGatewayFactory.getGateway().isHostedCheckout) {
+      return res.status(400).json({ message: "Online payment is not enabled. Choose another payment method." });
+    }
+    if (awaitsHostedPayment && expectedInitialPayment <= 0) {
+      return res.status(400).json({ message: "This catering selection has no initial payment to collect online." });
+    }
+
     const reservation_id = body.reservation_id ?? (await generateReadableId("CAT", body.event_date, "reservation_id"));
-    const verifiedPayment = await getVerifiedDownpayment(
-      body.payment_transaction_id,
-      reservation_id,
-      "catering",
-      body.payment_method,
-      expectedInitialPayment,
-      isFullPayment ? "full_payment" : "downpayment"
-    );
-    const paidAmount = expectedInitialPayment;
+    // PayMongo bookings are saved first and paid on PayMongo's page; the webhook records the payment.
+    const verifiedPayment = awaitsHostedPayment
+      ? null
+      : await getVerifiedDownpayment(
+        body.payment_transaction_id,
+        reservation_id,
+        "catering",
+        body.payment_method,
+        expectedInitialPayment,
+        isFullPayment ? "full_payment" : "downpayment"
+      );
+    const paidAmount = verifiedPayment ? expectedInitialPayment : 0;
     const remaining_balance = Number((total_price - paidAmount).toFixed(2));
     if (body.reservation_id) {
       const existing = await prisma.cateringReservation.findUnique({
@@ -3322,7 +3353,7 @@ app.post("/api/catering/reservations", async (req, res, next) => {
         if (!sameRequest) {
           return res.status(409).json({ message: "This reservation reference is already associated with a different request." });
         }
-        if (existing.downpayment_status !== "paid") {
+        if (existing.downpayment_status !== "paid" && verifiedPayment) {
           const paidExisting = await prisma.$transaction(async (tx) => {
             await lockCateringReservationForUpdate(tx, existing.id);
             const current = await tx.cateringReservation.findUnique({ where: { id: existing.id } });
@@ -3516,7 +3547,7 @@ app.post("/api/catering/reservations", async (req, res, next) => {
       return created;
     });
 
-    void emailService.sendCateringConfirmation({
+    if (verifiedPayment) void emailService.sendCateringConfirmation({
       bookingId: reservation.reservation_id ?? inquiry_id,
       email: reservation.customer_email ?? body.customer_email,
       name: reservation.customer_name ?? body.customer_name,
@@ -3538,10 +3569,236 @@ app.post("/api/catering/reservations", async (req, res, next) => {
       package_total: total_price,
       initial_payment_due: verifiedPayment ? 0 : expectedInitialPayment,
       payment_plan: reservation.payment_plan,
-      message: "Catering request received. Complete the selected package payment before staff approval."
+      message: verifiedPayment
+        ? "Catering request received. Staff will review it soon."
+        : "Catering request received. Complete the selected package payment before staff approval."
     });
   } catch (error) {
     return next(error);
+  }
+});
+
+/**
+ * Records the initial (50% or full) package payment on a pending catering request.
+ * Idempotent: a transaction already claimed by this booking returns the booking unchanged.
+ */
+async function applyCateringInitialPayment(reservationReference: string, transactionId: string, paymentMethod: string) {
+  const existingReservation = await prisma.cateringReservation.findUnique({
+    where: { reservation_id: reservationReference }
+  });
+  if (!existingReservation) {
+    throw new InventoryError("Reservation not found.", "BOOKING_NOT_FOUND", 404);
+  }
+
+  const isFullPayment = existingReservation.payment_plan === "full_payment";
+  const packageTotal = Number(existingReservation.package_total || existingReservation.total_price);
+  const expectedAmount = isFullPayment ? packageTotal : roundMoney(packageTotal * 0.5);
+  const verifiedPayment = await getVerifiedDownpayment(
+    transactionId,
+    reservationReference,
+    "catering",
+    paymentMethod,
+    expectedAmount,
+    isFullPayment ? "full_payment" : "downpayment"
+  );
+
+  let alreadyRecorded = false;
+  const reservation = await prisma.$transaction(async (tx) => {
+    await lockCateringReservationForUpdate(tx, existingReservation.id);
+    const current = await tx.cateringReservation.findUnique({ where: { id: existingReservation.id } });
+    if (!current) {
+      throw new InventoryError("Catering booking not found.", "BOOKING_NOT_FOUND", 404);
+    }
+    const claim = await tx.paymentTransactionClaim.findUnique({
+      where: { transaction_id: verifiedPayment.transactionId }
+    });
+    if (claim) {
+      const claimedPayment = await tx.reservationPayment.findFirst({
+        where: {
+          catering_reservation_id: current.id,
+          reference_number: verifiedPayment.transactionId
+        },
+        select: { payment_stage: true }
+      });
+      if (
+        claim.catering_reservation_id !== current.id ||
+        claimedPayment?.payment_stage !== (isFullPayment ? "full_payment" : "downpayment")
+      ) {
+        throw new InventoryError("This payment was already used for another booking.", "PAYMENT_ALREADY_CLAIMED", 409);
+      }
+      alreadyRecorded = true;
+      return tx.cateringReservation.findUnique({
+        where: { id: current.id },
+        include: { payments: { orderBy: { received_at: "asc" } } }
+      });
+    }
+    if (current.status !== "pending_approval") {
+      throw new InventoryError("Initial package payment is available only for a pending catering request.", "BOOKING_NOT_PENDING", 409);
+    }
+    if (current.downpayment_status === "paid") {
+      throw new InventoryError("The initial package payment has already been recorded.", "PAYMENT_ALREADY_RECORDED", 409);
+    }
+
+    const remaining = roundMoney(Math.max(Number(current.total_price) - expectedAmount, 0));
+    const paidAt = verifiedPayment.paidAt ?? new Date();
+    await recordVerifiedDownpayment(tx, {
+      transactionId: verifiedPayment.transactionId,
+      cateringReservationId: current.id,
+      amount: expectedAmount,
+      method: paymentMethod,
+      paidAt,
+      paymentStage: isFullPayment ? "full_payment" : "downpayment"
+    });
+    const updated = await tx.cateringReservation.update({
+      where: { id: current.id },
+      data: {
+        downpayment_amount: expectedAmount,
+        downpayment_status: "paid",
+        downpayment_method: paymentMethod,
+        downpayment_date: paidAt,
+        downpayment_transaction_id: verifiedPayment.transactionId,
+        deposit_paid: expectedAmount,
+        remaining_balance: remaining,
+        full_payment_paid: isFullPayment && remaining === 0,
+        full_payment_date: isFullPayment && remaining === 0 ? paidAt : null,
+        final_payment_status: remaining === 0 ? "paid" : "pending",
+        final_payment_method: remaining === 0 ? paymentMethod : null,
+        final_payment_date: remaining === 0 ? paidAt : null
+      },
+      include: { payments: { orderBy: { received_at: "asc" } } }
+    });
+    await addReservationActivity(tx, {
+      cateringReservationId: current.id,
+      eventType: "initial_package_payment_recorded",
+      fromStatus: current.status,
+      toStatus: updated.status,
+      actorType: "customer",
+      actorName: current.customer_name,
+      details: { amount: expectedAmount, payment_method: paymentMethod, transaction_id: verifiedPayment.transactionId }
+    });
+    return updated;
+  });
+
+  return { reservation, alreadyRecorded };
+}
+
+async function resolveCateringPayableBooking(
+  reservationReference: string,
+  purpose: PaymentPurpose
+): Promise<PayableBookingCheck> {
+  const reservation = await prisma.cateringReservation.findUnique({
+    where: { reservation_id: reservationReference }
+  });
+  if (!reservation) {
+    return { ok: false, status: 404, message: "Catering booking not found." };
+  }
+
+  const customer = {
+    name: reservation.customer_name ?? undefined,
+    email: reservation.customer_email ?? undefined,
+    phone: reservation.customer_phone ?? undefined
+  };
+
+  if (purpose === "balance") {
+    const eventDate = reservation.event_date ?? reservation.confirmed_date;
+    if (!eventDate || manilaDateKey(eventDate) <= manilaDateKey(new Date())) {
+      return { ok: false, status: 400, message: "Catering balances must be paid before the event date." };
+    }
+    if (!["confirmed", "approved"].includes(reservation.status ?? "")) {
+      return { ok: false, status: 409, message: "The catering request must be approved before paying its balance." };
+    }
+    const remainingBalance = roundMoney(Number(reservation.remaining_balance));
+    if (remainingBalance <= 0) {
+      return { ok: false, status: 400, message: "No remaining balance is due." };
+    }
+    return {
+      ok: true,
+      amount: remainingBalance,
+      lineItemName: "Catering remaining balance",
+      description: `Katana Sushi catering ${reservationReference} - remaining balance`,
+      customer
+    };
+  }
+
+  const isFullPayment = reservation.payment_plan === "full_payment";
+  if (purpose !== (isFullPayment ? "full_payment" : "downpayment")) {
+    return { ok: false, status: 400, message: "This payment does not match the booking's payment plan." };
+  }
+  if (reservation.status !== "pending_approval") {
+    return { ok: false, status: 409, message: "Initial package payment is available only for a pending catering request." };
+  }
+  if (reservation.downpayment_status === "paid") {
+    return { ok: false, status: 409, message: "The initial package payment has already been recorded." };
+  }
+
+  const packageTotal = Number(reservation.package_total || reservation.total_price);
+  const amount = isFullPayment ? packageTotal : roundMoney(packageTotal * 0.5);
+  if (!(amount > 0)) {
+    return { ok: false, status: 400, message: "There is no initial payment due for this booking." };
+  }
+  return {
+    ok: true,
+    amount,
+    lineItemName: isFullPayment ? "Catering package (paid in full)" : "Catering package downpayment (50%)",
+    description: `Katana Sushi catering ${reservationReference} - ${isFullPayment ? "full payment" : "50% downpayment"}`,
+    customer
+  };
+}
+
+registerPaymentHooks({
+  resolvePayableBooking: async ({ bookingId, reservationType, purpose }) => {
+    if (reservationType === "catering") {
+      return resolveCateringPayableBooking(bookingId, purpose);
+    }
+    return { ok: false, status: 400, message: "Online payment is available for catering bookings only." };
+  },
+  fulfillPayment: async (intent) => {
+    if (intent.reservationType !== "catering") {
+      throw new Error(`No booking handler for ${intent.reservationType} payments.`);
+    }
+
+    if (intent.purpose === "balance") {
+      await recordVerifiedCateringBalancePayment(intent.bookingId, intent.transactionId, intent.paymentMethod);
+      return;
+    }
+
+    const { reservation, alreadyRecorded } = await applyCateringInitialPayment(
+      intent.bookingId,
+      intent.transactionId,
+      intent.paymentMethod
+    );
+    if (alreadyRecorded || !reservation) {
+      return;
+    }
+
+    // PayMongo bookings skip the email at submission; send it once the payment is in.
+    const details = await prisma.cateringReservation.findUnique({
+      where: { id: reservation.id },
+      include: { package: true, inquiry: true }
+    });
+    if (details?.customer_email) {
+      void emailService.sendCateringConfirmation({
+        bookingId: details.reservation_id ?? intent.bookingId,
+        email: details.customer_email,
+        name: details.customer_name ?? "Customer",
+        date: details.event_date ?? new Date(),
+        partySize: details.headcount ?? undefined,
+        packageName: details.package?.name ?? "Catering package",
+        venueAddress: details.inquiry?.venue_type ?? "",
+        total: details.total_price,
+        downpayment: Number(details.downpayment_amount),
+        remaining: Number(details.remaining_balance),
+        status: details.status
+      }).catch((error) => console.error("Failed to send catering confirmation email:", error));
+    }
+  },
+  isAllowedReturnUrl: (url) => {
+    try {
+      const origin = new URL(url).origin;
+      return origin !== "null" && isLocalFrontendOrigin(origin);
+    } catch {
+      return false;
+    }
   }
 });
 
@@ -3549,101 +3806,13 @@ app.post("/api/catering/reservations/:reservationId/record-initial-payment", asy
   try {
     const body = z.object({
       payment_transaction_id: z.string().min(1),
-      payment_method: z.enum(["cash", "gcash", "bank_transfer"])
+      payment_method: z.enum(["cash", "gcash", "bank_transfer", "paymongo"])
     }).parse(req.body);
-    const existingReservation = await prisma.cateringReservation.findUnique({
-      where: { reservation_id: req.params.reservationId }
-    });
-    if (!existingReservation) {
-      return res.status(404).json({ message: "Reservation not found." });
-    }
-
-    const isFullPayment = existingReservation.payment_plan === "full_payment";
-    const packageTotal = Number(existingReservation.package_total || existingReservation.total_price);
-    const expectedAmount = isFullPayment ? packageTotal : roundMoney(packageTotal * 0.5);
-    const verifiedPayment = await getVerifiedDownpayment(
-      body.payment_transaction_id,
+    const { reservation } = await applyCateringInitialPayment(
       req.params.reservationId,
-      "catering",
-      body.payment_method,
-      expectedAmount,
-      isFullPayment ? "full_payment" : "downpayment"
+      body.payment_transaction_id,
+      body.payment_method
     );
-
-    const reservation = await prisma.$transaction(async (tx) => {
-      await lockCateringReservationForUpdate(tx, existingReservation.id);
-      const current = await tx.cateringReservation.findUnique({ where: { id: existingReservation.id } });
-      if (!current) {
-        throw new InventoryError("Catering booking not found.", "BOOKING_NOT_FOUND", 404);
-      }
-      const claim = await tx.paymentTransactionClaim.findUnique({
-        where: { transaction_id: verifiedPayment.transactionId }
-      });
-      if (claim) {
-        const claimedPayment = await tx.reservationPayment.findFirst({
-          where: {
-            catering_reservation_id: current.id,
-            reference_number: verifiedPayment.transactionId
-          },
-          select: { payment_stage: true }
-        });
-        if (
-          claim.catering_reservation_id !== current.id ||
-          claimedPayment?.payment_stage !== (isFullPayment ? "full_payment" : "downpayment")
-        ) {
-          throw new InventoryError("This payment was already used for another booking.", "PAYMENT_ALREADY_CLAIMED", 409);
-        }
-        return tx.cateringReservation.findUnique({
-          where: { id: current.id },
-          include: { payments: { orderBy: { received_at: "asc" } } }
-        });
-      }
-      if (current.status !== "pending_approval") {
-        throw new InventoryError("Initial package payment is available only for a pending catering request.", "BOOKING_NOT_PENDING", 409);
-      }
-      if (current.downpayment_status === "paid") {
-        throw new InventoryError("The initial package payment has already been recorded.", "PAYMENT_ALREADY_RECORDED", 409);
-      }
-
-      const remaining = roundMoney(Math.max(Number(current.total_price) - expectedAmount, 0));
-      const paidAt = verifiedPayment.paidAt ?? new Date();
-      await recordVerifiedDownpayment(tx, {
-        transactionId: verifiedPayment.transactionId,
-        cateringReservationId: current.id,
-        amount: expectedAmount,
-        method: body.payment_method,
-        paidAt,
-        paymentStage: isFullPayment ? "full_payment" : "downpayment"
-      });
-      const updated = await tx.cateringReservation.update({
-        where: { id: current.id },
-        data: {
-          downpayment_amount: expectedAmount,
-          downpayment_status: "paid",
-          downpayment_method: body.payment_method,
-          downpayment_date: paidAt,
-          downpayment_transaction_id: verifiedPayment.transactionId,
-          deposit_paid: expectedAmount,
-          remaining_balance: remaining,
-          full_payment_paid: isFullPayment && remaining === 0,
-          full_payment_date: isFullPayment && remaining === 0 ? paidAt : null,
-          final_payment_status: remaining === 0 ? "paid" : "pending",
-          final_payment_method: remaining === 0 ? body.payment_method : null,
-          final_payment_date: remaining === 0 ? paidAt : null
-        },
-        include: { payments: { orderBy: { received_at: "asc" } } }
-      });
-      await addReservationActivity(tx, {
-        cateringReservationId: current.id,
-        eventType: "initial_package_payment_recorded",
-        fromStatus: current.status,
-        toStatus: updated.status,
-        actorType: "customer",
-        actorName: current.customer_name,
-        details: { amount: expectedAmount, payment_method: body.payment_method }
-      });
-      return updated;
-    });
 
     return res.json({
       success: true,
@@ -3700,7 +3869,7 @@ app.get("/api/catering/reservations/status/:reservationId", async (req, res, nex
 app.post("/api/catering/reservations/:reservationId/pay-remaining", async (req, res, next) => {
   try {
     const body = z.object({
-      payment_method: z.enum(["cash", "gcash", "bank_transfer"]),
+      payment_method: z.enum(["cash", "gcash", "bank_transfer", "paymongo"]),
       payment_transaction_id: z.string().min(1)
     }).parse(req.body);
     const updated = await recordVerifiedCateringBalancePayment(
@@ -3867,36 +4036,6 @@ app.get("/api/customer/bookings/:reference", async (req, res, next) => {
       reservation_status: reservation.status,
       special_requests: reservation.special_requests
     });
-  } catch (error) {
-    return next(error);
-  }
-});
-
-app.post("/api/reservations/:bookingId/pay-remaining", async (req, res, next) => {
-  try {
-    const body = z.object({
-      payment_method: z.enum(["cash", "gcash", "bank_transfer"]),
-      reference_number: z.string().optional().nullable()
-    }).parse(req.body);
-    const reservation = await prisma.reservation.findUnique({ where: { booking_id: req.params.bookingId } });
-
-    if (!reservation) {
-      return res.status(404).json({ message: "Reservation not found" });
-    }
-
-    if (reservation.remaining_balance <= 0) {
-      return res.status(400).json({ message: "No remaining balance due." });
-    }
-
-    const parsedPayment = reservationPaymentBodySchema.parse({
-      amount: reservation.remaining_balance,
-      payment_method: body.payment_method,
-      reference_number: body.reference_number ?? `ONLINE-${reservation.booking_id}`,
-      cash_received: reservation.remaining_balance
-    });
-    const updated = await recordDineInReservationPayment(reservation.id, parsedPayment);
-
-    return res.json({ reservation: { ...updated, ...paymentSummaryFields(updated) } });
   } catch (error) {
     return next(error);
   }

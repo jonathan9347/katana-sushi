@@ -15,6 +15,7 @@ import Menu from "./pages/customer/Menu";
 import ReserveHub from "./pages/customer/ReserveHub";
 import TableReservationForm from "./pages/customer/TableReservationForm";
 import ReservationStatus from "./pages/customer/ReservationStatus";
+import PaymentReturn from "./pages/customer/PaymentReturn";
 import TakeoutOrder from "./pages/customer/TakeoutOrder";
 import InventoryPage from "./pages/staff/inventory";
 import CateringOptionPhotos from "./pages/staff/inventory/CateringOptionPhotos";
@@ -76,6 +77,7 @@ export default function App() {
       <Route path="/reserve" element={<InnerCustomerLayout><ReserveHub /></InnerCustomerLayout>} />
       <Route path="/reserve/book" element={<InnerCustomerLayout><TableReservationForm /></InnerCustomerLayout>} />
       <Route path="/reservation/status" element={<InnerCustomerLayout><ReservationStatus /></InnerCustomerLayout>} />
+      <Route path="/payment/return" element={<InnerCustomerLayout><PaymentReturn /></InnerCustomerLayout>} />
       <Route path="/catering" element={<InnerCustomerLayout><CateringReservationIntro /></InnerCustomerLayout>} />
       <Route path="/catering/book" element={<InnerCustomerLayout><CateringReservation /></InnerCustomerLayout>} />
       <Route path="/catering/inquiry" element={<InnerCustomerLayout><CateringInquiry /></InnerCustomerLayout>} />
