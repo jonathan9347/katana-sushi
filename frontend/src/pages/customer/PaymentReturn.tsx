@@ -4,7 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import axios from "axios";
 import { CheckCircle2, Clock3, LoaderCircle, RefreshCw, ShieldCheck, XCircle } from "lucide-react";
 import BackToHome from "../../components/layout/BackToHome";
-import { clearCustomerPaymentAttempt, getPaymentStatus, type PaymentStatusResponse } from "../../lib/payment";
+import { clearCustomerPaymentAttempt, getPaymentStatus, paymentPagePath, type PaymentStatusResponse } from "../../lib/payment";
 
 const POLL_INTERVAL_MS = 3000;
 const MAX_POLL_MS = 3 * 60 * 1000;
@@ -33,7 +33,7 @@ export default function PaymentReturn() {
     refetchInterval: (query) => {
       const status = query.state.data?.status;
       const stillOpen = !status || status === "pending" || status === "created";
-      if (!stillOpen || cancelled || Date.now() - startedAt.current > MAX_POLL_MS) {
+      if (!stillOpen || cancelled || query.state.data?.lastError || Date.now() - startedAt.current > MAX_POLL_MS) {
         return false;
       }
       return POLL_INTERVAL_MS;
@@ -94,6 +94,11 @@ export default function PaymentReturn() {
     icon = <XCircle className="h-7 w-7" aria-hidden="true" />;
     title = "Payment session ended";
     body = "This checkout is no longer active and nothing was charged. Start the payment again from your booking status page.";
+  } else if (payment?.lastError) {
+    tone = "problem";
+    icon = <XCircle className="h-7 w-7" aria-hidden="true" />;
+    title = "Payment didn't go through";
+    body = `${payment.lastError} Nothing was charged. You can try again or choose another way to pay.`;
   } else if (cancelled) {
     tone = "problem";
     icon = <XCircle className="h-7 w-7" aria-hidden="true" />;
@@ -153,7 +158,15 @@ export default function PaymentReturn() {
           )}
 
           <div className="grid gap-3 px-6 pb-6">
-            <Link className="customer-btn-primary text-center" to={bookingStatusLink}>
+            {isOpen && reference && !notFound && (payment?.lastError || cancelled || timedOut) && (
+              <Link className="customer-btn-primary text-center" to={paymentPagePath(reference)}>
+                Choose another method
+              </Link>
+            )}
+            <Link
+              className={isOpen && (payment?.lastError || cancelled || timedOut) ? "customer-btn-secondary text-center" : "customer-btn-primary text-center"}
+              to={bookingStatusLink}
+            >
               {isPaid ? "View booking status" : "Go to booking status"}
             </Link>
             {isOpen && reference && !notFound && (timedOut || statusQuery.isError || cancelled) && (

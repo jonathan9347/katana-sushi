@@ -39,6 +39,46 @@ export type PayMongoCheckoutSession = {
   };
 };
 
+export type PayMongoPaymentIntentStatus =
+  | "awaiting_payment_method"
+  | "awaiting_next_action"
+  | "processing"
+  | "succeeded"
+  | string;
+
+export type PayMongoNextAction =
+  | {
+      type: "consume_qr";
+      code: { id: string; amount: number; image_url: string; test_url?: string | null; expires_at?: string | null };
+    }
+  | { type: "redirect"; redirect: { url: string; return_url?: string } }
+  | { type: string; [key: string]: unknown };
+
+export type PayMongoPaymentIntent = {
+  id: string;
+  type: "payment_intent";
+  attributes: {
+    amount: number;
+    currency: string;
+    status: PayMongoPaymentIntentStatus;
+    client_key?: string;
+    livemode?: boolean;
+    payments?: PayMongoPayment[];
+    next_action?: PayMongoNextAction | null;
+    last_payment_error?: { failed_code?: string; failed_message?: string; payment_method_type?: string } | string | null;
+    payment_method_allowed?: string[];
+    metadata?: Record<string, string> | null;
+  };
+};
+
+export type CreatePaymentIntentInput = {
+  amount: number;
+  paymentMethodTypes: string[];
+  description: string;
+  statementDescriptor?: string;
+  metadata?: Record<string, string>;
+};
+
 export type PayMongoLineItem = {
   name: string;
   amount: number;
@@ -129,6 +169,60 @@ export class PayMongoClient {
     return response.data;
   }
 
+  async createPaymentIntent(input: CreatePaymentIntentInput) {
+    const attributes: Record<string, unknown> = {
+      amount: input.amount,
+      currency: "PHP",
+      capture_type: "automatic",
+      payment_method_allowed: input.paymentMethodTypes,
+      description: input.description
+    };
+    if (input.paymentMethodTypes.includes("card")) {
+      attributes.payment_method_options = { card: { request_three_d_secure: "any" } };
+    }
+    if (input.statementDescriptor) {
+      attributes.statement_descriptor = input.statementDescriptor;
+    }
+    if (input.metadata && Object.keys(input.metadata).length > 0) {
+      attributes.metadata = input.metadata;
+    }
+
+    const response = await this.request<{ data: PayMongoPaymentIntent }>("POST", "/payment_intents", {
+      data: { attributes }
+    });
+    return response.data;
+  }
+
+  async retrievePaymentIntent(paymentIntentId: string) {
+    const response = await this.request<{ data: PayMongoPaymentIntent }>(
+      "GET",
+      `/payment_intents/${encodeURIComponent(paymentIntentId)}`
+    );
+    return response.data;
+  }
+
+  /** Creates a payment method that carries no card data (QR Ph and e-wallets). */
+  async createPaymentMethod(input: { type: string; billing?: { name?: string; email?: string; phone?: string } }) {
+    const attributes: Record<string, unknown> = { type: input.type };
+    const billing = compactBilling(input.billing);
+    if (billing) {
+      attributes.billing = billing;
+    }
+    const response = await this.request<{ data: { id: string; attributes: { type: string } } }>("POST", "/payment_methods", {
+      data: { attributes }
+    });
+    return response.data;
+  }
+
+  async attachPaymentIntent(paymentIntentId: string, input: { paymentMethodId: string; returnUrl: string }) {
+    const response = await this.request<{ data: PayMongoPaymentIntent }>(
+      "POST",
+      `/payment_intents/${encodeURIComponent(paymentIntentId)}/attach`,
+      { data: { attributes: { payment_method: input.paymentMethodId, return_url: input.returnUrl } } }
+    );
+    return response.data;
+  }
+
   async createRefund(input: { paymentId: string; amount: number; reason: string; notes?: string }) {
     const response = await this.request<{ data: PayMongoRefund }>("POST", "/refunds", {
       data: {
@@ -206,6 +300,22 @@ export function toCentavos(amount: number) {
 
 export function fromCentavos(amount: number) {
   return Math.round(amount) / 100;
+}
+
+/** The paid payment on a payment intent, if PayMongo has captured one. */
+export function getPaidIntentPayment(intent: PayMongoPaymentIntent) {
+  return intent.attributes.payments?.find((payment) => payment.attributes.status === "paid") ?? null;
+}
+
+export function describeLastPaymentError(intent: PayMongoPaymentIntent) {
+  const error = intent.attributes.last_payment_error;
+  if (!error) {
+    return null;
+  }
+  if (typeof error === "string") {
+    return error;
+  }
+  return error.failed_message ?? error.failed_code ?? "The last payment attempt did not go through.";
 }
 
 /** The paid payment on a checkout session, if PayMongo has captured one. */

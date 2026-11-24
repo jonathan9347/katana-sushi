@@ -1,8 +1,9 @@
 /**
- * Lists or registers the PayMongo webhook that confirms checkout payments.
+ * Lists, registers, or updates the PayMongo webhook that confirms payments.
  *
  *   npm run paymongo:webhook -- list
  *   npm run paymongo:webhook -- create https://<your-api-host>/api/payments/paymongo/webhook
+ *   npm run paymongo:webhook -- update <hook_id> https://<your-api-host>/api/payments/paymongo/webhook
  *
  * `create` prints the webhook secret (whsk_...). Put it in PAYMONGO_WEBHOOK_SECRET
  * on the server. PayMongo only calls public HTTPS URLs, so use the deployed API.
@@ -12,14 +13,16 @@ import dotenv from "dotenv";
 
 dotenv.config({ path: path.resolve(__dirname, "..", "..", ".env") });
 
-const WEBHOOK_EVENTS = ["checkout_session.payment.paid"];
+// payment.paid / payment.failed: Katana's payment page (Payment Intents).
+// checkout_session.payment.paid: payments started on the older PayMongo checkout page.
+const WEBHOOK_EVENTS = ["payment.paid", "payment.failed", "checkout_session.payment.paid"];
 
 type WebhookRecord = {
   id: string;
   attributes: { url: string; status: string; events: string[]; livemode: boolean; secret_key?: string };
 };
 
-async function paymongo<T>(method: "GET" | "POST", pathName: string, body?: unknown): Promise<T> {
+async function paymongo<T>(method: "GET" | "POST" | "PUT", pathName: string, body?: unknown): Promise<T> {
   const secretKey = process.env.PAYMONGO_SECRET_KEY?.trim();
   if (!secretKey?.startsWith("sk_")) {
     throw new Error("Set PAYMONGO_SECRET_KEY (sk_test_... or sk_live_...) in backend/.env first.");
@@ -64,8 +67,28 @@ async function create(url: string | undefined) {
   console.log(`Set this on the server as PAYMONGO_WEBHOOK_SECRET: ${result.data.attributes.secret_key}`);
 }
 
-const [command, argument] = process.argv.slice(2);
-(command === "create" ? create(argument) : command === "list" ? list() : Promise.reject(new Error("Usage: list | create <url>")))
+/** Keeps the webhook's secret; only its URL and events change. */
+async function update(id: string | undefined, url: string | undefined) {
+  if (!id || !/^hook_[A-Za-z0-9]+$/.test(id)) {
+    throw new Error("Pass the webhook id (hook_...) shown by `list`.");
+  }
+  if (!url || !/^https:\/\/.+\/api\/payments\/paymongo\/webhook$/.test(url)) {
+    throw new Error("Pass the public HTTPS URL ending in /api/payments/paymongo/webhook.");
+  }
+  const result = await paymongo<{ data: WebhookRecord }>("PUT", `/webhooks/${id}`, {
+    data: { attributes: { url, events: WEBHOOK_EVENTS } }
+  });
+  console.log(`Updated ${result.data.id}: ${result.data.attributes.status}, events [${result.data.attributes.events.join(", ")}]`);
+}
+
+const [command, firstArgument, secondArgument] = process.argv.slice(2);
+(command === "create"
+  ? create(firstArgument)
+  : command === "update"
+    ? update(firstArgument, secondArgument)
+    : command === "list"
+      ? list()
+      : Promise.reject(new Error("Usage: list | create <url> | update <hook_id> <url>")))
   .catch((error: unknown) => {
     console.error(error instanceof Error ? error.message : error);
     process.exit(1);

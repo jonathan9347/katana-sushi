@@ -24,5 +24,7 @@ services:
         value: paymongo
       - key: PAYMONGO_SECRET_KEY
         sync: false
+      - key: PAYMONGO_PUBLIC_KEY
+        sync: false
       - key: PAYMONGO_WEBHOOK_SECRET
         sync: false

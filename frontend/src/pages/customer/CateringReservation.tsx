@@ -1,5 +1,5 @@
 import { FormEvent, ReactNode, useEffect, useId, useMemo, useRef, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { Banknote, Check, CheckCircle2, Clock3, Copy, CreditCard, Landmark, LoaderCircle, Send, ShieldCheck, ShoppingBag, Smartphone, X } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { Dialog } from "../../components/ui/dialog";
@@ -11,8 +11,7 @@ import {
   createPaymentIntent,
   formatPayMongoMethods,
   getOrCreateCustomerPaymentAttempt,
-  paymentReturnUrl,
-  redirectToHostedCheckout,
+  paymentPagePath,
   saveCustomerPaymentIntentReference,
   usePaymentConfig,
   verifyPayment,
@@ -383,6 +382,7 @@ export default function CateringReservation() {
   });
   const [notice, setNotice] = useState("");
   const [isProcessingPayment, setIsProcessingPayment] = useState(false);
+  const navigate = useNavigate();
   const paymentConfigQuery = usePaymentConfig();
   const hostedCheckout = paymentConfigQuery.data?.hostedCheckout === true;
   const onlineMethodsLabel = formatPayMongoMethods(paymentConfigQuery.data?.methods ?? []);
@@ -658,18 +658,17 @@ export default function CateringReservation() {
         paymentMethod: "paymongo",
         bookingId: reservationId,
         reservationType: "catering",
-        purpose: paymentPurpose,
-        successUrl: paymentReturnUrl()
+        purpose: paymentPurpose
       });
       if (intent.alreadyPaid) {
-        window.location.assign(`/payment/return?reference=${encodeURIComponent(intent.referenceId)}`);
+        navigate(`/payment/return?reference=${encodeURIComponent(intent.referenceId)}`);
         return;
       }
-      if (!intent.success || !intent.paymentUrl) {
-        throw new Error(intent.message || "Unable to open the PayMongo checkout.");
+      if (!intent.success || !intent.referenceId) {
+        throw new Error(intent.message || "Unable to open the payment page.");
       }
       saveCustomerPaymentIntentReference("catering", reservationId, intent.referenceId);
-      redirectToHostedCheckout(intent.paymentUrl);
+      navigate(paymentPagePath(intent.referenceId));
     } catch (error) {
       throw new Error(
         `Your request ${reservationId} is saved, but the payment page could not open: ${getApiErrorMessage(error, "please try again")}. You can pay from the booking status page.`

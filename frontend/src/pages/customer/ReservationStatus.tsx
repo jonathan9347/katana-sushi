@@ -1,5 +1,5 @@
 import { FormEvent, useEffect, useState } from "react";
-import { Link, useLocation, useSearchParams } from "react-router-dom";
+import { Link, useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { CalendarPlus, Check, CheckCircle2, Clock3, CreditCard, LoaderCircle, Search, XCircle } from "lucide-react";
 import BackToHome from "../../components/layout/BackToHome";
 import { api } from "../../lib/api";
@@ -10,8 +10,7 @@ import { getApiErrorMessage } from "../../lib/errors";
 import {
   createPaymentIntent,
   formatPayMongoMethods,
-  paymentReturnUrl,
-  redirectToHostedCheckout,
+  paymentPagePath,
   usePaymentConfig,
   verifyPayment
 } from "../../lib/payment";
@@ -63,6 +62,7 @@ export default function ReservationStatus() {
   });
   const [result, setResult] = useState<StatusResult | null>(null);
   const [message, setMessage] = useState("");
+  const navigate = useNavigate();
   const paymentConfigQuery = usePaymentConfig();
   const hostedCheckout = paymentConfigQuery.data?.hostedCheckout === true;
   const paymentMethod = hostedCheckout ? "paymongo" as const : "cash" as const;
@@ -155,23 +155,22 @@ export default function ReservationStatus() {
         : "balance";
 
       if (hostedCheckout) {
-        // PayMongo: the server sets the amount, reuses an open checkout, and records the payment itself.
+        // PayMongo: the server sets the amount, reuses an open payment, and records the payment itself.
         const checkout = await createPaymentIntent({
           amount,
           paymentMethod: "paymongo",
           bookingId: reference,
           reservationType: "catering",
-          purpose,
-          successUrl: paymentReturnUrl()
+          purpose
         });
         if (checkout.alreadyPaid) {
           await checkStatus();
           return;
         }
-        if (!checkout.success || !checkout.paymentUrl) {
-          throw new Error(checkout.message || "Unable to open the PayMongo checkout.");
+        if (!checkout.success || !checkout.referenceId) {
+          throw new Error(checkout.message || "Unable to open the payment page.");
         }
-        redirectToHostedCheckout(checkout.paymentUrl);
+        navigate(paymentPagePath(checkout.referenceId));
         return;
       }
 
@@ -508,7 +507,7 @@ export default function ReservationStatus() {
                       disabled={isPaying}
                     >
                       {isPaying ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <CreditCard className="h-4 w-4" />}
-                      {isPaying ? "Opening checkout..." : `${onlinePayment.label} · ₱${onlinePayment.amount.toFixed(2)}`}
+                      {isPaying ? "Opening payment..." : `${onlinePayment.label} · ₱${onlinePayment.amount.toFixed(2)}`}
                     </button>
                     <p className="mt-2 text-center text-[11px] text-[#8d7a7d]">
                       {formatPayMongoMethods(paymentConfigQuery.data?.methods ?? []) || "QR Ph, card, GCash, or Maya"} via PayMongo

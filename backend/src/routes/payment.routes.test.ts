@@ -17,6 +17,7 @@ const WEBHOOK_SECRET = "whsk_route_test_secret";
 before(async () => {
   process.env.PAYMENT_GATEWAY = "paymongo";
   process.env.PAYMONGO_SECRET_KEY = "sk_test_routeTestOnly123";
+  process.env.PAYMONGO_PUBLIC_KEY = "pk_test_routeTestPublic123";
   delete process.env.PAYMONGO_PAYMENT_METHODS;
 
   // Loaded after the env above so the gateway factory picks PayMongo.
@@ -69,7 +70,8 @@ test("publishes the PayMongo checkout configuration without secrets", async () =
     hostedCheckout: true,
     testMode: true,
     available: true,
-    methods: ["qrph", "card", "gcash", "paymaya"]
+    methods: ["qrph", "card", "gcash", "paymaya"],
+    publicKey: "pk_test_routeTestPublic123"
   });
   assert.doesNotMatch(JSON.stringify(body), /sk_test/);
 });
@@ -102,6 +104,17 @@ test("only accepts the online method while PayMongo is active", async () => {
   });
   assert.equal(response.status, 400);
   assert.match((await response.json()).message, /PayMongo/);
+});
+
+test("rejects unknown payment channels and malformed card references", async () => {
+  for (const payload of [{ channel: "bitcoin" }, { channel: "card", paymentMethodId: "4343434343434345" }]) {
+    const response = await fetch(`${baseUrl}/api/payments/PMG-1/pay`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    });
+    assert.equal(response.status, 400);
+  }
 });
 
 test("passes booking rule failures through with their status", async () => {

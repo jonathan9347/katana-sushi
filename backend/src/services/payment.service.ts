@@ -4,11 +4,20 @@ import { paymentIntentStore, StoredPaymentIntent } from "./payment/paymentIntent
 import { getPaymentHooks } from "./payment/paymentHooks";
 import {
   CreatePaymentIntentParams,
+  OnlinePaymentChannel,
   PaymentGateway,
   PaymentIntentResult,
+  PaymentNextAction,
+  StartPaymentResult,
   VerifyPaymentParams,
   VerifyPaymentResult
 } from "../interfaces/paymentGateway.interface";
+
+export type PaymentSessionState = {
+  intent: StoredPaymentIntent;
+  nextAction?: PaymentNextAction;
+  lastError?: string;
+};
 
 const HOSTED_PAYMENT_METHOD = "paymongo";
 
@@ -141,17 +150,7 @@ export class PaymentService {
       };
     }
 
-    const returnUrl = this.resolveReturnUrl(params.successUrl);
-    if (!returnUrl) {
-      return {
-        success: false,
-        referenceId: "",
-        httpStatus: 400,
-        message: "The payment return page is not allowed. Set FRONTEND_URL on the server."
-      };
-    }
-
-    // One open checkout per booking payment; the server owns this key.
+    // One open payment per booking payment; the server owns this key.
     const idempotencyKey = [
       HOSTED_PAYMENT_METHOD,
       params.reservationType,
@@ -194,9 +193,7 @@ export class PaymentService {
       idempotencyKey,
       description: payable.description,
       lineItemName: payable.lineItemName,
-      customer: payable.customer,
-      successUrl: this.withReference(returnUrl, referenceId),
-      failureUrl: this.withReference(returnUrl, referenceId, true)
+      customer: payable.customer
     });
 
     try {
@@ -263,9 +260,9 @@ export class PaymentService {
       success: true,
       referenceId: synced.referenceId,
       gatewayReference: synced.gatewayReference,
-      paymentUrl: resumed.paymentUrl,
+      paymentUrl: resumed.paymentUrl || undefined,
       expiresAt: synced.expiresAt,
-      instructions: "Continue your payment on the secure checkout page."
+      instructions: "Continue your payment."
     };
   }
 
@@ -296,6 +293,99 @@ export class PaymentService {
     }
   }
 
+  /**
+   * The customer chose how to pay on Katana's payment page. Re-checks the booking,
+   * then attaches that method and returns what the customer must do next.
+   */
+  async startPayment(
+    referenceId: string,
+    input: { channel: OnlinePaymentChannel; paymentMethodId?: string; returnUrl?: string }
+  ): Promise<StartPaymentResult & { httpStatus?: number }> {
+    const intent = await paymentIntentStore.get(referenceId);
+    if (!intent) {
+      return { status: "failed", httpStatus: 404, message: "Payment session not found." };
+    }
+    if (intent.paymentMethod !== HOSTED_PAYMENT_METHOD || !this.gateway.startPayment) {
+      return { status: "failed", httpStatus: 400, message: "Online payment is not enabled for this payment." };
+    }
+
+    const synced = await this.syncHostedIntent(intent);
+    if (synced.status === "succeeded") {
+      return { status: "paid" };
+    }
+    if ((synced.status !== "pending" && synced.status !== "created") || !synced.gatewayReference) {
+      return {
+        status: "failed",
+        httpStatus: 410,
+        message: "This payment session has ended. Start the payment again from your booking status page."
+      };
+    }
+
+    const hooks = getPaymentHooks();
+    if (!hooks.resolvePayableBooking) {
+      throw new Error("Payment booking rules are not registered.");
+    }
+    const payable = await hooks.resolvePayableBooking({
+      bookingId: synced.bookingId,
+      reservationType: synced.reservationType as "dine_in" | "catering" | "takeout",
+      purpose: synced.purpose
+    });
+    if (!payable.ok) {
+      return { status: "failed", httpStatus: payable.status, message: payable.message };
+    }
+    if (Math.abs(payable.amount - synced.amount) > 0.01) {
+      await paymentIntentStore.markExpired(synced.referenceId);
+      return {
+        status: "failed",
+        httpStatus: 409,
+        message: `The amount due changed to PHP ${payable.amount.toFixed(2)}. Start the payment again from your booking status page.`
+      };
+    }
+
+    const returnUrl = this.resolveReturnUrl(input.returnUrl);
+    if (!returnUrl) {
+      return {
+        status: "failed",
+        httpStatus: 400,
+        message: "The payment return page is not allowed. Set FRONTEND_URL on the server."
+      };
+    }
+
+    const result = await this.gateway.startPayment(synced.gatewayReference, {
+      channel: input.channel,
+      paymentMethodId: input.paymentMethodId,
+      billing: payable.customer,
+      returnUrl: this.withReference(returnUrl, synced.referenceId)
+    });
+
+    if (result.status === "paid") {
+      const settled = await this.syncHostedIntent(synced);
+      return settled.status === "succeeded" ? { status: "paid" } : { status: "pending", message: "Your payment is being confirmed." };
+    }
+    return result;
+  }
+
+  /** Name and email PayMongo needs for card payments, from the booking. Only while the payment is open. */
+  async getPaymentBilling(referenceId: string) {
+    const intent = await paymentIntentStore.get(referenceId);
+    if (!intent || intent.paymentMethod !== HOSTED_PAYMENT_METHOD || !["pending", "created"].includes(intent.status)) {
+      return null;
+    }
+    const resolvePayableBooking = getPaymentHooks().resolvePayableBooking;
+    if (!resolvePayableBooking) {
+      return null;
+    }
+    const payable = await resolvePayableBooking({
+      bookingId: intent.bookingId,
+      reservationType: intent.reservationType as "dine_in" | "catering" | "takeout",
+      purpose: intent.purpose
+    });
+    if (!payable.ok) {
+      return null;
+    }
+    return { name: payable.customer?.name ?? null, email: payable.customer?.email ?? null };
+  }
+
   private withReference(returnUrl: string, referenceId: string, cancelled = false) {
     const url = new URL(returnUrl);
     url.searchParams.set("reference", referenceId);
@@ -314,17 +404,24 @@ export class PaymentService {
     intent: StoredPaymentIntent,
     options: { forceExpire?: boolean } = {}
   ): Promise<StoredPaymentIntent> {
+    return (await this.syncHostedIntentDetailed(intent, options)).intent;
+  }
+
+  private async syncHostedIntentDetailed(
+    intent: StoredPaymentIntent,
+    options: { forceExpire?: boolean } = {}
+  ): Promise<PaymentSessionState> {
     if (intent.paymentMethod !== HOSTED_PAYMENT_METHOD || !this.gateway.isHostedCheckout) {
-      return intent;
+      return { intent };
     }
 
     if (intent.status === "succeeded") {
       await this.fulfill(intent);
-      return intent;
+      return { intent };
     }
 
     if (intent.status === "cancelled" || !intent.gatewayReference) {
-      return intent;
+      return { intent };
     }
 
     let result = await this.gateway.verifyPayment({
@@ -343,7 +440,7 @@ export class PaymentService {
         gatewayReference: intent.gatewayReference
       });
       if (result.status === "pending") {
-        return (await paymentIntentStore.markExpired(intent.referenceId)) ?? intent;
+        return { intent: (await paymentIntentStore.markExpired(intent.referenceId)) ?? intent };
       }
     }
 
@@ -352,7 +449,7 @@ export class PaymentService {
         console.error(
           `[PaymentService] ${intent.referenceId}: provider reports PHP ${result.amount.toFixed(2)} paid but PHP ${intent.amount.toFixed(2)} was due. Payment ${result.transactionId} needs staff review.`
         );
-        return (await paymentIntentStore.markFailed(intent.referenceId)) ?? intent;
+        return { intent: (await paymentIntentStore.markFailed(intent.referenceId)) ?? intent };
       }
 
       const paid = await paymentIntentStore.markPaid(
@@ -366,16 +463,16 @@ export class PaymentService {
           `[PaymentService] ${paid.referenceId} paid via ${result.paymentChannel ?? "online payment"} (${result.transactionId}).`
         );
         await this.fulfill(paid);
-        return paid;
+        return { intent: paid };
       }
-      return paid ?? intent;
+      return { intent: paid ?? intent };
     }
 
     if (result.status === "expired") {
-      return (await paymentIntentStore.markExpired(intent.referenceId)) ?? intent;
+      return { intent: (await paymentIntentStore.markExpired(intent.referenceId)) ?? intent };
     }
 
-    return intent;
+    return { intent, nextAction: result.nextAction, lastError: result.lastError };
   }
 
   private async fulfill(intent: StoredPaymentIntent) {
@@ -394,11 +491,11 @@ export class PaymentService {
     }
   }
 
-  /** Called by the provider webhook. Re-reads the session from the provider rather than trusting the event body. */
+  /** Called by the provider webhook. Re-reads the payment from the provider rather than trusting the event body. */
   async handleHostedCheckoutEvent(gatewayReference: string) {
     const intent = await paymentIntentStore.findByGatewayReference(gatewayReference);
     if (!intent) {
-      console.warn(`[PaymentService] Webhook for unknown checkout session ${gatewayReference}.`);
+      console.warn(`[PaymentService] Webhook for unknown PayMongo reference ${gatewayReference}.`);
       return null;
     }
     return this.syncHostedIntent(intent);
@@ -572,7 +669,7 @@ export class PaymentService {
     };
   }
 
-  async getPaymentStatus(referenceId: string) {
+  async getPaymentStatus(referenceId: string): Promise<PaymentSessionState | null> {
     const intent = await paymentIntentStore.get(referenceId);
     if (!intent) {
       return null;
@@ -580,22 +677,22 @@ export class PaymentService {
 
     if (intent.paymentMethod === HOSTED_PAYMENT_METHOD) {
       try {
-        return await this.syncHostedIntent(intent);
+        return await this.syncHostedIntentDetailed(intent);
       } catch (error) {
         // Report the last known state; the next check or webhook will catch up.
         console.error(
           `[PaymentService] Could not refresh ${referenceId} from ${hostedMethodLabel(this.gateway)}:`,
           error instanceof Error ? error.message : error
         );
-        return intent;
+        return { intent };
       }
     }
 
     if (intent.expiresAt && intent.expiresAt.getTime() < Date.now() && !["succeeded", "failed", "cancelled", "expired"].includes(intent.status)) {
       await paymentIntentStore.markExpired(referenceId);
-      return { ...intent, status: "expired" as const };
+      return { intent: { ...intent, status: "expired" as const } };
     }
 
-    return intent;
+    return { intent };
   }
 }

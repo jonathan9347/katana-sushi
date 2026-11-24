@@ -3,29 +3,79 @@ import {
   CreatePaymentIntentParams,
   PaymentGateway,
   PaymentIntentResult,
+  PaymentNextAction,
   RefundParams,
   RefundResult,
+  StartPaymentInput,
+  StartPaymentResult,
   VerifyPaymentParams,
   VerifyPaymentResult
 } from "../../interfaces/paymentGateway.interface";
 import {
+  describeLastPaymentError,
   fromCentavos,
   getConfiguredPayMongoMethods,
   getPaidCheckoutPayment,
+  getPaidIntentPayment,
   PayMongoApiError,
   PayMongoClient,
+  PayMongoPayment,
+  PayMongoPaymentIntent,
   toCentavos
 } from "./paymongo.client";
 
 const DEFAULT_SESSION_TTL_MINUTES = 60;
 const PAYMONGO_REFUND_REASONS = new Set(["duplicate", "fraudulent", "requested_by_customer", "others"]);
+const STATEMENT_DESCRIPTOR = "KATANA SUSHI";
 
 type FetchLike = (input: string, init?: RequestInit) => Promise<Response>;
 
+function isCheckoutSession(gatewayReference: string) {
+  return gatewayReference.startsWith("cs_");
+}
+
+function paidResult(payment: PayMongoPayment): VerifyPaymentResult {
+  return {
+    success: true,
+    status: "paid",
+    amount: fromCentavos(payment.attributes.amount),
+    transactionId: payment.id,
+    paidAt: payment.attributes.paid_at ? new Date(payment.attributes.paid_at * 1000) : new Date(),
+    paymentChannel: payment.attributes.source?.type ?? undefined,
+    message: "Payment received."
+  };
+}
+
+/** Turns PayMongo's next_action into what Katana's payment page shows. */
+export function toNextAction(intent: PayMongoPaymentIntent): PaymentNextAction | undefined {
+  const action = intent.attributes.next_action;
+  if (!action) {
+    return undefined;
+  }
+  if (action.type === "consume_qr" && "code" in action && action.code && typeof action.code === "object") {
+    const code = action.code as { image_url?: string; expires_at?: string | null; test_url?: string | null };
+    if (code.image_url) {
+      return {
+        type: "qr",
+        imageUrl: code.image_url,
+        expiresAt: code.expires_at ?? undefined,
+        testUrl: code.test_url ?? undefined
+      };
+    }
+  }
+  if (action.type === "redirect" && "redirect" in action && action.redirect && typeof action.redirect === "object") {
+    const redirect = action.redirect as { url?: string };
+    if (redirect.url) {
+      return { type: "redirect", url: redirect.url };
+    }
+  }
+  return undefined;
+}
+
 /**
- * PayMongo hosted checkout (Checkout Sessions API).
- * The customer picks QR Ph, card, GCash, or Maya on PayMongo's page; we confirm
- * the payment by reading the session back from PayMongo, never from the browser.
+ * PayMongo through Katana's own payment page (Payment Intents API).
+ * The customer picks QR Ph, card, GCash, or Maya on our page; the server confirms
+ * payment by reading the intent back from PayMongo, never from the browser.
  */
 export class PayMongoGateway implements PaymentGateway {
   readonly gatewayName = "paymongo";
@@ -65,6 +115,21 @@ export class PayMongoGateway implements PaymentGateway {
     return getConfiguredPayMongoMethods();
   }
 
+  /** The publishable key the browser needs to send card details straight to PayMongo. */
+  get publicKey() {
+    const key = process.env.PAYMONGO_PUBLIC_KEY?.trim();
+    if (!key || !/^pk_(test|live)_[A-Za-z0-9]+$/.test(key)) {
+      return null;
+    }
+    // A live secret key must be paired with a live public key, and test with test.
+    return key.startsWith(this.isTestMode ? "pk_test_" : "pk_live_") ? key : null;
+  }
+
+  /** Card needs the public key; without it the card option is hidden. */
+  get availableChannels() {
+    return this.paymentMethodTypes.filter((type) => type !== "card" || this.publicKey !== null);
+  }
+
   private get sessionTtlMs() {
     const minutes = Number(process.env.PAYMONGO_CHECKOUT_TTL_MINUTES ?? DEFAULT_SESSION_TTL_MINUTES);
     return (Number.isFinite(minutes) && minutes >= 5 ? minutes : DEFAULT_SESSION_TTL_MINUTES) * 60 * 1000;
@@ -79,27 +144,14 @@ export class PayMongoGateway implements PaymentGateway {
 
   async createPaymentIntent(params: CreatePaymentIntentParams): Promise<PaymentIntentResult> {
     const client = this.requireClient();
-    if (!params.successUrl || !params.failureUrl) {
-      throw new Error("PayMongo checkout requires success and cancel URLs.");
-    }
-
     const referenceId = params.referenceId ?? `PMG-${crypto.randomUUID()}`;
     const description = params.description ?? `Katana Sushi booking ${params.bookingId}`;
-    const session = await client.createCheckoutSession({
-      lineItems: [{
-        name: params.lineItemName ?? "Katana Sushi payment",
-        description,
-        amount: toCentavos(params.amount),
-        currency: "PHP",
-        quantity: 1
-      }],
-      paymentMethodTypes: this.paymentMethodTypes,
-      successUrl: params.successUrl,
-      cancelUrl: params.failureUrl,
-      referenceNumber: params.bookingId,
+
+    const intent = await client.createPaymentIntent({
+      amount: toCentavos(params.amount),
+      paymentMethodTypes: this.availableChannels,
       description,
-      billing: params.customer,
-      sendEmailReceipt: true,
+      statementDescriptor: STATEMENT_DESCRIPTOR,
       metadata: {
         reference_id: referenceId,
         booking_id: params.bookingId,
@@ -111,13 +163,54 @@ export class PayMongoGateway implements PaymentGateway {
     return {
       success: true,
       referenceId,
-      gatewayReference: session.id,
-      paymentUrl: session.attributes.checkout_url,
+      gatewayReference: intent.id,
       instructions: this.isTestMode
         ? "PayMongo TEST MODE: no real money will be charged."
-        : "Complete your payment on the secure PayMongo page.",
+        : "Choose how you want to pay.",
       expiresAt: new Date(Date.now() + this.sessionTtlMs)
     };
+  }
+
+  async startPayment(gatewayReference: string, input: StartPaymentInput): Promise<StartPaymentResult> {
+    const client = this.requireClient();
+    if (isCheckoutSession(gatewayReference)) {
+      throw new PayMongoApiError("This payment was started on the old checkout page. Start the payment again.", 409);
+    }
+    if (!this.availableChannels.includes(input.channel)) {
+      return { status: "failed", message: "That payment method is not available." };
+    }
+
+    let paymentMethodId: string;
+    if (input.channel === "card") {
+      if (!input.paymentMethodId || !/^pm_[A-Za-z0-9]+$/.test(input.paymentMethodId)) {
+        return { status: "failed", message: "Card details are missing. Please enter your card again." };
+      }
+      paymentMethodId = input.paymentMethodId;
+    } else {
+      const method = await client.createPaymentMethod({ type: input.channel, billing: input.billing });
+      paymentMethodId = method.id;
+    }
+
+    const intent = await client.attachPaymentIntent(gatewayReference, {
+      paymentMethodId,
+      returnUrl: input.returnUrl
+    });
+
+    if (intent.attributes.status === "succeeded" || getPaidIntentPayment(intent)) {
+      return { status: "paid" };
+    }
+
+    const nextAction = toNextAction(intent);
+    if (nextAction) {
+      return { status: "action_required", nextAction };
+    }
+
+    const lastError = describeLastPaymentError(intent);
+    if (intent.attributes.status === "awaiting_payment_method" && lastError) {
+      return { status: "failed", message: lastError };
+    }
+
+    return { status: "pending", message: "Your payment is being processed." };
   }
 
   async verifyPayment(params: VerifyPaymentParams): Promise<VerifyPaymentResult> {
@@ -128,33 +221,25 @@ export class PayMongoGateway implements PaymentGateway {
         status: "failed",
         amount: 0,
         transactionId: "",
-        message: "This payment has no PayMongo checkout session."
+        message: "This payment has no PayMongo reference."
       };
     }
 
-    const session = await client.retrieveCheckoutSession(params.gatewayReference);
-    const paidPayment = getPaidCheckoutPayment(session);
+    if (isCheckoutSession(params.gatewayReference)) {
+      const session = await client.retrieveCheckoutSession(params.gatewayReference);
+      const paidPayment = getPaidCheckoutPayment(session);
+      if (paidPayment) {
+        return paidResult(paidPayment);
+      }
+      return session.attributes.status === "expired"
+        ? { success: false, status: "expired", amount: 0, transactionId: "", message: "The PayMongo checkout expired before payment." }
+        : { success: false, status: "pending", amount: 0, transactionId: "", message: "Waiting for payment on PayMongo." };
+    }
 
+    const intent = await client.retrievePaymentIntent(params.gatewayReference);
+    const paidPayment = getPaidIntentPayment(intent);
     if (paidPayment) {
-      return {
-        success: true,
-        status: "paid",
-        amount: fromCentavos(paidPayment.attributes.amount),
-        transactionId: paidPayment.id,
-        paidAt: paidPayment.attributes.paid_at ? new Date(paidPayment.attributes.paid_at * 1000) : new Date(),
-        paymentChannel: paidPayment.attributes.source?.type ?? undefined,
-        message: "Payment received."
-      };
-    }
-
-    if (session.attributes.status === "expired") {
-      return {
-        success: false,
-        status: "expired",
-        amount: 0,
-        transactionId: "",
-        message: "The PayMongo checkout expired before payment."
-      };
+      return paidResult(paidPayment);
     }
 
     return {
@@ -162,19 +247,31 @@ export class PayMongoGateway implements PaymentGateway {
       status: "pending",
       amount: 0,
       transactionId: "",
-      message: "Waiting for payment on PayMongo."
+      nextAction: intent.attributes.status === "awaiting_next_action" ? toNextAction(intent) : undefined,
+      lastError: describeLastPaymentError(intent) ?? undefined,
+      message: intent.attributes.status === "processing" ? "Your payment is being processed." : "Waiting for payment."
     };
   }
 
+  /** Old checkout sessions are never resumed; the customer gets the new payment page. */
   async resumePaymentIntent(gatewayReference: string) {
-    const session = await this.requireClient().retrieveCheckoutSession(gatewayReference);
-    if (session.attributes.status !== "active" || getPaidCheckoutPayment(session)) {
+    if (isCheckoutSession(gatewayReference)) {
       return null;
     }
-    return { paymentUrl: session.attributes.checkout_url };
+    const intent = await this.requireClient().retrievePaymentIntent(gatewayReference);
+    return intent.attributes.status === "succeeded" || getPaidIntentPayment(intent)
+      ? null
+      : { paymentUrl: "" };
   }
 
+  /**
+   * Checkout sessions can be expired at PayMongo. Payment intents cannot be
+   * cancelled there; Katana stops offering them, and a late payment is still recorded.
+   */
   async cancelPaymentIntent(gatewayReference: string) {
+    if (!isCheckoutSession(gatewayReference)) {
+      return;
+    }
     try {
       await this.requireClient().expireCheckoutSession(gatewayReference);
     } catch (error) {
