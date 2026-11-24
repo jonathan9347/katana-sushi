@@ -66,3 +66,45 @@ Setup:
 - Test mode: with test keys, the QR screen shows a "simulate scanning" link, and PayMongo's test cards work (for example 4343 4343 4343 4345). No real money moves.
 - Going live: switch both keys to live keys, register a live webhook, and update `PAYMONGO_WEBHOOK_SECRET`.
 - Refunds are not automated; issue them from the PayMongo dashboard using the `pay_...` reference shown on the booking.
+
+6) Email and SMS notifications
+
+Customers get an email and a text message when a reservation is confirmed or declined, and when a catering request is received (paid) or confirmed. The admin Settings switches "Email notifications" and "SMS notifications" turn each channel on or off; SMS is off until an admin turns it on.
+
+Email (Gmail SMTP, no domain needed):
+
+- Turn on 2-Step Verification for the Gmail account, then create an App Password at https://myaccount.google.com/apppasswords.
+- Set on Render: `SMTP_USER` (the Gmail address), `SMTP_PASS` (the 16-letter App Password), and `EMAIL_FROM` (for example `Katana Sushi <yourname@gmail.com>`; the address must be the same Gmail account). `SMTP_HOST` defaults to `smtp.gmail.com` and `SMTP_PORT` to `465` (SSL/TLS); use `587` for STARTTLS.
+- A personal Gmail account sends to about 500 recipients a day. With your own domain later, the same settings work with that provider's SMTP host.
+
+SMS (TextBee):
+
+- TextBee sends texts through the restaurant's Android phone running the TextBee app; the phone must stay online, charged, and have load.
+- Set on Render: `TEXTBEE_API_KEY` and `TEXTBEE_DEVICE_ID` (shown in the TextBee dashboard).
+- Customer numbers like `09171234567` are sent as `+639171234567`.
+
+Locally, nothing is sent unless `SEND_EMAILS_IN_DEVELOPMENT=true` or `SEND_SMS_IN_DEVELOPMENT=true`; messages are printed to the backend log instead.
+
+7) Staff password reset and account setup (Supabase email codes)
+
+Staff sign-ins stay in Katana's own database. Supabase Auth is used only to email a one-time code and confirm it, so staff can reset a forgotten password or set the first password on a new account.
+
+- "Forgot password?" on `/staff/login` opens `/staff/forgot-password`: the staff member enters their email, receives a code, and enters it with a new password. Only active staff accounts get a code; the page shows the same message for unknown emails.
+- When an admin adds a user with "Email them a setup code" ticked, no password is set; the new staff member receives a code and chooses their own password on the same page.
+- Limits: one code per email per minute, and 5 wrong codes lock that email for 15 minutes. Each reset is recorded in the activity log.
+
+Setup in the Supabase dashboard (project `jiewnzbjaiddzbwcjjvm`):
+
+1. Render: set `SUPABASE_URL=https://jiewnzbjaiddzbwcjjvm.supabase.co` and `SUPABASE_ANON_KEY` (Project Settings -> API -> anon/public key).
+2. Authentication -> Providers -> Email: keep Email enabled and allow new users to sign up (codes create a Supabase Auth user the first time).
+3. Authentication -> URL Configuration: set Site URL to the customer site, for example `https://katana-sushi-sage.vercel.app`.
+4. Authentication -> Emails -> Templates: edit both "Magic Link" and "Confirm signup" so the email shows the code, for example:
+
+   ```html
+   <h2>Your Katana Sushi staff code</h2>
+   <p>Your one-time code is <strong>{{ .Token }}</strong>. It expires in about an hour.</p>
+   <p><a href="{{ .SiteURL }}/staff/forgot-password?step=code&email={{ .Email }}">Enter the code</a></p>
+   <p>If you didn't ask for this, you can ignore this email.</p>
+   ```
+
+5. Authentication -> Emails -> SMTP Settings: turn on custom SMTP with the same Gmail account (host `smtp.gmail.com`, port `465`, the Gmail address as username, the App Password as password, sender name "Katana Sushi"). Supabase's built-in email only sends a few messages per hour.

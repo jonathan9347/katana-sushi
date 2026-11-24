@@ -1,5 +1,7 @@
 import { format } from "date-fns";
+import nodemailer, { Transporter } from "nodemailer";
 import { Resend } from "resend";
+import { getNotificationPreferences } from "./notificationPreferences";
 
 type EmailItem = {
   name: string;
@@ -41,7 +43,33 @@ export type CateringEmailDetails = {
 const RESTAURANT_ADDRESS = process.env.RESTAURANT_ADDRESS ?? "Katana Sushi Restaurant";
 const RESTAURANT_PHONE = process.env.RESTAURANT_PHONE ?? "Please contact Katana Sushi";
 
+/**
+ * Gmail SMTP settings. Gmail needs an App Password (Google Account -> Security ->
+ * 2-Step Verification -> App passwords), not the account password.
+ * Port 465 uses implicit SSL/TLS; port 587 uses STARTTLS.
+ */
+export function getSmtpConfig(env: NodeJS.ProcessEnv = process.env) {
+  const user = env.SMTP_USER?.trim();
+  const pass = env.SMTP_PASS?.replace(/\s+/g, "");
+  if (!user || !pass) {
+    return null;
+  }
+  const port = Number(env.SMTP_PORT ?? 465);
+  const safePort = Number.isInteger(port) && port > 0 ? port : 465;
+  const secure = env.SMTP_SECURE ? env.SMTP_SECURE.trim().toLowerCase() === "true" : safePort === 465;
+  return {
+    host: env.SMTP_HOST?.trim() || "smtp.gmail.com",
+    port: safePort,
+    secure,
+    requireTLS: !secure,
+    auth: { user, pass },
+    from: env.EMAIL_FROM?.trim() || `Katana Sushi <${user}>`
+  };
+}
+
 export class EmailService {
+  private smtpTransport: Transporter | null = null;
+
   async sendBookingConfirmation(details: BookingEmailDetails): Promise<void> {
     await this.send(
       details.email,
@@ -89,6 +117,16 @@ export class EmailService {
   }
 
   private async send(to: string, subject: string, html: string): Promise<void> {
+    if (!to?.trim()) {
+      return;
+    }
+
+    const preferences = await getNotificationPreferences();
+    if (!preferences.email) {
+      console.log(`[EmailService] Email notifications are turned off in settings; skipped: ${subject}`);
+      return;
+    }
+
     const shouldSend = process.env.NODE_ENV === "production" || process.env.SEND_EMAILS_IN_DEVELOPMENT === "true";
 
     if (!shouldSend) {
@@ -96,11 +134,27 @@ export class EmailService {
       return;
     }
 
+    // Gmail SMTP when configured; Resend remains as a fallback.
+    const smtp = getSmtpConfig();
+    if (smtp) {
+      if (!this.smtpTransport) {
+        this.smtpTransport = nodemailer.createTransport({
+          host: smtp.host,
+          port: smtp.port,
+          secure: smtp.secure,
+          requireTLS: smtp.requireTLS,
+          auth: smtp.auth
+        });
+      }
+      await this.smtpTransport.sendMail({ from: smtp.from, to, subject, html });
+      return;
+    }
+
     const apiKey = process.env.RESEND_API_KEY?.trim();
     const from = process.env.RESEND_FROM_EMAIL?.trim();
 
     if (!apiKey || !from) {
-      throw new Error("RESEND_API_KEY and RESEND_FROM_EMAIL are required to send email.");
+      throw new Error("Email is not configured: set SMTP_USER and SMTP_PASS (Gmail), or RESEND_API_KEY and RESEND_FROM_EMAIL.");
     }
 
     const resend = new Resend(apiKey);

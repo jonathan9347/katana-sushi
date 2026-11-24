@@ -5,16 +5,19 @@ import helmet from "helmet";
 import jwt from "jsonwebtoken";
 import morgan from "morgan";
 import bcrypt from "bcrypt";
+import crypto from "crypto";
 import fs from "fs";
 import path from "path";
 import multer from "multer";
 import { Prisma } from "@prisma/client";
 import { z } from "zod";
 import { NotificationService } from "./services/notification.service";
+import { registerNotificationPreferences } from "./services/notificationPreferences";
 import { emailService } from "./services/email.service";
 import { generateTransactionNumber } from "./utils/transactionNumber";
 import { jsonBodyParser } from "./lib/jsonBody";
 import paymentRoutes from "./routes/payment.routes";
+import staffPasswordRoutes, { sendStaffSetupCode } from "./routes/staffPassword.routes";
 import { PaymentGatewayFactory } from "./services/payment/paymentGateway.factory";
 import { registerPaymentHooks, PayableBookingCheck, PaymentPurpose } from "./services/payment/paymentHooks";
 import diningPosRoutes from "./routes/diningPos.routes";
@@ -130,6 +133,15 @@ app.set("json replacer", (_key: string, value: unknown) => {
   return numericValue;
 });
 const notificationService = new NotificationService();
+
+// The admin "Email notifications" / "SMS notifications" switches control customer notices.
+registerNotificationPreferences(async () => {
+  const settings = await getSystemSettings();
+  return {
+    email: settings.email_notifications_enabled !== false,
+    sms: settings.sms_notifications_enabled === true
+  };
+});
 const paymentService = new PaymentService();
 
 const defaultStaffUsers = [
@@ -796,6 +808,7 @@ app.use("/api", (req, res, next) => {
   return next();
 });
 app.use("/api", paymentRoutes);
+app.use("/api", staffPasswordRoutes);
 app.use(diningPosRoutes);
 
 app.get("/", (_req, res) => {
@@ -2790,7 +2803,8 @@ app.post("/api/admin/users", async (req, res, next) => {
       name: z.string().trim().min(2).max(120),
       email: z.string().trim().email(),
       role: z.enum(supportedStaffRoles),
-      password: z.string().min(8).max(128)
+      // Leave the password out to email the new staff member a setup code instead.
+      password: z.string().min(8).max(128).optional()
     }).parse(req.body);
 
     const existingUser = await prisma.user.findUnique({ where: { email: body.email.toLowerCase() } });
@@ -2805,7 +2819,8 @@ app.post("/api/admin/users", async (req, res, next) => {
         name: body.name.trim(),
         email: body.email.trim().toLowerCase(),
         role: body.role,
-        password_hash: await bcrypt.hash(body.password, 10),
+        // Without a password the account can't sign in until the staff member sets one with the emailed code.
+        password_hash: await bcrypt.hash(body.password ?? crypto.randomBytes(32).toString("hex"), 10),
         is_active: true
       },
       select: {
@@ -2833,13 +2848,23 @@ app.post("/api/admin/users", async (req, res, next) => {
       }
     });
 
+    let setupCodeSent = false;
+    if (!body.password) {
+      const sent = await sendStaffSetupCode(user.email);
+      setupCodeSent = sent.ok;
+      if (!sent.ok) {
+        console.error(`[StaffPassword] Setup code for ${user.id} was not sent: ${sent.reason}`);
+      }
+    }
+
     return res.status(201).json({
       user: {
         ...user,
         last_login: user.last_login ? user.last_login.toISOString() : null,
         created_at: user.created_at.toISOString(),
         updated_at: user.updated_at.toISOString()
-      }
+      },
+      setup_code_sent: setupCodeSent
     });
   } catch (error) {
     return next(error);
@@ -3560,6 +3585,11 @@ app.post("/api/catering/reservations", async (req, res, next) => {
       remaining: remaining_balance,
       status: reservation.status
     }).catch((error) => console.error("Failed to send catering confirmation email:", error));
+    if (verifiedPayment) void notificationService.sendCateringReceived(
+      reservation.reservation_id ?? inquiry_id,
+      { name: reservation.customer_name ?? body.customer_name, phone: reservation.customer_phone ?? body.customer_phone },
+      paidAmount
+    );
 
     return res.status(201).json({
       success: true,
@@ -3790,6 +3820,13 @@ registerPaymentHooks({
         remaining: Number(details.remaining_balance),
         status: details.status
       }).catch((error) => console.error("Failed to send catering confirmation email:", error));
+    }
+    if (details) {
+      void notificationService.sendCateringReceived(
+        details.reservation_id ?? intent.bookingId,
+        { name: details.customer_name, phone: details.customer_phone },
+        Number(details.downpayment_amount)
+      );
     }
   },
   isAllowedReturnUrl: (url) => {
@@ -4162,6 +4199,14 @@ app.put("/api/staff/catering/reservations/:id/approve", async (req, res, next) =
         remaining: reservation.remaining_balance,
         status: reservation.status
       }).catch((error) => console.error("Failed to send catering approval email:", error));
+      void notificationService.sendCateringApproved(
+        reservation.reservation_id ?? reservation.id,
+        {
+          name: reservation.customer_name ?? reservation.inquiry?.customer_name,
+          phone: reservation.customer_phone ?? reservation.inquiry?.customer_phone
+        },
+        reservation.event_date ?? reservation.inquiry?.event_date
+      );
     }
 
     return res.json({ reservation });

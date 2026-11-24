@@ -25,7 +25,8 @@ export type StaffUserPayload = {
 };
 
 export type NewStaffUserPayload = StaffUserPayload & {
-  password: string;
+  /** Leave out to email the new staff member a setup code instead. */
+  password?: string;
 };
 
 export async function fetchStaffUsers(page = 1, limit = 20) {
@@ -36,8 +37,8 @@ export async function fetchStaffUsers(page = 1, limit = 20) {
 }
 
 export async function createStaffUser(payload: NewStaffUserPayload) {
-  const response = await api.post<{ user: StaffUser }>("/api/admin/users", payload);
-  return response.data.user;
+  const response = await api.post<{ user: StaffUser; setup_code_sent?: boolean }>("/api/admin/users", payload);
+  return { user: response.data.user, setupCodeSent: response.data.setup_code_sent === true };
 }
 
 export async function updateStaffUser(userId: string, payload: StaffUserPayload) {

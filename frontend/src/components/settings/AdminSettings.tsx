@@ -117,6 +117,8 @@ export default function AdminSettings({ activeTab }: { activeTab: "users" | "act
     role: "staff",
     password: ""
   });
+  // New staff: email a setup code (they choose their own password) or set one now.
+  const [sendSetupCode, setSendSetupCode] = useState(true);
 
   const usersQuery = useQuery({
     queryKey: ["admin", "users"],
@@ -147,6 +149,7 @@ export default function AdminSettings({ activeTab }: { activeTab: "users" | "act
 
   const openAddDrawer = () => {
     setEditingUserId(null);
+    setSendSetupCode(true);
     setForm({ name: "", email: "", role: "staff", password: "" });
     setResetPassword("");
     setDrawerOpen(true);
@@ -171,10 +174,16 @@ export default function AdminSettings({ activeTab }: { activeTab: "users" | "act
         return updateStaffUser(editingUserId, payload);
       }
 
-      return createStaffUser({ ...payload, password: form.password.trim() });
+      const created = await createStaffUser(sendSetupCode ? payload : { ...payload, password: form.password.trim() });
+      return created;
     },
-    onSuccess: () => {
-      toast(editingUserId ? "User updated successfully." : "User added successfully.");
+    onSuccess: (result) => {
+      const setupNote = !editingUserId && sendSetupCode
+        ? result && "setupCodeSent" in result && result.setupCodeSent
+          ? " A setup code was emailed to them."
+          : " The setup code couldn't be sent; they can use \"Forgot password?\" on the sign-in page."
+        : "";
+      toast(editingUserId ? "User updated successfully." : `User added successfully.${setupNote}`);
       closeDrawer();
       queryClient.invalidateQueries({ queryKey: ["admin", "users"] });
       queryClient.invalidateQueries({ queryKey: ["admin", "activity-logs"] });
@@ -202,7 +211,7 @@ export default function AdminSettings({ activeTab }: { activeTab: "users" | "act
   const canSubmitUser =
     form.name.trim() &&
     form.email.trim() &&
-    (!editingUserId ? form.password.trim().length >= 8 : true) &&
+    (!editingUserId && !sendSetupCode ? form.password.trim().length >= 8 : true) &&
     !upsertUserMutation.isPending;
 
   return (
@@ -430,7 +439,22 @@ export default function AdminSettings({ activeTab }: { activeTab: "users" | "act
                 </select>
               </label>
 
-              {!editingUserId && <label className="block space-y-2 text-sm text-slate-700">
+              {!editingUserId && (
+                <label className="flex items-start gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
+                  <input
+                    type="checkbox"
+                    className="mt-0.5 h-4 w-4 accent-red-700"
+                    checked={sendSetupCode}
+                    onChange={(event) => setSendSetupCode(event.target.checked)}
+                  />
+                  <span>
+                    <span className="block font-semibold text-slate-900">Email them a setup code</span>
+                    <span className="block text-slate-500">They choose their own password from the sign-in page. Untick to set a password now.</span>
+                  </span>
+                </label>
+              )}
+
+              {!editingUserId && !sendSetupCode && <label className="block space-y-2 text-sm text-slate-700">
                 <span>Password</span>
                 <input
                   type="password"

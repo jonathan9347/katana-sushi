@@ -24,6 +24,7 @@ import AnalyticsPage from "./pages/staff/analytics";
 import Dashboard from "./pages/staff/Dashboard";
 import SettingsPage from "./pages/staff/Settings";
 import Login from "./pages/staff/Login";
+import ForgotPassword from "./pages/staff/ForgotPassword";
 import PosPage from "./pages/staff/pos";
 import PosHistory from "./pages/staff/pos/PosHistory";
 import DineInReservations from "./pages/staff/reservations/DineInReservations";
@@ -85,6 +86,7 @@ export default function App() {
       <Route path="/catering/inquiry" element={<InnerCustomerLayout><CateringInquiry /></InnerCustomerLayout>} />
       <Route path="/feedback" element={<InnerCustomerLayout><Feedback /></InnerCustomerLayout>} />
       <Route path="/staff/login" element={<Login />} />
+      <Route path="/staff/forgot-password" element={<ForgotPassword />} />
       <Route path="/staff/dashboard" element={<StaffPage roles={["admin", "inventory_manager", "cashier", "receptionist", "event_coordinator", "chef"]}><Dashboard /></StaffPage>} />
       <Route path="/staff/inventory" element={<StaffPage roles={["admin", "inventory_manager"]}><InventoryPage /></StaffPage>} />
       <Route path="/staff/inventory/read-only" element={<StaffPage roles={["admin", "inventory_manager", "chef"]}><InventoryPage readOnly /></StaffPage>} />

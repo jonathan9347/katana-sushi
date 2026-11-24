@@ -233,13 +233,12 @@ export default function Login() {
                 <input type="checkbox" />
                 <span>Keep me signed in</span>
               </label>
-              <button
-                type="button"
+              <Link
+                to={`/staff/forgot-password${validEmail(email) ? `?email=${encodeURIComponent(email.trim())}` : ""}`}
                 className="staff-login-forgot"
-                onClick={() => setMessage("Contact your manager to reset your login access.")}
               >
                 Forgot password?
-              </button>
+              </Link>
             </div>
 
             {message && <p className="staff-login-server-message" role="alert">{message}</p>}
@@ -265,7 +264,7 @@ export default function Login() {
           </form>
 
           <div className="staff-login-card-footer">
-            <span>Need help?</span> Contact your manager to reset your login access.
+            <span>Need help?</span> Use "Forgot password?" to get a reset code by email, or ask your manager.
           </div>
         </div>
         <Link to="/" className="staff-login-public-link">Return to public site</Link>
