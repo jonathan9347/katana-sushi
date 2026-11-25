@@ -61,7 +61,29 @@ test("printer test slip invokes print and keeps every line plain and within 32 c
   const popup = await popupPromise;
   await expect(popup.locator("body")).toHaveAttribute("data-print-requested", "true");
   await expectPrintLinesWithin32(popup);
-  await expect(popup.locator("pre")).toContainText("PHP 1,234.56");
+  const printContent = await popup.locator("pre").textContent() ?? "";
+  const printLines = printContent.split("\n");
+  const edgeLine = `|${"-".repeat(30)}|`;
+  expect(printLines).toContain("12345678901234567890123456789012");
+  expect(printLines.filter((line) => line === edgeLine)).toHaveLength(2);
+  expect(printContent).toContain("Paper width: 58mm");
+  expect(printContent).toContain("Printable area: 48 mm");
+  expect(printContent).toContain("ORDER SLIP - NOT A RECEIPT");
+  expect(printContent).toContain("BILL SLIP - NOT A RECEIPT");
+  expect(printContent).toContain("SAMPLE SUSHI");
+  expect(printContent).toContain("RECEIPT");
+  expect(printContent).toContain("PAID");
+  expect(printContent).not.toMatch(/address|\bTIN\b|official receipt|\binvoice\b/i);
+
+  const printStyle = await popup.locator("style").textContent() ?? "";
+  expect(printStyle).toContain("@page { size: 58mm auto; margin: 0; }");
+  expect(printStyle).toContain("font: 7pt/1.2");
+  const layout = await popup.locator("pre").evaluate((element) => ({
+    width: element.getBoundingClientRect().width,
+    fontSize: Number.parseFloat(getComputedStyle(element).fontSize)
+  }));
+  expect(layout.width).toBeLessThanOrEqual((48 * 96) / 25.4);
+  expect(layout.fontSize).toBeCloseTo((7 * 96) / 72, 2);
 });
 
 test("reprinting a committed order prints saved session totals without committing or changing stock", async ({ page }) => {

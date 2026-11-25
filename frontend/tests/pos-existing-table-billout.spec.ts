@@ -185,6 +185,7 @@ test("existing table order can be committed, previewed with Senior/PWD discount,
   await expect(slip.locator("body")).toContainText("ORDER SLIP - NOT A RECEIPT");
   await expect(slip.locator("body")).toContainText("Cashier: Test Cashier");
   await expect(slip.locator("body")).toContainText("Table total so far");
+  await expect(slip.locator("body")).not.toContainText(/address|\bTIN\b|official receipt|\binvoice\b/i);
   await expectPrintLinesWithin32(slip);
   await expect(orderBuilder.getByRole("button", { name: "Bill out" })).toBeVisible();
   expect(confirmationCount).toBe(1);
@@ -215,13 +216,16 @@ test("existing table order can be committed, previewed with Senior/PWD discount,
   await expect(billSlip.locator("body")).toContainText("TOTAL TO PAY");
   await expect(billSlip.locator("body")).toContainText("PHP 940.00");
   await expect(billSlip.locator("body")).not.toContainText("Payment:");
+  await expect(billSlip.locator("body")).not.toContainText(/address|\bTIN\b|official receipt|\binvoice\b/i);
   await expect(billSlip.locator("body")).toHaveAttribute("data-print-requested", "true");
   await expectPrintLinesWithin32(billSlip);
   await expect(receipt.locator("body")).not.toContainText("POS-001");
   releaseCheckout();
   await expect(receipt.locator("body")).toContainText("POS-001");
   await expect(receipt.locator("body")).toContainText("PAID");
+  await expect(receipt.locator("body")).toContainText("Thank you");
   await expect(receipt.locator("body")).toContainText("TOTAL PAID");
+  await expect(receipt.locator("body")).not.toContainText(/address|\bTIN\b|official receipt|\binvoice\b/i);
   const billSlipTotal = printedAmount(await billSlip.locator("pre").textContent(), "TOTAL TO PAY");
   const receiptTotal = printedAmount(await receipt.locator("pre").textContent(), "TOTAL PAID");
   expect(billSlipTotal).toBe(receiptTotal);

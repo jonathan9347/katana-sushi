@@ -616,13 +616,51 @@ export default function PosPage() {
       toast("Allow pop-ups for this site to print the test slip.");
       return;
     }
+    const ruler = "12345678901234567890123456789012";
+    const edgeLine = `|${"-".repeat(30)}|`;
     try {
       printPlainLines(printWindow, "Printer test slip", [
         "PRINTER TEST SLIP",
         "Paper width: " + systemSettings.receipt_paper_size,
-        "Each line is at most 32 chars.",
-        "PHP 1,234.56",
-        "ABCDEFGHIJKLMNOPQRSTUVWXYZ123456"
+        "Printable area: 48 mm",
+        ruler,
+        edgeLine,
+        edgeLine,
+        "",
+        "ORDER SLIP - NOT A RECEIPT",
+        "Table: 4",
+        "Order: DEMO-ORDER-001",
+        "Date: 2026-11-25 13:00",
+        "Cashier: Demo Cashier",
+        "1 x Sample Roll",
+        "Amount: PHP 250.00",
+        "This order total: PHP 250.00",
+        "Table total so far: PHP 500.00",
+        "",
+        "BILL SLIP - NOT A RECEIPT",
+        "Table: 4",
+        "A LA CARTE ITEMS",
+        "1 x Sample Roll",
+        "A la carte subtotal: PHP 250.00",
+        "UNLIMITED PACKAGES",
+        "2 heads x PHP 500.00",
+        "Unlimited subtotal: PHP 1,000.00",
+        "ADD-ONS: PHP 100.00",
+        "LEFTOVER FEES: PHP 50.00",
+        "Senior/PWD: -PHP 50.00",
+        "TOTAL TO PAY: PHP 1,350.00",
+        "",
+        "SAMPLE SUSHI",
+        "RECEIPT",
+        "PAID",
+        "Receipt no: DEMO-RECEIPT-001",
+        "Date: 2026-11-25 13:00",
+        "1 x Sample Roll: PHP 250.00",
+        "TOTAL PAID: PHP 250.00",
+        "Payment: CASH",
+        "Amount received: PHP 300.00",
+        "Change: PHP 50.00",
+        "Thank you!"
       ], systemSettings.receipt_paper_size);
     } catch (error) {
       printWindow.close();

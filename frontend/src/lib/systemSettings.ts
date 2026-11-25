@@ -28,7 +28,7 @@ export const defaultSystemSettings: SystemSettings = {
   timezone: "Asia/Manila",
   currency: "PHP",
   tax_rate_percent: 12,
-  receipt_paper_size: "80mm",
+  receipt_paper_size: "58mm",
   receipt_footer: "Thank you for dining with us!",
   max_party_size: 30,
   reservation_duration_minutes: 90,

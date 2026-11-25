@@ -1,4 +1,5 @@
 export const PRINT_LINE_WIDTH = 32;
+export const PRINTABLE_WIDTH_MM = 48;
 
 export function plainText(value: unknown) {
   return String(value ?? "")
@@ -92,8 +93,8 @@ export function printPlainLines(
         <style>
           @page { size: ${pageSettings.size}; margin: 0; }
           html, body { width: ${pageSettings.width}; margin: 0; padding: 0; }
-          body { color: #000; background: #fff; font: 10px/1.3 "Courier New", monospace; }
-          pre { box-sizing: border-box; width: 32ch; margin: 0; padding: 0; white-space: pre; overflow-wrap: normal; }
+          body { color: #000; background: #fff; font: 7pt/1.2 "Courier New", monospace; }
+          pre { box-sizing: border-box; width: 32ch; max-width: ${PRINTABLE_WIDTH_MM}mm; margin: 0 auto; padding: 0; white-space: pre; overflow-wrap: normal; }
           @media print { html, body { margin: 0 !important; padding: 0 !important; } }
         </style>
       </head>
