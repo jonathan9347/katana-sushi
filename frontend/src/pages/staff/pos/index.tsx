@@ -176,6 +176,7 @@ export default function PosPage() {
   );
   const [paymentOpen, setPaymentOpen] = useState(false);
   const [billOutOpen, setBillOutOpen] = useState(false);
+  const [billOutStep, setBillOutStep] = useState<"bill" | "payment">("bill");
   const [billOutGuestCount, setBillOutGuestCount] = useState("1");
   const [billOutSeniorPwdCount, setBillOutSeniorPwdCount] = useState("0");
   const [billOutPaymentMethod, setBillOutPaymentMethod] = useState<"cash" | "gcash" | "bank_transfer">("cash");
@@ -344,12 +345,6 @@ export default function PosPage() {
       return { transaction: response.data.transaction, printWindow };
     },
     onSuccess: ({ transaction, printWindow }) => {
-      setPaymentOpen(false);
-      clearCurrentOrderPath();
-      queryClient.invalidateQueries({ queryKey: ["inventory"] });
-      queryClient.invalidateQueries({ queryKey: ["products"] });
-      queryClient.invalidateQueries({ queryKey: ["pos", "transactions"] });
-      toast("Payment completed.");
       try {
         printReceipt(transaction, systemSettings, printWindow);
       } catch (error) {
@@ -357,6 +352,12 @@ export default function PosPage() {
         console.error("Takeout receipt printing failed", error);
         toast("Payment completed, but the receipt could not be printed. Check the print window and retry from transaction history.");
       }
+      setPaymentOpen(false);
+      clearCurrentOrderPath();
+      queryClient.invalidateQueries({ queryKey: ["inventory"] });
+      queryClient.invalidateQueries({ queryKey: ["products"] });
+      queryClient.invalidateQueries({ queryKey: ["pos", "transactions"] });
+      toast("Payment completed.");
     },
     onError: (error, input) => {
       input.printWindow.close();
@@ -445,7 +446,15 @@ export default function PosPage() {
       return { ...response.data, ...input };
     },
     onSuccess: ({ transaction, receiptWindow, billSlipTotal }) => {
+      try {
+        printReceipt(transaction, systemSettings, receiptWindow);
+      } catch (error) {
+        receiptWindow.close();
+        console.error("Bill-out receipt printing failed", error);
+        toast("The table bill was completed, but the receipt could not be printed.");
+      }
       setBillOutOpen(false);
+      setBillOutStep("bill");
       clearCurrentOrderPath();
       setSelectedDiningSessionId("");
       queryClient.invalidateQueries({ queryKey: ["pos", "dining", "sessions"] });
@@ -460,13 +469,6 @@ export default function PosPage() {
         );
       } else {
         setBillOutMismatchWarning("");
-      }
-      try {
-        printReceipt(transaction, systemSettings, receiptWindow);
-      } catch (error) {
-        receiptWindow.close();
-        console.error("Bill-out receipt printing failed", error);
-        toast("The table bill was completed, but the receipt could not be printed.");
       }
     },
     onError: (error, input) => {
@@ -496,12 +498,6 @@ export default function PosPage() {
       return { ...response.data, printWindow: input.printWindow };
     },
     onSuccess: ({ transaction, printWindow }) => {
-      setPaymentOpen(false);
-      setSelectedPickupOrder(null);
-      setSelectionView("menu");
-      setLastPickupReceipt(transaction);
-      queryClient.invalidateQueries({ queryKey: ["pos", "pickup-orders"] });
-      queryClient.invalidateQueries({ queryKey: ["inventory"] });
       if (printWindow) {
         try {
           printReceipt(transaction, systemSettings, printWindow);
@@ -514,6 +510,12 @@ export default function PosPage() {
       } else {
         toast("Pickup order completed. Use Print Receipt to print the receipt.");
       }
+      setPaymentOpen(false);
+      setSelectedPickupOrder(null);
+      setSelectionView("menu");
+      setLastPickupReceipt(transaction);
+      queryClient.invalidateQueries({ queryKey: ["pos", "pickup-orders"] });
+      queryClient.invalidateQueries({ queryKey: ["inventory"] });
     },
     onError: (error, input) => {
       input.printWindow?.close();
@@ -669,26 +671,35 @@ export default function PosPage() {
     }
   }
 
-  function handleBillOutConfirm() {
+  function handlePrintBillSlip() {
     const preview = billOutPreviewQuery.data;
-    if (!activeSession || !preview || billOutMutation.isPending) return;
+    if (!activeSession || !preview || billOutPreviewQuery.isFetching || billOutMutation.isPending) return;
 
     const billSlipWindow = window.open("", "_blank", "width=380,height=640");
-    const receiptWindow = window.open("", "_blank", "width=380,height=640");
-    if (!billSlipWindow || !receiptWindow) {
-      billSlipWindow?.close();
-      receiptWindow?.close();
-      toast("Allow pop-ups for this site to print the bill slip and receipt before bill-out.");
+    if (!billSlipWindow) {
+      toast("Allow pop-ups for this site to print the bill.");
       return;
     }
 
     try {
-      printBillSlip(billSlipWindow, preview, systemSettings.receipt_paper_size);
+      printBillSlip(billSlipWindow, preview, systemSettings.receipt_paper_size, () => {
+        billSlipWindow.close();
+        setBillOutStep("payment");
+      });
     } catch (error) {
       billSlipWindow.close();
-      receiptWindow.close();
       console.error("Bill slip printing failed", error);
-      toast("The bill slip could not be printed; checkout was not started.");
+      toast("The bill slip could not be printed. Checkout has not started.");
+    }
+  }
+
+  function handleBillOutConfirm() {
+    const preview = billOutPreviewQuery.data;
+    if (!activeSession || !preview || billOutStep !== "payment" || billOutMutation.isPending) return;
+
+    const receiptWindow = window.open("", "_blank", "width=380,height=640");
+    if (!receiptWindow) {
+      toast("Allow pop-ups for this site to print the paid receipt after checkout.");
       return;
     }
 
@@ -1162,13 +1173,14 @@ export default function PosPage() {
                     headcount,
                     1
                   )));
+                  setBillOutStep("bill");
                   setBillOutSeniorPwdCount("0");
                   setBillOutCashReceived("");
                   setBillOutApplyDiscount(false);
                   setBillOutOpen(true);
                 }}
               >
-                Bill out
+                Print Bill
               </Button>
               {(carts.dine_in_ala_carte.length > 0 || carts.dine_in_unlimited.length > 0) && (
                 <p className="text-xs text-slate-600">Commit or clear the dine-in cart before billing out.</p>
@@ -1330,12 +1342,15 @@ export default function PosPage() {
       />
       <Dialog
         open={billOutOpen}
-        title={`Bill out Table ${activeSession?.table.table_number ?? ""}`}
-        onClose={() => setBillOutOpen(false)}
+        title={`${billOutStep === "bill" ? "Print Bill" : "Checkout"} Table ${activeSession?.table.table_number ?? ""}`}
+        onClose={() => {
+          setBillOutOpen(false);
+          setBillOutStep("bill");
+        }}
         panelClassName="max-w-xl"
       >
         <div className="grid gap-4">
-          {billOutHasDiscountableItems && (
+          {billOutStep === "bill" && billOutHasDiscountableItems && (
             <SeniorPwdDiscountFields
               applyDiscount={billOutApplyDiscount}
               guestCount={billOutGuestCount}
@@ -1361,66 +1376,75 @@ export default function PosPage() {
               <TotalLine label="Amount due" value={billOutPreviewQuery.data.total} strong />
             </div>
           )}
-          <div className="grid gap-2">
-            <p className="text-sm font-semibold uppercase text-slate-500">Payment method</p>
-            <div aria-label="Bill-out payment method" className="grid grid-cols-3 gap-2" role="group">
-              {([
-                ["cash", "Cash", <Banknote key="cash-icon" className="h-5 w-5" />],
-                ["gcash", "GCash", <Smartphone key="gcash-icon" className="h-5 w-5" />],
-                ["bank_transfer", "BPI", <Landmark key="bpi-icon" className="h-5 w-5" />]
-              ] as const).map(([value, label, icon]) => (
-                <button
-                  key={value}
-                  type="button"
-                  aria-pressed={billOutPaymentMethod === value}
-                  className={`flex min-h-16 items-center justify-center gap-2 rounded-md border p-3 text-sm font-semibold transition ${
-                    billOutPaymentMethod === value
-                      ? "border-red-700 bg-red-50 text-red-800"
-                      : "border-slate-300 bg-white text-slate-900 hover:bg-slate-50"
-                  }`}
-                  onClick={() => setBillOutPaymentMethod(value)}
-                >
-                  {icon}
-                  {label}
-                </button>
-              ))}
-            </div>
-          </div>
-          {billOutPaymentMethod === "cash" && (
-            <label className="grid gap-1 text-sm font-medium text-slate-700">
-              Cash received
-              <input
-                aria-label="Bill-out cash received"
-                className="h-10 rounded-md border border-slate-300 px-3"
-                type="number"
-                min={0}
-                step="0.01"
-                value={billOutCashReceived}
-                onChange={(event) => setBillOutCashReceived(event.target.value)}
-              />
-              {billOutPreviewQuery.data && (
-                <span className="text-sm font-semibold text-slate-700">
-                  Change: {money(Math.max(
-                    Number(billOutCashReceived) - billOutPreviewQuery.data.total,
-                    0
+          {billOutStep === "payment" && (
+            <>
+              <div className="grid gap-2">
+                <p className="text-sm font-semibold uppercase text-slate-500">Payment method</p>
+                <div aria-label="Bill-out payment method" className="grid grid-cols-3 gap-2" role="group">
+                  {([
+                    ["cash", "Cash", <Banknote key="cash-icon" className="h-5 w-5" />],
+                    ["gcash", "GCash", <Smartphone key="gcash-icon" className="h-5 w-5" />],
+                    ["bank_transfer", "BPI", <Landmark key="bpi-icon" className="h-5 w-5" />]
+                  ] as const).map(([value, label, icon]) => (
+                    <button
+                      key={value}
+                      type="button"
+                      aria-pressed={billOutPaymentMethod === value}
+                      className={`flex min-h-16 items-center justify-center gap-2 rounded-md border p-3 text-sm font-semibold transition ${
+                        billOutPaymentMethod === value
+                          ? "border-red-700 bg-red-50 text-red-800"
+                          : "border-slate-300 bg-white text-slate-900 hover:bg-slate-50"
+                      }`}
+                      onClick={() => setBillOutPaymentMethod(value)}
+                    >
+                      {icon}
+                      {label}
+                    </button>
                   ))}
-                </span>
+                </div>
+              </div>
+              {billOutPaymentMethod === "cash" && (
+                <label className="grid gap-1 text-sm font-medium text-slate-700">
+                  Cash received
+                  <input
+                    aria-label="Bill-out cash received"
+                    className="h-10 rounded-md border border-slate-300 px-3"
+                    type="number"
+                    min={0}
+                    step="0.01"
+                    value={billOutCashReceived}
+                    onChange={(event) => setBillOutCashReceived(event.target.value)}
+                  />
+                  {billOutPreviewQuery.data && (
+                    <span className="text-sm font-semibold text-slate-700">
+                      Change: {money(Math.max(
+                        Number(billOutCashReceived) - billOutPreviewQuery.data.total,
+                        0
+                      ))}
+                    </span>
+                  )}
+                </label>
               )}
-            </label>
+            </>
+          )}
+          {billOutStep === "payment" && (
+            <p className="text-sm text-slate-600">The unpaid bill has been printed. Complete payment to print the paid receipt.</p>
           )}
           <Button
             className="pos-primary-action"
-            disabled={
-              billOutMutation.isPending
-              || !billOutPreviewQuery.data
-              || (billOutPaymentMethod === "cash"
-                && Number(billOutCashReceived) < (billOutPreviewQuery.data?.total ?? Number.POSITIVE_INFINITY))
-            }
-            onClick={handleBillOutConfirm}
+            disabled={billOutStep === "bill"
+              ? !billOutPreviewQuery.data || billOutPreviewQuery.isFetching
+              : billOutMutation.isPending
+                || !billOutPreviewQuery.data
+                || (billOutPaymentMethod === "cash"
+                  && Number(billOutCashReceived) < (billOutPreviewQuery.data?.total ?? Number.POSITIVE_INFINITY))}
+            onClick={billOutStep === "bill" ? handlePrintBillSlip : handleBillOutConfirm}
           >
-            {billOutMutation.isPending
-              ? <><LoaderCircle className="pos-action-spinner mr-2 inline h-4 w-4" aria-hidden="true" />Completing bill...</>
-              : "Confirm bill out"}
+            {billOutStep === "bill"
+              ? "Print Bill"
+              : billOutMutation.isPending
+                ? <><LoaderCircle className="pos-action-spinner mr-2 inline h-4 w-4" aria-hidden="true" />Completing payment...</>
+                : "Complete Payment"}
           </Button>
         </div>
       </Dialog>
@@ -1437,7 +1461,12 @@ function TotalLine({ label, value, strong = false }: { label: string; value: num
   );
 }
 
-function printBillSlip(windowTarget: Window, preview: DiningCheckoutPreview, paperSize: string) {
+function printBillSlip(
+  windowTarget: Window,
+  preview: DiningCheckoutPreview,
+  paperSize: string,
+  afterPrint: () => void
+) {
   const lines = ["BILL SLIP - NOT A RECEIPT"];
   addPrintPair(lines, "Table", preview.table_number);
 
@@ -1489,7 +1518,7 @@ function printBillSlip(windowTarget: Window, preview: DiningCheckoutPreview, pap
   }
   lines.push("-".repeat(32));
   addPrintAmount(lines, "TOTAL TO PAY", money(preview.total));
-  printPlainLines(windowTarget, "Bill slip", lines, paperSize);
+  printPlainLines(windowTarget, "Bill slip", lines, paperSize, afterPrint);
 }
 
 function printReceipt(transaction: PosTransaction, settings: SystemSettings, receiptWindow?: Window) {

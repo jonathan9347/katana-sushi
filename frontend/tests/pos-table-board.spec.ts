@@ -199,7 +199,7 @@ test("existing-table board only selects occupied tables with a live session", as
   await tableBoard.getByRole("button", { name: "Select Table 11, Occupied" }).click();
   await expect(orderBuilder.getByRole("button", { name: /California Roll/ })).toBeVisible();
   await expect(orderBuilder.getByRole("button", { name: "Print order" })).toBeVisible();
-  await expect(orderBuilder.getByRole("button", { name: "Bill out" })).toBeVisible();
+  await expect(orderBuilder.getByRole("button", { name: "Print Bill" })).toBeVisible();
   await expect(orderBuilder.getByRole("button", { name: "Checkout" })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Open table session tools" })).toHaveCount(0);
 });

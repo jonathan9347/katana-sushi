@@ -40,6 +40,23 @@ async function signIn(page: import("@playwright/test").Page) {
   });
 }
 
+async function printBillAndContinue(
+  page: import("@playwright/test").Page,
+  billDialog: import("@playwright/test").Locator,
+  beforeContinue?: () => void
+) {
+  const popupPromise = page.waitForEvent("popup");
+  await billDialog.getByRole("button", { name: "Print Bill", exact: true }).click();
+  const popup = await popupPromise;
+  await expect(popup.locator("body")).toHaveAttribute("data-print-requested", "true");
+  await expectPrintLinesWithin32(popup);
+  const content = await popup.locator("pre").textContent() ?? "";
+  beforeContinue?.();
+  await popup.evaluate(() => window.dispatchEvent(new Event("afterprint")));
+  await expect(page.getByRole("dialog", { name: "Checkout Table 4" })).toBeVisible();
+  return content;
+}
+
 function printedAmount(text: string | null, label: string) {
   const line = text?.split("\n").find((candidate) => candidate.includes(label));
   const amount = line?.match(/PHP ([\d,]+\.\d{2})/)?.[1];
@@ -187,38 +204,40 @@ test("existing table order can be committed, previewed with Senior/PWD discount,
   await expect(slip.locator("body")).toContainText("Table total so far");
   await expect(slip.locator("body")).not.toContainText(/address|\bTIN\b|official receipt|\binvoice\b/i);
   await expectPrintLinesWithin32(slip);
-  await expect(orderBuilder.getByRole("button", { name: "Bill out" })).toBeVisible();
+  await expect(orderBuilder.getByRole("button", { name: "Print Bill" })).toBeVisible();
   expect(confirmationCount).toBe(1);
 
-  await orderBuilder.getByRole("button", { name: "Bill out" }).click();
-  const billOut = page.getByRole("dialog", { name: "Bill out Table 4" });
+  await orderBuilder.getByRole("button", { name: "Print Bill" }).click();
+  const billOut = page.getByRole("dialog", { name: "Print Bill Table 4" });
   await expect(billOut.getByLabel("Bill-out guest count")).toHaveCount(0);
   await expect(billOut.getByLabel("Senior/PWD guest count")).toHaveCount(0);
-  const paymentMethods = billOut.getByRole("group", { name: "Bill-out payment method" });
-  await expect(paymentMethods.getByRole("button", { name: "Cash", exact: true })).toBeVisible();
-  await expect(paymentMethods.getByRole("button", { name: "GCash", exact: true })).toBeVisible();
-  await expect(paymentMethods.getByRole("button", { name: "BPI", exact: true })).toBeVisible();
+  await expect(billOut.getByRole("group", { name: "Bill-out payment method" })).toHaveCount(0);
   await billOut.getByRole("button", { name: "Apply Discount" }).click();
   await billOut.getByLabel("Bill-out guest count").fill("10");
   await billOut.getByLabel("Senior/PWD guest count").fill("3");
   await expect(billOut).toContainText("Senior/PWD discount (3 guests × 20% of PHP 1,000.00 a-la-carte total)");
   await expect(billOut).toContainText("PHP 940.00");
-  await billOut.getByLabel("Bill-out cash received").fill("1000");
-  await expect(billOut).toContainText("Change: PHP 60.00");
 
-  const popupPages: import("@playwright/test").Page[] = [];
-  page.on("popup", (popup) => popupPages.push(popup));
-  await billOut.getByRole("button", { name: "Confirm bill out" }).click();
-  await expect.poll(() => popupPages.length).toBe(2);
+  const billSlipText = await printBillAndContinue(page, billOut, () => {
+    expect(checkoutBody).toBeNull();
+  });
+  const checkout = page.getByRole("dialog", { name: "Checkout Table 4" });
+  const paymentMethods = checkout.getByRole("group", { name: "Bill-out payment method" });
+  await expect(paymentMethods.getByRole("button", { name: "Cash", exact: true })).toBeVisible();
+  await expect(paymentMethods.getByRole("button", { name: "GCash", exact: true })).toBeVisible();
+  await expect(paymentMethods.getByRole("button", { name: "BPI", exact: true })).toBeVisible();
+  await checkout.getByLabel("Bill-out cash received").fill("1000");
+  await expect(checkout).toContainText("Change: PHP 60.00");
+
+  const receiptPopup = page.waitForEvent("popup");
+  await checkout.getByRole("button", { name: "Complete Payment" }).click();
+  const receipt = await receiptPopup;
   await checkoutStarted;
-  const [billSlip, receipt] = popupPages;
-  await expect(billSlip.locator("body")).toContainText("BILL SLIP - NOT A RECEIPT");
-  await expect(billSlip.locator("body")).toContainText("TOTAL TO PAY");
-  await expect(billSlip.locator("body")).toContainText("PHP 940.00");
-  await expect(billSlip.locator("body")).not.toContainText("Payment:");
-  await expect(billSlip.locator("body")).not.toContainText(/address|\bTIN\b|official receipt|\binvoice\b/i);
-  await expect(billSlip.locator("body")).toHaveAttribute("data-print-requested", "true");
-  await expectPrintLinesWithin32(billSlip);
+  expect(billSlipText).toContain("BILL SLIP - NOT A RECEIPT");
+  expect(billSlipText).toContain("TOTAL TO PAY");
+  expect(billSlipText).toContain("PHP 940.00");
+  expect(billSlipText).not.toContain("Payment:");
+  expect(billSlipText).not.toMatch(/address|\bTIN\b|official receipt|\binvoice\b/i);
   await expect(receipt.locator("body")).not.toContainText("POS-001");
   releaseCheckout();
   await expect(receipt.locator("body")).toContainText("POS-001");
@@ -226,7 +245,7 @@ test("existing table order can be committed, previewed with Senior/PWD discount,
   await expect(receipt.locator("body")).toContainText("Thank you");
   await expect(receipt.locator("body")).toContainText("TOTAL PAID");
   await expect(receipt.locator("body")).not.toContainText(/address|\bTIN\b|official receipt|\binvoice\b/i);
-  const billSlipTotal = printedAmount(await billSlip.locator("pre").textContent(), "TOTAL TO PAY");
+  const billSlipTotal = printedAmount(billSlipText, "TOTAL TO PAY");
   const receiptTotal = printedAmount(await receipt.locator("pre").textContent(), "TOTAL PAID");
   expect(billSlipTotal).toBe(receiptTotal);
   expect(receiptTotal).toBe(940);
@@ -242,7 +261,7 @@ test("existing table order can be committed, previewed with Senior/PWD discount,
     paymentMethod: "cash",
     cashReceived: 1000
   });
-  await expect(orderBuilder.getByRole("button", { name: "Bill out" })).toHaveCount(0);
+  await expect(orderBuilder.getByRole("button", { name: "Print Bill" })).toHaveCount(0);
 });
 
 test("bill-out warns when the charged total differs from the printed preview", async ({ page }) => {
@@ -318,10 +337,14 @@ test("bill-out warns when the charged total differs from the printed preview", a
   await page.goto("/staff/pos");
   await page.getByRole("button", { name: "Existing Table" }).click();
   await page.getByRole("button", { name: "Select Table 4, Occupied" }).click();
-  await page.getByRole("button", { name: "Bill out" }).click();
-  const billOut = page.getByRole("dialog", { name: "Bill out Table 4" });
-  await billOut.getByLabel("Bill-out cash received").fill("100");
-  await billOut.getByRole("button", { name: "Confirm bill out" }).click();
+  await page.getByRole("button", { name: "Print Bill" }).click();
+  const billOut = page.getByRole("dialog", { name: "Print Bill Table 4" });
+  await printBillAndContinue(page, billOut);
+  const checkout = page.getByRole("dialog", { name: "Checkout Table 4" });
+  await checkout.getByLabel("Bill-out cash received").fill("100");
+  const receiptPopup = page.waitForEvent("popup");
+  await checkout.getByRole("button", { name: "Complete Payment" }).click();
+  await receiptPopup;
   await expect(page.getByText("Bill slip total PHP 100.00 differs from charged total PHP 99.00")).toBeVisible();
 });
 
@@ -372,9 +395,9 @@ test("Unlimited-only table bill out does not offer a discount", async ({ page })
   await page.goto("/staff/pos");
   await page.getByRole("button", { name: "Existing Table" }).click();
   await page.getByRole("button", { name: "Select Table 4, Occupied" }).click();
-  await page.getByRole("button", { name: "Bill out" }).click();
+  await page.getByRole("button", { name: "Print Bill" }).click();
 
-  const billOut = page.getByRole("dialog", { name: "Bill out Table 4" });
+  const billOut = page.getByRole("dialog", { name: "Print Bill Table 4" });
   await expect(billOut.getByText("PHP 7,000.00").first()).toBeVisible();
   await expect(billOut.getByRole("button", { name: "Apply Discount" })).toHaveCount(0);
   await expect(billOut.getByLabel("Bill-out guest count")).toHaveCount(0);
@@ -430,9 +453,9 @@ test("Mixed Unlimited and a-la-carte table bill out offers a discount on the a-l
   await page.goto("/staff/pos");
   await page.getByRole("button", { name: "Existing Table" }).click();
   await page.getByRole("button", { name: "Select Table 4, Occupied" }).click();
-  await page.getByRole("button", { name: "Bill out" }).click();
+  await page.getByRole("button", { name: "Print Bill" }).click();
 
-  const billOut = page.getByRole("dialog", { name: "Bill out Table 4" });
+  const billOut = page.getByRole("dialog", { name: "Print Bill Table 4" });
   await billOut.getByRole("button", { name: "Apply Discount" }).click();
   await billOut.getByLabel("Senior/PWD guest count").fill("3");
   await expect(billOut).toContainText("Senior/PWD discount (3 guests × 20% of PHP 1,000.00 a-la-carte total)");
