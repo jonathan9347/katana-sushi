@@ -6,6 +6,7 @@ import UnlimitedTimer from "../../../components/pos/UnlimitedTimer";
 import { usePosCart, type PosCartKey } from "./store";
 import { api } from "../../../lib/api";
 import { useToast } from "../../../hooks/useToast";
+import { PRINT_LINE_WIDTH, addPrintAmount, addPrintPair, printPlainLines, wrapPrintText } from "./printLayout";
 
 type Guest = {
   id: string;
@@ -229,46 +230,31 @@ function escapeHtml(value: string) {
 export function printDiningOrderSlip(
   target: Window,
   order: CommittedDiningOrder,
-  isReprint = false
+  isReprint = false,
+  options: { cashierName?: string; tableTotal?: number | null; paperSize?: string } = {}
 ) {
-  const lines = order.items.map((item) => `
-    <tr>
-      <td>${escapeHtml(item.name_snapshot)}</td>
-      <td class="number">${item.quantity}</td>
-      <td class="number">${money(Number(item.unit_price))}</td>
-      <td class="number">${money(Number(item.total_price))}</td>
-    </tr>`).join("");
-  target.document.open();
-  target.document.write(`<!doctype html>
-    <html>
-      <head>
-        <meta charset="utf-8">
-        <title>Order ${escapeHtml(order.order_number)}</title>
-        <style>
-          body { font: 14px Arial, sans-serif; margin: 24px; color: #111; }
-          h1 { font-size: 20px; margin: 0 0 8px; }
-          p { margin: 4px 0 16px; }
-          table { border-collapse: collapse; width: 100%; }
-          th, td { border-bottom: 1px solid #bbb; padding: 7px 4px; text-align: left; }
-          .number { text-align: right; white-space: nowrap; }
-          .reprint { border: 2px solid #111; font-weight: bold; padding: 8px; text-align: center; }
-          .total { font-weight: bold; }
-        </style>
-      </head>
-      <body>
-        ${isReprint ? '<p class="reprint">REPRINT</p>' : ""}
-        <h1>Order ${escapeHtml(order.order_number)}</h1>
-        <p>Table ${order.table_number_snapshot ?? "—"} · ${escapeHtml(formatTime(order.created_at))}</p>
-        <table>
-          <thead><tr><th>Item</th><th class="number">Qty</th><th class="number">Price</th><th class="number">Total</th></tr></thead>
-          <tbody>${lines}</tbody>
-          <tfoot><tr class="total"><td colspan="3">Total</td><td class="number">${money(order.items.reduce((sum, item) => sum + Number(item.total_price), 0))}</td></tr></tfoot>
-        </table>
-      </body>
-    </html>`);
-  target.document.close();
-  target.focus();
-  target.print();
+  const lines = ["ORDER SLIP - NOT A RECEIPT"];
+  if (isReprint) lines.push("REPRINT");
+  addPrintPair(lines, "Table", order.table_number_snapshot ?? "Unknown");
+  addPrintPair(lines, "Order", order.order_number);
+  addPrintPair(lines, "Date", formatTime(order.created_at));
+  addPrintPair(lines, "Cashier", options.cashierName ?? "Cashier");
+  lines.push("-".repeat(PRINT_LINE_WIDTH));
+  for (const item of order.items) {
+    lines.push(...wrapPrintText(`${item.quantity} x ${item.name_snapshot}`));
+    addPrintAmount(lines, "Amount", money(Number(item.total_price)));
+  }
+  lines.push("-".repeat(PRINT_LINE_WIDTH));
+  const orderTotal = order.items.reduce((sum, item) => sum + Number(item.total_price), 0);
+  addPrintAmount(lines, "This order total", money(orderTotal));
+  addPrintAmount(
+    lines,
+    "Table total so far",
+    options.tableTotal === null || options.tableTotal === undefined
+      ? "Unavailable"
+      : money(options.tableTotal)
+  );
+  printPlainLines(target, `Order ${order.order_number}`, lines, options.paperSize ?? "80mm");
 }
 
 function errorMessage(error: unknown) {

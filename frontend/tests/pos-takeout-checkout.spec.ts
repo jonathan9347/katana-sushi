@@ -1,9 +1,10 @@
 import { expect, test } from "@playwright/test";
+import { expectPrintLinesWithin32 } from "./printAssertions";
 
 test("takeout checkout creates one immediate sale and receipt without entering dine-in flow", async ({ page }) => {
   const checkoutBodies: Array<Record<string, unknown>> = [];
   const diningRequests: string[] = [];
-  await page.addInitScript(() => {
+  await page.context().addInitScript(() => {
     localStorage.setItem("katana_token", "playwright-token");
     localStorage.setItem("katana_role", "cashier");
     localStorage.setItem("katana_user", JSON.stringify({
@@ -103,6 +104,8 @@ test("takeout checkout creates one immediate sale and receipt without entering d
   const receipt = await receiptPopupPromise;
   await expect(receipt.locator("body")).toContainText("POS-TAKEOUT-001");
   await expect(receipt.locator("body")).toContainText("2 x California Roll");
+  await expect(receipt.locator("body")).toHaveAttribute("data-print-requested", "true");
+  await expectPrintLinesWithin32(receipt);
   await expect(receipt.locator("body")).not.toContainText("Table");
   await expect(receipt.locator("body")).not.toContainText("Order POS-TAKEOUT-001");
 
@@ -127,7 +130,7 @@ test("takeout checkout creates one immediate sale and receipt without entering d
 
 test("takeout checkout applies the shared Senior/PWD discount to the server-calculated total and receipt", async ({ page }) => {
   const checkoutBodies: Array<Record<string, unknown>> = [];
-  await page.addInitScript(() => {
+  await page.context().addInitScript(() => {
     localStorage.setItem("katana_token", "playwright-token");
     localStorage.setItem("katana_role", "cashier");
     localStorage.setItem("katana_user", JSON.stringify({
@@ -136,6 +139,7 @@ test("takeout checkout applies the shared Senior/PWD discount to the server-calc
       name: "Test Cashier",
       role: "cashier"
     }));
+    window.print = () => document.body.setAttribute("data-print-requested", "true");
   });
   await page.route("**/api/**", async (route) => {
     const url = new URL(route.request().url());
@@ -230,7 +234,9 @@ test("takeout checkout applies the shared Senior/PWD discount to the server-calc
   const receipt = await receiptPopupPromise;
   await expect(receipt.locator("body")).toContainText("Senior/PWD discount");
   await expect(receipt.locator("body")).toContainText("PHP 60.00");
-  await expect(receipt.locator("body")).toContainText("Total: PHP 940.00");
+  await expect(receipt.locator("body")).toHaveAttribute("data-print-requested", "true");
+  await expect(receipt.locator("body")).toContainText("TOTAL PAID PHP 940.00");
+  await expectPrintLinesWithin32(receipt);
   expect(checkoutBodies).toHaveLength(1);
   expect(checkoutBodies[0]).toMatchObject({
     transactionType: "takeout",

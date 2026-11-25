@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import { expectPrintLinesWithin32 } from "./printAssertions";
 
 type PickupStatus = "preparing" | "ready";
 type PickupOrder = {
@@ -32,7 +33,7 @@ function order(orderNumber: string, status: PickupStatus): PickupOrder {
 test("cashier searches by order ID and completes preparing or ready pickups with cash", async ({ page }) => {
   const completionRequests: Array<{ orderNumber: string; body: Record<string, unknown> }> = [];
   const searches: string[] = [];
-  await page.addInitScript(() => {
+  await page.context().addInitScript(() => {
     localStorage.setItem("katana_token", "playwright-token");
     localStorage.setItem("katana_role", "cashier");
     localStorage.setItem("katana_user", JSON.stringify({
@@ -41,6 +42,7 @@ test("cashier searches by order ID and completes preparing or ready pickups with
       name: "Test Cashier",
       role: "cashier"
     }));
+    window.print = () => document.body.setAttribute("data-print-requested", "true");
   });
   await page.route("**/api/**", async (route) => {
     const url = new URL(route.request().url());
@@ -154,6 +156,8 @@ test("cashier searches by order ID and completes preparing or ready pickups with
     const receiptPopupPromise = page.waitForEvent("popup");
     await payment.getByRole("button", { name: "Confirm" }).click();
     const receipt = await receiptPopupPromise;
+    await expect(receipt.locator("body")).toHaveAttribute("data-print-requested", "true");
+    await expectPrintLinesWithin32(receipt);
     if (orderId.includes("READY")) {
       await expect(receipt.locator("body")).toContainText("Senior/PWD discount");
       await expect(receipt.locator("body")).toContainText("PHP 12.00");

@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import { expectPrintLinesWithin32 } from "./printAssertions";
 
 const product = {
   id: "sushi-1",
@@ -20,13 +21,13 @@ function activeSession(unlimitedSessions: Array<Record<string, unknown>> = []) {
     table_id: "table-4",
     table: { id: "table-4", table_number: 4, capacity: 10 },
     guests: Array.from({ length: 10 }, (_, index) => ({ id: `guest-${index + 1}` })),
-    orders: [],
+    orders: [] as Array<{ status: string; items: Array<{ total_price: number }> }>,
     unlimited_sessions: unlimitedSessions
   };
 }
 
 async function signIn(page: import("@playwright/test").Page) {
-  await page.addInitScript(() => {
+  await page.context().addInitScript(() => {
     localStorage.setItem("katana_token", "playwright-token");
     localStorage.setItem("katana_role", "cashier");
     localStorage.setItem("katana_user", JSON.stringify({
@@ -39,10 +40,25 @@ async function signIn(page: import("@playwright/test").Page) {
   });
 }
 
+function printedAmount(text: string | null, label: string) {
+  const line = text?.split("\n").find((candidate) => candidate.includes(label));
+  const amount = line?.match(/PHP ([\d,]+\.\d{2})/)?.[1];
+  if (!amount) throw new Error(`Missing printed amount for ${label}`);
+  return Number(amount.replace(/,/g, ""));
+}
+
 test("existing table order can be committed, previewed with Senior/PWD discount, and billed out", async ({ page }) => {
   let currentSession: ReturnType<typeof activeSession> | null = activeSession();
   let confirmationCount = 0;
   let checkoutBody: Record<string, unknown> | null = null;
+  let releaseCheckout = () => {};
+  const checkoutGate = new Promise<void>((resolve) => {
+    releaseCheckout = resolve;
+  });
+  let checkoutStartedResolve = () => {};
+  const checkoutStarted = new Promise<void>((resolve) => {
+    checkoutStartedResolve = resolve;
+  });
 
   await page.setViewportSize({ width: 1280, height: 800 });
   await signIn(page);
@@ -74,6 +90,9 @@ test("existing table order can be committed, previewed with Senior/PWD discount,
     }
     if (url.pathname === "/api/pos/dining/confirm-order") {
       confirmationCount += 1;
+      if (currentSession) {
+        currentSession.orders = [{ status: "committed", items: [{ total_price: 1000 }] }];
+      }
       await route.fulfill({
         status: 201,
         json: {
@@ -98,7 +117,13 @@ test("existing table order can be committed, previewed with Senior/PWD discount,
           session_id: "session-1",
           table_number: 4,
           guest_count: Number(url.searchParams.get("guestCount")),
+          a_la_carte_lines: [{ name: "Sushi Set", quantity: 1, unit_price: 1000, total_price: 1000 }],
+          unlimited_order_lines: [],
+          unlimited_lines: [],
+          leftover_lines: [],
           subtotal: 1000,
+          unlimited_amount: 0,
+          leftover_amount: 0,
           discount_base_snapshot: 1000,
           discount_rate_snapshot: 0.2,
           discounted_guest_count: seniorPwdCount,
@@ -111,6 +136,8 @@ test("existing table order can be committed, previewed with Senior/PWD discount,
     if (url.pathname === "/api/pos/dining/sessions/session-1/checkout") {
       checkoutBody = route.request().postDataJSON() as Record<string, unknown>;
       currentSession = null;
+      checkoutStartedResolve();
+      await checkoutGate;
       await route.fulfill({
         status: 201,
         json: {
@@ -126,7 +153,8 @@ test("existing table order can be committed, previewed with Senior/PWD discount,
             cash_received: 1000,
             change_due: 60,
             created_at: "2026-10-20T12:30:00.000Z",
-            items: [{ quantity: 1, unit_price: 1000, total_price: 1000, selling_product: { name: "Sushi Set" } }]
+            items: [{ quantity: 1, unit_price: 1000, total_price: 1000, selling_product: { name: "Sushi Set" } }],
+            charges: []
           }
         }
       });
@@ -152,8 +180,12 @@ test("existing table order can be committed, previewed with Senior/PWD discount,
   await orderBuilder.getByRole("button", { name: "Print order" }).click();
   const slip = await slipPopup;
   await expect(slip.locator("body")).toContainText("DO-001");
-  await expect(slip.locator("body")).toContainText("Table 4");
+  await expect(slip.locator("body")).toContainText("Table: 4");
   await expect(slip.locator("body")).toContainText("Sushi Set");
+  await expect(slip.locator("body")).toContainText("ORDER SLIP - NOT A RECEIPT");
+  await expect(slip.locator("body")).toContainText("Cashier: Test Cashier");
+  await expect(slip.locator("body")).toContainText("Table total so far");
+  await expectPrintLinesWithin32(slip);
   await expect(orderBuilder.getByRole("button", { name: "Bill out" })).toBeVisible();
   expect(confirmationCount).toBe(1);
 
@@ -173,11 +205,33 @@ test("existing table order can be committed, previewed with Senior/PWD discount,
   await billOut.getByLabel("Bill-out cash received").fill("1000");
   await expect(billOut).toContainText("Change: PHP 60.00");
 
-  const receiptPopup = page.waitForEvent("popup");
+  const popupPages: import("@playwright/test").Page[] = [];
+  page.on("popup", (popup) => popupPages.push(popup));
   await billOut.getByRole("button", { name: "Confirm bill out" }).click();
-  const receipt = await receiptPopup;
+  await expect.poll(() => popupPages.length).toBe(2);
+  await checkoutStarted;
+  const [billSlip, receipt] = popupPages;
+  await expect(billSlip.locator("body")).toContainText("BILL SLIP - NOT A RECEIPT");
+  await expect(billSlip.locator("body")).toContainText("TOTAL TO PAY");
+  await expect(billSlip.locator("body")).toContainText("PHP 940.00");
+  await expect(billSlip.locator("body")).not.toContainText("Payment:");
+  await expect(billSlip.locator("body")).toHaveAttribute("data-print-requested", "true");
+  await expectPrintLinesWithin32(billSlip);
+  await expect(receipt.locator("body")).not.toContainText("POS-001");
+  releaseCheckout();
   await expect(receipt.locator("body")).toContainText("POS-001");
+  await expect(receipt.locator("body")).toContainText("PAID");
+  await expect(receipt.locator("body")).toContainText("TOTAL PAID");
+  const billSlipTotal = printedAmount(await billSlip.locator("pre").textContent(), "TOTAL TO PAY");
+  const receiptTotal = printedAmount(await receipt.locator("pre").textContent(), "TOTAL PAID");
+  expect(billSlipTotal).toBe(receiptTotal);
+  expect(receiptTotal).toBe(940);
   await expect(receipt.locator("body")).toContainText("PHP 940.00");
+  await expect(receipt.locator("body")).toHaveAttribute("data-print-requested", "true");
+  await expectPrintLinesWithin32(receipt);
+  expect(checkoutBody).not.toBeNull();
+  expect(Number((checkoutBody as Record<string, unknown> | null)?.cashReceived)).toBe(1000);
+  expect(Number((checkoutBody as Record<string, unknown> | null)?.seniorPwdCount)).toBe(3);
   expect(checkoutBody).toMatchObject({
     guestCount: 10,
     seniorPwdCount: 3,
@@ -185,6 +239,86 @@ test("existing table order can be committed, previewed with Senior/PWD discount,
     cashReceived: 1000
   });
   await expect(orderBuilder.getByRole("button", { name: "Bill out" })).toHaveCount(0);
+});
+
+test("bill-out warns when the charged total differs from the printed preview", async ({ page }) => {
+  const session = activeSession();
+  session.orders = [{ status: "committed", items: [{ total_price: 100 }] }];
+  await signIn(page);
+  await page.route("**/api/**", async (route) => {
+    const url = new URL(route.request().url());
+    if (url.pathname === "/api/products") {
+      await route.fulfill({ json: { products: [] } });
+      return;
+    }
+    if (url.pathname === "/api/settings/system") {
+      await route.fulfill({ json: { settings: { receipt_paper_size: "58mm" } } });
+      return;
+    }
+    if (url.pathname === "/api/pos/dining/tables") {
+      await route.fulfill({ json: { tables: [{
+        id: "table-4",
+        table_number: 4,
+        capacity: 10,
+        status: "occupied",
+        linked_to_table_id: null,
+        unavailable_reason: null,
+        active_session: { id: "session-1", guests: session.guests }
+      }] } });
+      return;
+    }
+    if (url.pathname === "/api/pos/dining/sessions" && route.request().method() === "GET") {
+      await route.fulfill({ json: { sessions: [session] } });
+      return;
+    }
+    if (url.pathname === "/api/pos/dining/sessions/session-1/checkout-preview") {
+      await route.fulfill({ json: {
+        session_id: "session-1",
+        table_number: 4,
+        guest_count: 10,
+        a_la_carte_lines: [{ name: "Sushi Set", quantity: 1, unit_price: 100, total_price: 100 }],
+        unlimited_order_lines: [],
+        unlimited_lines: [],
+        leftover_lines: [],
+        subtotal: 100,
+        unlimited_amount: 0,
+        leftover_amount: 0,
+        discount_base_snapshot: 100,
+        discount_rate_snapshot: 0.2,
+        discounted_guest_count: 0,
+        discount_amount: 0,
+        total: 100
+      } });
+      return;
+    }
+    if (url.pathname === "/api/pos/dining/sessions/session-1/checkout") {
+      await route.fulfill({ status: 201, json: { transaction: {
+        id: "transaction-2",
+        transaction_number: "POS-MISMATCH-001",
+        transaction_type: "dine_in",
+        subtotal: 100,
+        tax: 0,
+        total: 99,
+        payment_method: "cash",
+        cash_received: 100,
+        change_due: 1,
+        created_at: "2026-10-20T12:30:00.000Z",
+        items: [{ quantity: 1, unit_price: 100, total_price: 100, selling_product: { name: "Sushi Set" } }],
+        charges: []
+      } } });
+      return;
+    }
+    await route.fulfill({ json: {} });
+  });
+
+  await page.goto("/staff/pos");
+  await page.getByRole("button", { name: "Existing Table" }).click();
+  await page.getByRole("button", { name: "Select Table 4, Occupied" }).click();
+  await page.getByRole("button", { name: "Bill out" }).click();
+  const billOut = page.getByRole("dialog", { name: "Bill out Table 4" });
+  await billOut.getByLabel("Bill-out cash received").fill("100");
+  await billOut.getByRole("button", { name: "Confirm bill out" }).click();
+  await expect(page.getByText("Bill slip total PHP 100.00 differs from charged total PHP 99.00")).toBeVisible();
 });
 
 test("Unlimited-only table bill out does not offer a discount", async ({ page }) => {
