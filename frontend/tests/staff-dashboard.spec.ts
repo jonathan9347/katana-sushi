@@ -23,17 +23,17 @@ const notification = {
   createdAt: "2026-10-20T00:00:00.000Z"
 };
 
-async function configureStaff(page: Page) {
-  await page.addInitScript(() => {
+async function configureStaff(page: Page, role = "admin") {
+  await page.addInitScript((staffRole) => {
     localStorage.setItem("katana_token", "test-token");
-    localStorage.setItem("katana_role", "admin");
+    localStorage.setItem("katana_role", staffRole);
     localStorage.setItem("katana_user", JSON.stringify({
       id: "staff-test",
       name: "Dashboard Tester",
       email: "dashboard@example.test",
-      role: "admin"
+      role: staffRole
     }));
-  });
+  }, role);
 }
 
 async function mockDashboard(page: Page, overrides: {
@@ -41,8 +41,12 @@ async function mockDashboard(page: Page, overrides: {
   empty?: boolean;
   failApproval?: boolean;
   delaySummary?: boolean;
+  notificationType?: "table" | "catering" | "pickup";
 } = {}) {
-  let pending = overrides.empty ? [] : [notification];
+  let pending = overrides.empty ? [] : [{
+    ...notification,
+    type: overrides.notificationType ?? notification.type
+  }];
   let summaryFailuresRemaining = overrides.failSummary ? 4 : 0;
   let summaryValue = overrides.empty
     ? { ...summary, todaySales: { total: "0.00", transactionCount: 0, series: summary.todaySales.series }, pendingApprovals: 0, lowStockCount: 0, upcomingEvents: 0 }
@@ -171,4 +175,29 @@ test("declining a notification removes it from the pending list", async ({ page 
   await page.getByRole("button", { name: "Decline Test Customer table booking" }).click();
   await expect(page.getByText("You're all caught up")).toBeVisible();
   await expect(page.getByText("0 pending")).toBeVisible();
+});
+
+test("cashier dashboard shows sales and booking operations without admin settings", async ({ page }) => {
+  await configureStaff(page, "cashier");
+  await mockDashboard(page);
+  await page.goto("/staff/dashboard");
+
+  await expect(page.getByRole("heading", { name: "Recent sales" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Reminders" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Inventory alerts" })).toHaveCount(0);
+  await expect(page.getByRole("heading", { name: "Customer feedback" })).toHaveCount(0);
+  await expect(page.getByRole("link", { name: "Settings" })).toHaveCount(0);
+});
+
+test("event coordinator dashboard shows catering operations without sales or inventory", async ({ page }) => {
+  await configureStaff(page, "event_coordinator");
+  await mockDashboard(page, { notificationType: "catering" });
+  await page.goto("/staff/dashboard");
+
+  await expect(page.getByRole("heading", { name: "Upcoming catering events" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Reminders" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Recent sales" })).toHaveCount(0);
+  await expect(page.getByRole("heading", { name: "Inventory alerts" })).toHaveCount(0);
+  await expect(page.getByRole("heading", { name: "Customer feedback" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Approve Test Customer catering booking" })).toBeVisible();
 });

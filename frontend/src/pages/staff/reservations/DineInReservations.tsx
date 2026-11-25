@@ -100,7 +100,8 @@ function getPermittedViews(role: string) {
   if (role === "admin") return allViews;
   if (role === "receptionist") return allViews.filter(({ id }) => id === "tables" || id === "pickup");
   if (role === "event_coordinator") return allViews.filter(({ id }) => id === "catering");
-  if (role === "cashier" || role === "chef") return allViews.filter(({ id }) => id === "pickup");
+  if (role === "cashier") return allViews.filter(({ id }) => id === "tables" || id === "pickup");
+  if (role === "chef") return allViews.filter(({ id }) => id === "pickup");
   return [];
 }
 

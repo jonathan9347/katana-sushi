@@ -149,6 +149,7 @@ export default function PosPage() {
   const [dineInEntryType, setDineInEntryType] = useState<"walk_in" | "reservation">("walk_in");
   const [selectionView, setSelectionView] = useState<SelectionView>("menu");
   const [newCustomerFlowOpen, setNewCustomerFlowOpen] = useState(false);
+  const [newCustomerFlowMode, setNewCustomerFlowMode] = useState<"reservation" | "pickup" | null>(null);
   const [currentOrderPath, setCurrentOrderPath] = useState<string[]>([]);
   const [tableBoardPurpose, setTableBoardPurpose] = useState<"walk_in" | "existing_table" | "reservation">("walk_in");
   const [selectedTable, setSelectedTable] = useState<{
@@ -258,6 +259,13 @@ export default function PosPage() {
   const isDineIn = customerType === "existing_table"
     || (customerType === "new_customer" && customerService === "dine_in");
   const isPickupCustomer = customerType === "pickup_customer";
+  const customerPath = isPickupCustomer
+    ? "pickup"
+    : customerType === "existing_table"
+      ? "existing_table"
+      : customerService === "dine_in"
+        ? dineInEntryType === "reservation" ? "reservation" : "dine_in_walk_in"
+        : "takeout_walk_in";
   const tableSessionToolsId = selectedDiningSessionId || lastCommittedOrderQuery.data?.dining_session_id || "";
   const activeSession = customerType === "existing_table"
     ? diningSessionsQuery.data?.find(
@@ -279,6 +287,15 @@ export default function PosPage() {
     && Boolean(selectedReservation)
     && selectedReservationSeats >= (selectedReservation?.partySize ?? 0);
   const takeoutItems = carts.takeout;
+  const orderStage = !isDineIn
+    ? "order"
+    : selectionView === "table-board" || selectionView === "reservation-list"
+      ? "table"
+      : items.length > 0 && !selectedTable
+        ? "table"
+        : items.length > 0 && selectedTable
+          ? "print"
+          : "order";
 
   useEffect(() => {
     selectCart(cartKey);
@@ -760,7 +777,25 @@ export default function PosPage() {
     }
   }
 
-  function beginNewCustomer() {
+  function beginDineInWalkIn() {
+    chooseCustomerService("dine_in");
+    chooseCustomerEntry("walk_in", "dine_in");
+    setCurrentOrderPath(["Dine-in", "Walk-in"]);
+  }
+
+  function beginTakeoutWalkIn() {
+    chooseCustomerService("takeout");
+    chooseCustomerEntry("walk_in", "takeout");
+    setCurrentOrderPath(["Take-out", "Walk-in"]);
+  }
+
+  function beginReservationSelection() {
+    setNewCustomerFlowMode("reservation");
+    setNewCustomerFlowOpen(true);
+  }
+
+  function beginPickupSelection() {
+    setNewCustomerFlowMode("pickup");
     setNewCustomerFlowOpen(true);
   }
 
@@ -1047,13 +1082,7 @@ export default function PosPage() {
   return (
     <main className="pos-page min-h-screen bg-slate-100 px-4 py-4 lg:pr-6">
       <div className="grid w-full gap-4">
-        <PosHeader />
-        <p className="text-sm text-slate-500">Signed in as {role}</p>
-        <div className="flex flex-wrap gap-2">
-          <Button type="button" variant="outline" onClick={handlePrintTestSlip}>
-            <Printer className="mr-2 h-4 w-4" /> Print test slip
-          </Button>
-        </div>
+        <PosHeader onPrintTestSlip={handlePrintTestSlip} />
         {orderPrintWarning && <p role="alert" className="rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">{orderPrintWarning}</p>}
         {billOutMismatchWarning && <p role="alert" className="rounded-md border border-red-300 bg-red-50 p-3 text-sm font-semibold text-red-900">{billOutMismatchWarning}</p>}
         {lastPickupReceipt && (
@@ -1073,7 +1102,12 @@ export default function PosPage() {
 
         <PosOrderBuilder
           customerType={customerType}
-          onNewCustomer={beginNewCustomer}
+          customerPath={customerPath}
+          orderStage={orderStage}
+          onDineInWalkIn={beginDineInWalkIn}
+          onReservation={beginReservationSelection}
+          onTakeoutWalkIn={beginTakeoutWalkIn}
+          onPickup={beginPickupSelection}
           onExistingTable={beginExistingTable}
           selectionContent={selectionContent}
           actionInSelectionView={selectionView === "table-board"}
@@ -1232,6 +1266,7 @@ export default function PosPage() {
 
       <NewCustomerFlowModal
         open={newCustomerFlowOpen}
+        initialMode={newCustomerFlowMode}
         onClose={() => setNewCustomerFlowOpen(false)}
         onStartOrdering={startNewCustomerOrdering}
       />
@@ -1408,13 +1443,49 @@ export default function PosPage() {
                   Cash received
                   <input
                     aria-label="Bill-out cash received"
-                    className="h-10 rounded-md border border-slate-300 px-3"
+                    autoFocus
+                    className="h-11 rounded-md border border-slate-300 px-3"
                     type="number"
-                    min={0}
+                    min={billOutPreviewQuery.data?.total ?? 0}
                     step="0.01"
                     value={billOutCashReceived}
                     onChange={(event) => setBillOutCashReceived(event.target.value)}
+                    onKeyDown={(event) => {
+                      if (
+                        event.key === "Enter"
+                        && billOutStep === "payment"
+                        && !billOutMutation.isPending
+                        && billOutPreviewQuery.data
+                        && Number(billOutCashReceived) >= billOutPreviewQuery.data.total
+                      ) {
+                        event.preventDefault();
+                        handleBillOutConfirm();
+                      }
+                    }}
                   />
+                  <span className="flex flex-wrap gap-2" role="group" aria-label="Quick cash amounts">
+                    {([
+                      ["Exact", billOutPreviewQuery.data?.total ?? 0],
+                      ["PHP 100", 100],
+                      ["PHP 500", 500],
+                      ["PHP 1,000", 1000]
+                    ] as const)
+                      .filter((option, index, options) =>
+                        options.findIndex((candidate) => candidate[1] === option[1]) === index
+                      )
+                      .map(([label, amount]) => (
+                      <Button
+                        key={label}
+                        className="min-h-11"
+                        type="button"
+                        variant="outline"
+                        disabled={amount < (billOutPreviewQuery.data?.total ?? Number.POSITIVE_INFINITY)}
+                        onClick={() => setBillOutCashReceived(amount.toFixed(2))}
+                      >
+                        {label}
+                      </Button>
+                    ))}
+                  </span>
                   {billOutPreviewQuery.data && (
                     <span className="text-sm font-semibold text-slate-700">
                       Change: {money(Math.max(

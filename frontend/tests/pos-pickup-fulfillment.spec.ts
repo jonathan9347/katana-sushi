@@ -125,9 +125,7 @@ test("cashier searches by order ID and completes preparing or ready pickups with
   });
 
   await page.goto("/staff/pos");
-  await page.getByRole("button", { name: "New Customer" }).click();
-  await page.getByRole("dialog", { name: "New Customer" }).getByRole("button", { name: /Take-out/ }).click();
-  await page.getByRole("dialog", { name: "Take-out" }).getByRole("button", { name: /Pickup/ }).click();
+  await page.getByRole("button", { name: "Pickup", exact: true }).click();
   const searchInput = page.getByLabel("Search pickup orders by customer or reference");
 
   for (const [orderId, status] of [["KTO-PREP-001", "Preparing"], ["KTO-READY-001", "Ready for pickup"]] as const) {
@@ -135,7 +133,6 @@ test("cashier searches by order ID and completes preparing or ready pickups with
     const result = page.getByRole("dialog", { name: "Select pickup order" }).getByRole("button", { name: new RegExp(orderId) });
     await expect(result).toBeVisible();
     await result.click();
-    await page.getByRole("dialog", { name: "Ready to order" }).getByRole("button", { name: "Start ordering" }).click();
     await expect(page.getByRole("region", { name: "POS order builder" })).toContainText(status);
     if (orderId.includes("READY")) {
       await expect(page.getByRole("region", { name: "POS order builder" }).getByText(/Pickup Time:/)).toBeVisible();
@@ -163,11 +160,9 @@ test("cashier searches by order ID and completes preparing or ready pickups with
       await expect(receipt.locator("body")).toContainText("PHP 12.00");
     }
     await expect(page.getByRole("region", { name: "POS order builder" })).toBeVisible();
-    await expect(page.getByRole("button", { name: "New Customer" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Pickup", exact: true })).toBeVisible();
     if (orderId.includes("PREP")) {
-      await page.getByRole("button", { name: "New Customer" }).click();
-      await page.getByRole("dialog", { name: "New Customer" }).getByRole("button", { name: /Take-out/ }).click();
-      await page.getByRole("dialog", { name: "Take-out" }).getByRole("button", { name: /Pickup/ }).click();
+      await page.getByRole("button", { name: "Pickup", exact: true }).click();
     }
   }
 
@@ -217,9 +212,7 @@ test("cashier can find a pickup order by customer name", async ({ page }) => {
   });
 
   await page.goto("/staff/pos");
-  await page.getByRole("button", { name: "New Customer" }).click();
-  await page.getByRole("dialog", { name: "New Customer" }).getByRole("button", { name: /Take-out/ }).click();
-  await page.getByRole("dialog", { name: "Take-out" }).getByRole("button", { name: /Pickup/ }).click();
+  await page.getByRole("button", { name: "Pickup", exact: true }).click();
   await page.getByLabel("Search pickup orders by customer or reference").fill("preparing Customer");
 
   await expect(page.getByRole("dialog", { name: "Select pickup order" }).getByRole("button", { name: /KTO-PREP-001/ })).toBeVisible();

@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 
-test("uses customer popups and staged table, reservation, and pickup selection views", async ({ page }) => {
+test("inline order paths open table, reservation, and pickup selection views", async ({ page }) => {
   let sessionCreationCount = 0;
   let reservationSeatCount = 0;
   await page.addInitScript(() => {
@@ -21,6 +21,7 @@ test("uses customer popups and staged table, reservation, and pickup selection v
         name: "Iced Tea",
         category: "Beverage",
         price: 45,
+        image_url: "/test-roll-photo.jpg",
         is_available: true,
         available_stock: 5,
         cart_compatibility: {
@@ -95,16 +96,15 @@ test("uses customer popups and staged table, reservation, and pickup selection v
 
   await page.goto("/staff/pos");
   await expect(page.getByRole("heading", { name: "Point of Sale" })).toBeVisible();
-  await expect(page.getByRole("link", { name: "Transaction History" })).toBeVisible();
-  await expect(page.getByRole("link", { name: "Unli Settings" })).toBeVisible();
+  await page.getByText("More", { exact: true }).click();
+  await expect(page.getByRole("link", { name: "Transaction history" })).toBeVisible();
+  await expect(page.getByRole("link", { name: "Unli Settings" })).toHaveCount(0);
   await expect(page.getByRole("link", { name: "Takeout Sale" })).toHaveCount(0);
 
-  await page.getByRole("button", { name: "New Customer" }).click();
-  await page.getByRole("dialog", { name: "New Customer" }).getByRole("button", { name: /Dine-in/ }).click();
-  await page.getByRole("dialog", { name: "Dine-in" }).getByRole("button", { name: /Walk-in/ }).click();
-  await page.getByRole("dialog", { name: "Ready to order" }).getByRole("button", { name: "Start ordering" }).click();
+  await page.getByRole("button", { name: "Dine-in walk-in", exact: true }).click();
   await expect(page.getByRole("region", { name: "POS order builder" })).toContainText("Menu");
   await expect(page.getByRole("button", { name: /Iced Tea/ })).toBeVisible();
+  await expect(page.getByRole("button", { name: /Iced Tea/ }).locator("img")).toHaveAttribute("src", "/test-roll-photo.jpg");
   await page.getByRole("region", { name: "POS order builder" }).getByRole("button", { name: /Iced Tea Beverage/ }).click();
   await page.getByRole("button", { name: "Proceed" }).click();
   await expect(page.getByRole("region", { name: "Table board" })).toBeVisible();
@@ -119,11 +119,8 @@ test("uses customer popups and staged table, reservation, and pickup selection v
   await expect(page.getByRole("button", { name: "Confirm & Print" })).toBeVisible();
   expect(sessionCreationCount).toBe(0);
 
-  await page.getByRole("button", { name: "New Customer" }).click();
-  await page.getByRole("dialog", { name: "New Customer" }).getByRole("button", { name: /Dine-in/ }).click();
-  await page.getByRole("dialog", { name: "Dine-in" }).getByRole("button", { name: /Reservation/ }).click();
+  await page.getByRole("button", { name: "Reservation", exact: true }).click();
   await page.getByRole("dialog", { name: "Today's reservations" }).getByRole("button", { name: /Ava Guest/ }).click();
-  await page.getByRole("dialog", { name: "Ready to order" }).getByRole("button", { name: "Start ordering" }).click();
   const reservationBoard = page.getByRole("region", { name: "Table board" });
   await expect(reservationBoard).toBeVisible();
   await expect(reservationBoard).toContainText("Assign table(s) for Ava Guest");
@@ -143,18 +140,12 @@ test("uses customer popups and staged table, reservation, and pickup selection v
   await expect(page.getByRole("button", { name: "Confirm & Print" })).toBeVisible();
   expect(reservationSeatCount).toBe(0);
 
-  await page.getByRole("button", { name: "New Customer" }).click();
-  await page.getByRole("dialog", { name: "New Customer" }).getByRole("button", { name: /Take-out/ }).click();
-  await page.getByRole("dialog", { name: "Take-out" }).getByRole("button", { name: /Walk-in/ }).click();
-  await page.getByRole("dialog", { name: "Ready to order" }).getByRole("button", { name: "Start ordering" }).click();
+  await page.getByRole("button", { name: "Takeout", exact: true }).click();
   await expect(page.getByRole("region", { name: "POS order builder" })).toContainText("PHP 45.00");
 
-  await page.getByRole("button", { name: "New Customer" }).click();
-  await page.getByRole("dialog", { name: "New Customer" }).getByRole("button", { name: /Take-out/ }).click();
-  await page.getByRole("dialog", { name: "Take-out" }).getByRole("button", { name: /Pickup/ }).click();
+  await page.getByRole("button", { name: "Pickup", exact: true }).click();
   await page.getByLabel("Search pickup orders by customer or reference").fill("PICK");
   await page.getByRole("dialog", { name: "Select pickup order" }).getByRole("button", { name: /Mika Customer.*PICK-123/ }).click();
-  await page.getByRole("dialog", { name: "Ready to order" }).getByRole("button", { name: "Start ordering" }).click();
   await expect(page.getByRole("region", { name: "POS order builder" })).toContainText("1 × Iced Tea");
   await expect(page.getByRole("region", { name: "POS order builder" })).toContainText("PHP 250.00");
   await expect(page.getByRole("button", { name: "Checkout" })).toBeVisible();
@@ -234,10 +225,7 @@ test("confirms a walk-in dine-in order atomically after table selection and rese
   await page.goto("/staff/pos");
 
   const builder = page.getByRole("region", { name: "POS order builder" });
-  await page.getByRole("button", { name: "New Customer" }).click();
-  await page.getByRole("dialog", { name: "New Customer" }).getByRole("button", { name: /Dine-in/ }).click();
-  await page.getByRole("dialog", { name: "Dine-in" }).getByRole("button", { name: /Walk-in/ }).click();
-  await page.getByRole("dialog", { name: "Ready to order" }).getByRole("button", { name: "Start ordering" }).click();
+  await page.getByRole("button", { name: "Dine-in walk-in", exact: true }).click();
   await expect(builder.getByLabel("Headcount")).toHaveCount(0);
   await builder.getByRole("button", { name: /California Roll/ }).click();
   await expect(builder).toContainText("1 × California Roll");
@@ -250,12 +238,12 @@ test("confirms a walk-in dine-in order atomically after table selection and rese
   await page.getByRole("button", { name: "Confirm & Print" }).click();
   const slip = await popupPromise;
   await expect(slip.locator("body")).toContainText("DIN-20261022-ABC12345");
-  await expect(slip.locator("body")).toContainText("Table 12");
+  await expect(slip.locator("body")).toContainText("Table: 12");
   await slip.close();
   await expect(builder).toContainText("Menu");
   await expect(builder).toContainText("Cart is empty");
   const reprintPromise = page.waitForEvent("popup");
-  await page.getByRole("button", { name: /Reprint last order/ }).click();
+  await page.getByRole("button", { name: "Reprint", exact: true }).click();
   const reprint = await reprintPromise;
   await expect(reprint.locator("body")).toContainText("REPRINT");
   await expect(reprint.locator("body")).toContainText("DIN-20261022-ABC12345");

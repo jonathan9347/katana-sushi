@@ -35,7 +35,7 @@ type PaymentModalProps = {
 const comingSoonTitle = "Coming soon - Online payments will be available in future update";
 
 export default function PaymentModal({ open, total, pending, previewRequest, onClose, onConfirm }: PaymentModalProps) {
-  const [method, setMethod] = useState<PaymentMethod | null>(null);
+  const [method, setMethod] = useState<PaymentMethod>("cash");
   const [cashReceived, setCashReceived] = useState("");
   const [applyDiscount, setApplyDiscount] = useState(false);
   const [guestCount, setGuestCount] = useState("1");
@@ -72,10 +72,18 @@ export default function PaymentModal({ open, total, pending, previewRequest, onC
     && !previewQuery.isLoading
     && !previewQuery.isError
     && Boolean(preview);
+  const quickCashAmounts = [
+    { label: "Exact", amount: amountDue },
+    { label: "PHP 100", amount: 100 },
+    { label: "PHP 500", amount: 500 },
+    { label: "PHP 1,000", amount: 1000 }
+  ].filter((option, index, options) =>
+    options.findIndex((candidate) => candidate.amount === option.amount) === index
+  );
 
   useEffect(() => {
     if (open) {
-      setMethod(null);
+      setMethod("cash");
       setCashReceived("");
       setApplyDiscount(false);
       setGuestCount("1");
@@ -148,6 +156,7 @@ export default function PaymentModal({ open, total, pending, previewRequest, onC
             <label className="grid gap-1 text-sm font-medium text-slate-700">
               <span>Enter Amount Received</span>
               <input
+                autoFocus
                 className="h-12 rounded-md border border-slate-300 px-3 text-lg outline-none focus:border-red-700 focus:ring-2 focus:ring-red-100"
                 min={amountDue}
                 step="0.01"
@@ -156,6 +165,20 @@ export default function PaymentModal({ open, total, pending, previewRequest, onC
                 onChange={(event) => setCashReceived(event.target.value)}
               />
             </label>
+            <div className="flex flex-wrap gap-2" role="group" aria-label="Quick cash amounts">
+              {quickCashAmounts.map(({ label, amount }) => (
+                <Button
+                  key={label}
+                  className="min-h-11"
+                  type="button"
+                  variant="outline"
+                  disabled={amount < amountDue}
+                  onClick={() => setCashReceived(amount.toFixed(2))}
+                >
+                  {label}
+                </Button>
+              ))}
+            </div>
             <p className="text-lg font-semibold text-slate-950">Change: PHP {changeDue.toFixed(2)}</p>
           </section>
         )}

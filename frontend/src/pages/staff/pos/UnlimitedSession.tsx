@@ -8,6 +8,7 @@ import UnlimitedTimer from "../../../components/pos/UnlimitedTimer";
 import { Button } from "../../../components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "../../../components/ui/card";
 import { api } from "../../../lib/api";
+import { useAuth } from "../../../hooks/useAuth";
 import { useToast } from "../../../hooks/useToast";
 
 type UnlimitedProduct = {
@@ -43,6 +44,7 @@ export default function UnlimitedSession({ sessionId, onExit }: UnlimitedSession
   const [cart, setCart] = useState<Record<string, number>>({});
   const [endOpen, setEndOpen] = useState(false);
   const queryClient = useQueryClient();
+  const { user } = useAuth();
   const { toast } = useToast();
 
   const sessionQuery = useQuery({
@@ -141,9 +143,11 @@ export default function UnlimitedSession({ sessionId, onExit }: UnlimitedSession
                 <p className="text-sm font-medium uppercase text-red-700">Unlimited Session</p>
                 <h2 className="text-2xl font-semibold text-slate-950">Round {(sessionQuery.data.session.rounds.length || 0) + 1}</h2>
               </div>
-              <Link className="inline-flex items-center gap-2 rounded-md border border-slate-300 px-3 py-2 text-sm font-bold text-slate-700 hover:bg-slate-50" to="/staff/pos/unlimited-settings">
-                <Settings className="h-4 w-4" /> Settings
-              </Link>
+              {user?.role === "admin" && (
+                <Link className="inline-flex items-center gap-2 rounded-md border border-slate-300 px-3 py-2 text-sm font-bold text-slate-700 hover:bg-slate-50" to="/staff/pos/unlimited-settings">
+                  <Settings className="h-4 w-4" /> Settings
+                </Link>
+              )}
             </div>
             <p className="mt-1 text-sm text-slate-500">
               {sessionQuery.data.session.pax_count} guests paid PHP {customerPaid.toLocaleString()}

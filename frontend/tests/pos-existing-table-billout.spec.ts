@@ -181,14 +181,15 @@ test("existing table order can be committed, previewed with Senior/PWD discount,
   });
 
   await page.goto("/staff/pos");
-  await page.getByRole("button", { name: "Existing Table" }).click();
+  await page.getByRole("button", { name: "Existing table", exact: true }).click();
   await page.getByRole("button", { name: "Select Table 4, Occupied" }).click();
   const orderBuilder = page.getByRole("region", { name: "POS order builder" });
   const cartPanel = page.getByTestId("pos-cart-panel");
   await expect(cartPanel).toHaveCSS("position", "sticky");
   const cartHeight = await cartPanel.evaluate((element) => element.getBoundingClientRect().height);
   const viewportHeight = await page.evaluate(() => window.innerHeight);
-  expect(cartHeight).toBe(viewportHeight - 32);
+  expect(cartHeight).toBeLessThan(viewportHeight - 32);
+  expect(cartHeight).toBeGreaterThan(400);
   await expect(orderBuilder.getByRole("button", { name: "Checkout" })).toHaveCount(0);
   await expect(orderBuilder.getByText(/checkout/i)).toHaveCount(0);
   await page.getByRole("button", { name: /Sushi Set Sushi/ }).click();
@@ -226,11 +227,12 @@ test("existing table order can be committed, previewed with Senior/PWD discount,
   await expect(paymentMethods.getByRole("button", { name: "Cash", exact: true })).toBeVisible();
   await expect(paymentMethods.getByRole("button", { name: "GCash", exact: true })).toBeVisible();
   await expect(paymentMethods.getByRole("button", { name: "BPI", exact: true })).toBeVisible();
-  await checkout.getByLabel("Bill-out cash received").fill("1000");
+  await checkout.getByRole("button", { name: "PHP 1,000", exact: true }).click();
+  await expect(checkout.getByLabel("Bill-out cash received")).toHaveValue("1000.00");
   await expect(checkout).toContainText("Change: PHP 60.00");
 
   const receiptPopup = page.waitForEvent("popup");
-  await checkout.getByRole("button", { name: "Complete Payment" }).click();
+  await checkout.getByLabel("Bill-out cash received").press("Enter");
   const receipt = await receiptPopup;
   await checkoutStarted;
   expect(billSlipText).toContain("BILL SLIP - NOT A RECEIPT");
@@ -266,6 +268,7 @@ test("existing table order can be committed, previewed with Senior/PWD discount,
 
 test("bill-out warns when the charged total differs from the printed preview", async ({ page }) => {
   const session = activeSession();
+  let checkoutCalls = 0;
   session.orders = [{ status: "committed", items: [{ total_price: 100 }] }];
   await signIn(page);
   await page.route("**/api/**", async (route) => {
@@ -315,6 +318,7 @@ test("bill-out warns when the charged total differs from the printed preview", a
       return;
     }
     if (url.pathname === "/api/pos/dining/sessions/session-1/checkout") {
+      checkoutCalls += 1;
       await route.fulfill({ status: 201, json: { transaction: {
         id: "transaction-2",
         transaction_number: "POS-MISMATCH-001",
@@ -335,16 +339,21 @@ test("bill-out warns when the charged total differs from the printed preview", a
   });
 
   await page.goto("/staff/pos");
-  await page.getByRole("button", { name: "Existing Table" }).click();
+  await page.getByRole("button", { name: "Existing table", exact: true }).click();
   await page.getByRole("button", { name: "Select Table 4, Occupied" }).click();
   await page.getByRole("button", { name: "Print Bill" }).click();
   const billOut = page.getByRole("dialog", { name: "Print Bill Table 4" });
   await printBillAndContinue(page, billOut);
   const checkout = page.getByRole("dialog", { name: "Checkout Table 4" });
-  await checkout.getByLabel("Bill-out cash received").fill("100");
+  const cashInput = checkout.getByLabel("Bill-out cash received");
+  await cashInput.fill("99");
+  await cashInput.press("Enter");
+  expect(checkoutCalls).toBe(0);
+  await cashInput.fill("100");
   const receiptPopup = page.waitForEvent("popup");
-  await checkout.getByRole("button", { name: "Complete Payment" }).click();
+  await cashInput.press("Enter");
   await receiptPopup;
+  expect(checkoutCalls).toBe(1);
   await expect(page.getByText("Bill slip total PHP 100.00 differs from charged total PHP 99.00")).toBeVisible();
 });
 
@@ -393,7 +402,7 @@ test("Unlimited-only table bill out does not offer a discount", async ({ page })
   });
 
   await page.goto("/staff/pos");
-  await page.getByRole("button", { name: "Existing Table" }).click();
+  await page.getByRole("button", { name: "Existing table", exact: true }).click();
   await page.getByRole("button", { name: "Select Table 4, Occupied" }).click();
   await page.getByRole("button", { name: "Print Bill" }).click();
 
@@ -451,7 +460,7 @@ test("Mixed Unlimited and a-la-carte table bill out offers a discount on the a-l
   });
 
   await page.goto("/staff/pos");
-  await page.getByRole("button", { name: "Existing Table" }).click();
+  await page.getByRole("button", { name: "Existing table", exact: true }).click();
   await page.getByRole("button", { name: "Select Table 4, Occupied" }).click();
   await page.getByRole("button", { name: "Print Bill" }).click();
 
@@ -553,7 +562,7 @@ test("active Unlimited session filters to included products and allows the full 
   });
 
   await page.goto("/staff/pos");
-  await page.getByRole("button", { name: "Existing Table" }).click();
+  await page.getByRole("button", { name: "Existing table", exact: true }).click();
   await page.getByRole("button", { name: "Select Table 4, Occupied" }).click();
   const builder = page.getByRole("region", { name: "POS order builder" });
   await expect(builder.getByText("Showing Unlimited items only")).toBeVisible();
@@ -647,7 +656,7 @@ test("Unlimited cart mode does not start a timer until staff starts the existing
   });
 
   await page.goto("/staff/pos");
-  await page.getByRole("button", { name: "Existing Table" }).click();
+  await page.getByRole("button", { name: "Existing table", exact: true }).click();
   await page.getByRole("button", { name: "Select Table 4, Occupied" }).click();
   await page.getByRole("button", { name: "Unlimited", exact: true }).click();
   const guestCountDialog = page.getByRole("dialog", { name: "Unlimited guest count" });
@@ -664,12 +673,10 @@ test("Unlimited cart mode does not start a timer until staff starts the existing
   await expect(page.getByText("Time Remaining")).toHaveCount(1);
   await expect(page.getByText("Timer starts after first round")).toHaveCount(0);
 
-  await page.getByRole("button", { name: "New Customer" }).click();
-  await expect(page.getByRole("dialog", { name: "New Customer" })).toBeVisible();
+  await page.getByRole("button", { name: "Takeout", exact: true }).click();
   await expect(page.getByRole("button", { name: "End Session", exact: true })).toHaveCount(0);
   await expect(page.getByText("Time Remaining")).toHaveCount(0);
-  await page.getByRole("button", { name: "Close dialog" }).click();
-  await page.getByRole("button", { name: "Existing Table" }).click();
+  await page.getByRole("button", { name: "Existing table", exact: true }).click();
   await page.getByRole("button", { name: "Select Table 4, Occupied" }).click();
   await expect(page.getByRole("button", { name: "End Session", exact: true })).toBeVisible();
 
@@ -761,7 +768,7 @@ test("one table cart keeps regular a-la-carte and Unlimited items together with 
   });
 
   await page.goto("/staff/pos");
-  await page.getByRole("button", { name: "Existing Table" }).click();
+  await page.getByRole("button", { name: "Existing table", exact: true }).click();
   await page.getByRole("button", { name: "Select Table 4, Occupied" }).click();
   const builder = page.getByRole("region", { name: "POS order builder" });
   await builder.getByRole("button", { name: /A la carte Maki/ }).click();

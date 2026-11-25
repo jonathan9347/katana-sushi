@@ -8,6 +8,7 @@ const products = [
     price: 120,
     description: "Crab and cucumber",
     image_url: null,
+    available_stock: 5,
     is_available: true
   },
   {
@@ -17,6 +18,7 @@ const products = [
     price: 80,
     description: "Fresh salmon",
     image_url: null,
+    available_stock: 8,
     is_available: true
   }
 ];
@@ -197,6 +199,21 @@ test("empty pickup cart keeps confirmation disabled and shows location details",
   await expect(cartPanel.getByRole("button", { name: "Choose a pickup time" })).toBeDisabled();
   await expect(page.getByRole("dialog")).toHaveCount(0);
   await expect(page.getByLabel(/email/i)).toHaveCount(0);
+});
+
+test("pickup menu and cart stop at the available stock quantity", async ({ page }) => {
+  await mockPickupApi(page, [{ ...products[0], available_stock: 2 }]);
+  await page.goto("/takeout", { waitUntil: "domcontentloaded" });
+
+  const menu = page.getByRole("region", { name: "Choose pickup menu items" });
+  await expect(menu).toContainText("2 available");
+  await menu.getByRole("button", { name: "Add to cart" }).click();
+  await menu.getByRole("button", { name: "Add one California Roll" }).click();
+
+  const cart = page.getByRole("complementary", { name: "Your pickup order" });
+  await expect(cart).toContainText("2 items");
+  await expect(cart.getByRole("button", { name: "Add one California Roll" })).toBeDisabled();
+  await expect(menu.getByRole("button", { name: "Add one California Roll" })).toBeDisabled();
 });
 
 test("pickup custom time rejects out-of-range values and accepts both endpoints", async ({ page }) => {

@@ -115,15 +115,48 @@ function bookingActionError(error: unknown) {
   return error instanceof Error ? error.message : "Booking status could not be updated. Your list was restored.";
 }
 
+function getNotificationPath(notification: DashboardNotification) {
+  if (notification.type === "catering") return "/staff/catering";
+  return `/staff/reservations?view=${notification.type === "pickup" ? "pickup" : "tables"}`;
+}
+
 export default function StaffDashboard() {
   const { user } = useAuth();
+  const role = user?.role ?? "staff";
+  const canViewSales = ["admin", "cashier"].includes(role);
+  const canViewInventory = ["admin", "inventory_manager", "chef"].includes(role);
+  const canViewReservations = ["admin", "cashier", "receptionist", "event_coordinator", "chef"].includes(role);
+  const canViewCatering = ["admin", "event_coordinator"].includes(role);
+  const canViewReminders = ["admin", "cashier", "receptionist", "event_coordinator"].includes(role);
+  const canViewFeedback = role === "admin";
+  const canViewCalendar = ["admin", "cashier", "receptionist", "event_coordinator"].includes(role);
   const queryClient = useQueryClient();
   const [month, setMonth] = useState(() => todayManilaDateKey().slice(0, 7));
   const summaryQuery = useQuery({ queryKey: dashboardKeys.summary, queryFn: fetchDashboardSummary, ...refreshOptions });
-  const salesQuery = useQuery({ queryKey: dashboardKeys.sales, queryFn: fetchDashboardSales, ...refreshOptions });
-  const inventoryQuery = useQuery({ queryKey: dashboardKeys.inventory, queryFn: fetchDashboardInventory, ...refreshOptions });
-  const remindersQuery = useQuery({ queryKey: dashboardKeys.reminders, queryFn: fetchDashboardReminders, ...refreshOptions });
-  const feedbackQuery = useQuery({ queryKey: dashboardKeys.feedback, queryFn: fetchDashboardFeedback, ...refreshOptions });
+  const salesQuery = useQuery({
+    queryKey: dashboardKeys.sales,
+    queryFn: fetchDashboardSales,
+    enabled: canViewSales,
+    ...refreshOptions
+  });
+  const inventoryQuery = useQuery({
+    queryKey: dashboardKeys.inventory,
+    queryFn: fetchDashboardInventory,
+    enabled: canViewInventory,
+    ...refreshOptions
+  });
+  const remindersQuery = useQuery({
+    queryKey: dashboardKeys.reminders,
+    queryFn: fetchDashboardReminders,
+    enabled: canViewReminders,
+    ...refreshOptions
+  });
+  const feedbackQuery = useQuery({
+    queryKey: dashboardKeys.feedback,
+    queryFn: fetchDashboardFeedback,
+    enabled: canViewFeedback,
+    ...refreshOptions
+  });
   const notificationsQuery = useQuery({
     queryKey: dashboardKeys.notifications,
     queryFn: fetchDashboardNotifications,
@@ -132,6 +165,7 @@ export default function StaffDashboard() {
   const calendarQuery = useQuery({
     queryKey: dashboardKeys.calendar(month),
     queryFn: () => fetchDashboardCalendar(month),
+    enabled: canViewCalendar,
     ...refreshOptions
   });
   const mutation = useMutation({
@@ -194,8 +228,12 @@ export default function StaffDashboard() {
   const feedback = feedbackQuery.data ?? [];
   const notifications = notificationsQuery.data?.notifications ?? [];
   const approvedDates = new Set(calendarQuery.data ?? []);
-  const role = user?.role ?? "staff";
   const displayRole = role === "staff" ? "TEAM MEMBER" : role.replace(/_/g, " ").toUpperCase();
+  const roleFocus = role === "event_coordinator"
+    ? { title: "Upcoming catering events", value: summaryQuery.data?.upcomingEvents }
+    : role === "inventory_manager" || role === "chef"
+      ? { title: "Low stock alerts", value: summaryQuery.data?.lowStockCount }
+      : { title: "Open requests", value: summaryQuery.data?.pendingApprovals };
 
   return (
     <main className="staff-dashboard min-h-screen w-full bg-[#f8f5f7] p-4 pb-24 md:p-6 lg:p-8 min-[1100px]:h-screen min-[1100px]:overflow-hidden">
@@ -215,61 +253,88 @@ export default function StaffDashboard() {
               <span className="rounded-full bg-amber-100 px-3 py-2 text-xs font-bold text-amber-900">
                 Role · {displayRole}
               </span>
-              <Link
-                to="/staff/settings"
-                className="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-4 py-2.5 text-sm font-semibold text-slate-900 hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-700"
-              >
-                <Settings className="h-4 w-4" aria-hidden="true" /> Settings
-              </Link>
+              {role === "admin" && (
+                <Link
+                  to="/staff/settings"
+                  className="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-4 py-2.5 text-sm font-semibold text-slate-900 hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-700"
+                >
+                  <Settings className="h-4 w-4" aria-hidden="true" /> Settings
+                </Link>
+              )}
             </div>
           </header>
 
-          <div className="grid min-w-0 gap-4 min-[800px]:grid-cols-[minmax(0,3fr)_minmax(240px,2fr)]">
-            <section className="relative flex min-h-56 flex-col justify-between overflow-hidden rounded-lg bg-gradient-to-br from-[#a43930] to-[#76221b] p-6 text-white shadow-sm sm:min-h-64">
-              <div aria-hidden="true" className="pointer-events-none absolute -right-10 -top-20 h-64 w-64 rounded-full bg-white/10" />
-              <div className="relative z-10">
-                <p className="text-sm font-medium">Today&apos;s sales</p>
+          <div className={`grid min-w-0 gap-4 ${canViewSales ? "min-[800px]:grid-cols-[minmax(0,3fr)_minmax(240px,2fr)]" : "min-[800px]:grid-cols-2"}`}>
+            {canViewSales ? (
+              <section className="relative flex min-h-56 flex-col justify-between overflow-hidden rounded-lg bg-gradient-to-br from-[#a43930] to-[#76221b] p-6 text-white shadow-sm sm:min-h-64">
+                <div aria-hidden="true" className="pointer-events-none absolute -right-10 -top-20 h-64 w-64 rounded-full bg-white/10" />
+                <div className="relative z-10">
+                  <p className="text-sm font-medium">Today&apos;s sales</p>
+                  {summaryQuery.isPending ? (
+                    <div className="mt-3 h-12 w-56 animate-pulse rounded-md bg-white/20" role="status" aria-label="Loading sales" />
+                  ) : summaryQuery.isError ? (
+                    <div role="alert" className="mt-3 text-sm">
+                      <p>Sales are temporarily unavailable.</p>
+                      <Retry onClick={() => void summaryQuery.refetch()} />
+                    </div>
+                  ) : (
+                    <>
+                      <p className="mt-1 text-4xl font-black tracking-tight sm:text-5xl">{money(summaryQuery.data.todaySales.total)}</p>
+                      <p className="mt-3 inline-flex rounded-full bg-amber-100 px-3 py-1 text-xs font-semibold text-amber-950">
+                        {summaryQuery.data.todaySales.transactionCount} completed transactions
+                      </p>
+                    </>
+                  )}
+                </div>
+                {!summaryQuery.isError && !summaryQuery.isPending && (
+                  <svg className="relative z-10 mt-5 h-16 w-full" viewBox="0 0 600 90" preserveAspectRatio="none" role="img" aria-label="Hourly sales sparkline">
+                    <path d={salesSparkline(summaryQuery.data.todaySales.series.map((item) => Number(item.total)))} fill="none" stroke="white" strokeWidth="3" vectorEffect="non-scaling-stroke" />
+                  </svg>
+                )}
+              </section>
+            ) : (
+              <section className="flex min-h-56 flex-col justify-between rounded-lg bg-gradient-to-br from-[#a43930] to-[#76221b] p-6 text-white shadow-sm sm:min-h-64">
+                <div>
+                  <p className="text-sm font-medium">Today&apos;s focus</p>
+                  <h2 className="mt-2 text-xl font-bold">{roleFocus.title}</h2>
+                </div>
                 {summaryQuery.isPending ? (
-                  <div className="mt-3 h-12 w-56 animate-pulse rounded-md bg-white/20" role="status" aria-label="Loading sales" />
+                  <div className="h-12 w-24 animate-pulse rounded-md bg-white/20" role="status" aria-label="Loading dashboard summary" />
                 ) : summaryQuery.isError ? (
-                  <div role="alert" className="mt-3 text-sm">
-                    <p>Sales are temporarily unavailable.</p>
+                  <div role="alert" className="text-sm">
+                    <p>Dashboard summary is temporarily unavailable.</p>
                     <Retry onClick={() => void summaryQuery.refetch()} />
                   </div>
                 ) : (
-                  <>
-                    <p className="mt-1 text-4xl font-black tracking-tight sm:text-5xl">{money(summaryQuery.data.todaySales.total)}</p>
-                    <p className="mt-3 inline-flex rounded-full bg-amber-100 px-3 py-1 text-xs font-semibold text-amber-950">
-                      {summaryQuery.data.todaySales.transactionCount} completed transactions
-                    </p>
-                  </>
+                  <p className="text-5xl font-black">{roleFocus.value ?? 0}</p>
                 )}
-              </div>
-              {!summaryQuery.isError && !summaryQuery.isPending && (
-                <svg className="relative z-10 mt-5 h-16 w-full" viewBox="0 0 600 90" preserveAspectRatio="none" role="img" aria-label="Hourly sales sparkline">
-                  <path d={salesSparkline(summaryQuery.data.todaySales.series.map((item) => Number(item.total)))} fill="none" stroke="white" strokeWidth="3" vectorEffect="non-scaling-stroke" />
-                </svg>
-              )}
-            </section>
+              </section>
+            )}
 
             <div className="grid gap-3">
-              <Link to="/staff/reservations" className="flex min-h-20 items-center gap-4 rounded-lg bg-[#191517] p-4 text-white hover:bg-[#282225] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-700">
-                <span className="min-w-10 text-3xl font-black">{summaryQuery.isError ? "—" : summaryQuery.data?.pendingApprovals ?? "…"}</span>
-                <span><span className="block font-bold">Pending approvals</span><span className="mt-1 block text-xs text-white/70">Open reservation and event requests</span></span>
-              </Link>
-              <Link to="/staff/inventory" className="flex min-h-20 items-center gap-4 rounded-lg bg-[#fff1df] p-4 text-slate-950 hover:bg-[#ffe8cb] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-700">
-                <span className="min-w-10 text-3xl font-black">{summaryQuery.isError ? "—" : summaryQuery.data?.lowStockCount ?? "…"}</span>
-                <span><span className="block font-bold">Low stock alerts</span><span className="mt-1 block text-xs text-slate-600">Materials need restocking</span></span>
-              </Link>
-              <Link to="/staff/catering" className="flex min-h-20 items-center gap-4 rounded-lg bg-[#e7f0e9] p-4 text-slate-950 hover:bg-[#dceade] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-700">
-                <span className="min-w-10 text-3xl font-black">{summaryQuery.isError ? "—" : summaryQuery.data?.upcomingEvents ?? "…"}</span>
-                <span><span className="block font-bold">Upcoming events</span><span className="mt-1 block text-xs text-slate-600">Approved catering events scheduled</span></span>
-              </Link>
+              {canViewReservations && (
+                <Link to="/staff/reservations" className="flex min-h-20 items-center gap-4 rounded-lg bg-[#191517] p-4 text-white hover:bg-[#282225] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-700">
+                  <span className="min-w-10 text-3xl font-black">{summaryQuery.isError ? "—" : summaryQuery.data?.pendingApprovals ?? "…"}</span>
+                  <span><span className="block font-bold">Pending approvals</span><span className="mt-1 block text-xs text-white/70">Open requests for your role</span></span>
+                </Link>
+              )}
+              {canViewInventory && (
+                <Link to={role === "chef" ? "/staff/inventory/read-only" : "/staff/inventory"} className="flex min-h-20 items-center gap-4 rounded-lg bg-[#fff1df] p-4 text-slate-950 hover:bg-[#ffe8cb] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-700">
+                  <span className="min-w-10 text-3xl font-black">{summaryQuery.isError ? "—" : summaryQuery.data?.lowStockCount ?? "…"}</span>
+                  <span><span className="block font-bold">Low stock alerts</span><span className="mt-1 block text-xs text-slate-600">Materials need restocking</span></span>
+                </Link>
+              )}
+              {canViewCatering && (
+                <Link to="/staff/catering" className="flex min-h-20 items-center gap-4 rounded-lg bg-[#e7f0e9] p-4 text-slate-950 hover:bg-[#dceade] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-700">
+                  <span className="min-w-10 text-3xl font-black">{summaryQuery.isError ? "—" : summaryQuery.data?.upcomingEvents ?? "…"}</span>
+                  <span><span className="block font-bold">Upcoming events</span><span className="mt-1 block text-xs text-slate-600">Approved catering events scheduled</span></span>
+                </Link>
+              )}
             </div>
           </div>
 
           <div className="grid min-w-0 gap-4 min-[800px]:grid-cols-2">
-            <DashboardCard title="Recent sales" subtitle="Latest completed transactions" className="min-h-64">
+            {canViewSales && <DashboardCard title="Recent sales" subtitle="Latest completed transactions" className="min-h-64">
               {salesQuery.isPending ? <Skeleton rows={3} /> : salesQuery.isError ? (
                 <div role="alert"><p className="text-sm text-slate-700">Sales could not be loaded.</p><Retry onClick={() => void salesQuery.refetch()} /></div>
               ) : latestSales.length === 0 ? (
@@ -284,9 +349,9 @@ export default function StaffDashboard() {
                   ))}
                 </ul>
               )}
-            </DashboardCard>
+            </DashboardCard>}
 
-            <DashboardCard title="Inventory alerts" subtitle="Lowest available stock · below par level" className="min-h-64">
+            {canViewInventory && <DashboardCard title="Inventory alerts" subtitle="Lowest available stock · below par level" className="min-h-64">
               {inventoryQuery.isPending ? <Skeleton rows={4} /> : inventoryQuery.isError ? (
                 <div role="alert"><p className="text-sm text-slate-700">Inventory alerts could not be loaded.</p><Retry onClick={() => void inventoryQuery.refetch()} /></div>
               ) : alerts.length === 0 ? (
@@ -318,10 +383,10 @@ export default function StaffDashboard() {
                   ))}
                 </ul>
               )}
-            </DashboardCard>
+            </DashboardCard>}
           </div>
 
-          <DashboardCard title="Reminders" subtitle="Approved bookings and events in the next 7 days">
+          {canViewReminders && <DashboardCard title="Reminders" subtitle="Approved bookings and events in the next 7 days">
             {remindersQuery.isPending ? <Skeleton rows={3} /> : remindersQuery.isError ? (
               <div role="alert"><p className="text-sm text-slate-700">Reminders could not be loaded.</p><Retry onClick={() => void remindersQuery.refetch()} /></div>
             ) : reminders.length === 0 ? (
@@ -343,9 +408,9 @@ export default function StaffDashboard() {
                 ))}
               </ul>
             )}
-          </DashboardCard>
+          </DashboardCard>}
 
-          <DashboardCard title="Customer feedback" subtitle="Latest 25 feedback entries">
+          {canViewFeedback && <DashboardCard title="Customer feedback" subtitle="Latest 25 feedback entries">
             {feedbackQuery.isPending ? <Skeleton rows={4} /> : feedbackQuery.isError ? (
               <div role="alert"><p className="text-sm text-slate-700">Customer feedback could not be loaded.</p><Retry onClick={() => void feedbackQuery.refetch()} /></div>
             ) : feedback.length === 0 ? (
@@ -365,7 +430,7 @@ export default function StaffDashboard() {
                 ))}
               </ul>
             )}
-          </DashboardCard>
+          </DashboardCard>}
         </div>
 
         <aside className="min-w-0 min-[1100px]:sticky min-[1100px]:top-4 min-[1100px]:h-[calc(100dvh-3rem)] min-[1100px]:self-start">
@@ -426,7 +491,7 @@ export default function StaffDashboard() {
                             </div>
                           ) : (
                             <Link
-                              to={notification.type === "catering" ? "/staff/catering" : "/staff/reservations"}
+                              to={getNotificationPath(notification)}
                               className="shrink-0 rounded-lg border border-slate-300 px-2 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-800"
                             >View</Link>
                           )}
@@ -443,7 +508,7 @@ export default function StaffDashboard() {
               )}
             </div>
 
-            <div className="shrink-0 border-t border-slate-100 p-4">
+            {canViewCalendar && <div className="shrink-0 border-t border-slate-100 p-4">
               <div className="mb-3 flex items-center justify-between">
                 <h3 className="font-bold text-slate-950">{monthLabel(month)}</h3>
                 <div className="flex gap-1">
@@ -485,7 +550,7 @@ export default function StaffDashboard() {
                   })}
                 </div>
               )}
-            </div>
+            </div>}
           </section>
         </aside>
       </div>

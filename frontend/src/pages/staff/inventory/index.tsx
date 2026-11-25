@@ -89,7 +89,7 @@ export default function InventoryPage({ readOnly = false }: { readOnly?: boolean
                   <div className="flex flex-wrap gap-2">
                     {([
                       ["materials", "Materials"],
-                      ["batches", "Batches & Expiry"],
+                      ["batches", "Stock In"],
                       ["waste", "Waste Disposal"],
                       ["menu-products", "Menu Products"],
                       ["yield", "Yield Estimator"]

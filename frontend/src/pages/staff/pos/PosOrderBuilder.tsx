@@ -1,18 +1,26 @@
 import { Check, LoaderCircle, Minus, Plus, Search, ShoppingCart, Trash2, Utensils } from "lucide-react";
 import type { ReactNode } from "react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Button } from "../../../components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "../../../components/ui/card";
+import { resolveImageUrl } from "../../../lib/api";
 import { formatManilaDateTime } from "../../../lib/dateTime";
 import type { CartItem, PosCartKey, PosProduct } from "./store";
 import "./PosPage.css";
 
 type CustomerType = "new_customer" | "existing_table" | "pickup_customer";
 type ServiceType = "dine_in" | "takeout";
+type CustomerPath = "dine_in_walk_in" | "reservation" | "takeout_walk_in" | "pickup" | "existing_table";
+type OrderStage = "order" | "table" | "print";
 
 type Props = {
   customerType: CustomerType;
-  onNewCustomer: () => void;
+  customerPath: CustomerPath;
+  orderStage: OrderStage;
+  onDineInWalkIn: () => void;
+  onReservation: () => void;
+  onTakeoutWalkIn: () => void;
+  onPickup: () => void;
   onExistingTable: () => void;
   selectionContent?: ReactNode;
   actionInSelectionView?: boolean;
@@ -90,7 +98,12 @@ function getAddedItemOrderType(product: PosProduct, orderType: Props["orderType"
 
 export default function PosOrderBuilder({
   customerType,
-  onNewCustomer,
+  customerPath,
+  orderStage,
+  onDineInWalkIn,
+  onReservation,
+  onTakeoutWalkIn,
+  onPickup,
   onExistingTable,
   selectionContent,
   actionInSelectionView = false,
@@ -130,12 +143,9 @@ export default function PosOrderBuilder({
 }: Props) {
   const [menuSearch, setMenuSearch] = useState("");
   const [selectedCategory, setSelectedCategory] = useState("All");
+  const [menuDensity, setMenuDensity] = useState<"compact" | "photos">("compact");
   const [showAllUnlimitedMenuItems, setShowAllUnlimitedMenuItems] = useState(false);
-  const [cartPulse, setCartPulse] = useState(0);
-  const [flyDot, setFlyDot] = useState(0);
-  const [flyDotProductId, setFlyDotProductId] = useState<string | null>(null);
   const [showActionSuccess, setShowActionSuccess] = useState(false);
-  const cartBadgeRef = useRef<HTMLSpanElement>(null);
   const normalizedSearch = menuSearch.trim().toLocaleLowerCase();
   const menuProducts = useMemo(
     () => unlimitedMenuActive && !showAllUnlimitedMenuItems
@@ -161,7 +171,7 @@ export default function PosOrderBuilder({
     && (!normalizedSearch
       || product.name.toLocaleLowerCase().includes(normalizedSearch)
       || product.category.toLocaleLowerCase().includes(normalizedSearch))
-  );
+  ).sort((left, right) => Number(left.available_stock === 0) - Number(right.available_stock === 0));
   const isPickup = customerType === "pickup_customer";
   const isDineIn = cartKey !== "takeout";
   const isSelectingExistingTable = customerType === "existing_table" && !selectionSummary;
@@ -194,17 +204,6 @@ export default function PosOrderBuilder({
 
   function addProduct(product: PosProduct, diningOrderType?: CartItem["diningOrderType"]) {
     onAddItem(product, diningOrderType);
-    setFlyDot((current) => current + 1);
-    setFlyDotProductId(product.id);
-    window.setTimeout(() => setFlyDotProductId((current) => current === product.id ? null : current), 450);
-    setCartPulse((current) => current + 1);
-    window.setTimeout(() => setCartPulse((current) => current + 1), 180);
-  }
-
-  function setRipplePosition(event: React.PointerEvent<HTMLButtonElement>) {
-    const bounds = event.currentTarget.getBoundingClientRect();
-    event.currentTarget.style.setProperty("--pos-ripple-x", `${event.clientX - bounds.left}px`);
-    event.currentTarget.style.setProperty("--pos-ripple-y", `${event.clientY - bounds.top}px`);
   }
 
   return (
@@ -214,45 +213,72 @@ export default function PosOrderBuilder({
     >
       <div className="min-w-0 space-y-4">
         <section aria-label="Customer type" className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
-          <div className="flex flex-wrap gap-2">
-            <Button className="min-h-12 px-5 font-bold" onClick={onNewCustomer}>New Customer</Button>
-            <Button className="min-h-12 px-5 font-bold" variant="outline" onClick={onExistingTable}>Existing Table</Button>
+          <div className="pos-customer-paths" role="group" aria-label="Choose order path">
+            {([
+              ["dine_in_walk_in", "Dine-in walk-in", onDineInWalkIn],
+              ["reservation", "Reservation", onReservation],
+              ["takeout_walk_in", "Takeout", onTakeoutWalkIn],
+              ["pickup", "Pickup", onPickup],
+              ["existing_table", "Existing table", onExistingTable]
+            ] as const).map(([path, label, onSelect]) => (
+              <button
+                key={path}
+                type="button"
+                className={`pos-customer-path${customerPath === path ? " is-active" : ""}`}
+                aria-pressed={customerPath === path}
+                onClick={onSelect}
+              >
+                {label}
+              </button>
+            ))}
           </div>
           {currentOrderPath.length > 0 && (
-            <div role="region" aria-label="Current order" className="mt-3 flex flex-wrap items-center justify-between gap-3 rounded-md border border-red-100 bg-red-50 px-3 py-2">
+            <div role="region" aria-label="Current order" className="pos-current-path mt-3 flex flex-wrap items-center justify-between gap-3 px-1 py-1">
               <div className="flex min-w-0 flex-wrap items-center gap-1.5">
-                <span className="mr-1 text-[10px] font-bold uppercase tracking-wide text-red-800">Current order</span>
+                <span className="mr-1 text-xs font-medium text-slate-500">Order path</span>
                 {currentOrderPath.map((part, index) => (
                   <span key={`${part}-${index}`} className="inline-flex items-center gap-1.5">
-                    {index > 0 && <span aria-hidden="true" className="text-red-500">›</span>}
-                    <span className="rounded-md border border-red-100 bg-white px-2 py-1 text-xs font-semibold text-red-900">{part}</span>
+                    {index > 0 && <span aria-hidden="true" className="text-slate-400">/</span>}
+                    <span className="text-xs font-semibold text-slate-700">{part}</span>
                   </span>
                 ))}
               </div>
-              <Button type="button" size="sm" variant="outline" onClick={onClearCurrentOrder}>Clear</Button>
+              <Button type="button" size="sm" variant="outline" onClick={onClearCurrentOrder}>Clear order</Button>
             </div>
           )}
-          {selectionSummary && <p className="mt-3 rounded bg-emerald-50 p-2 text-sm font-semibold text-emerald-900">{selectionSummary}</p>}
-          <p className="mt-3 text-xs text-slate-500">
-            {isPickup ? "Selected pickup order items are read-only." : "A la carte and Unlimited items can share one table cart."}
-          </p>
         </section>
+
+        {isDineIn && (
+          <nav className="pos-order-stage" aria-label="Order progress">
+            {(["order", "table", "print"] as const).map((stage) => (
+              <span key={stage} className={orderStage === stage ? "is-current" : ""} aria-current={orderStage === stage ? "step" : undefined}>
+                {stage === "order" ? "Order" : stage === "table" ? "Table" : "Print"}
+              </span>
+            ))}
+          </nav>
+        )}
 
         {selectionContent ?? <Card className="pos-menu-card min-w-0">
           <CardHeader className="pos-menu-header gap-3">
             <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-center">
               <CardTitle>Menu</CardTitle>
-              <label className="relative block w-full sm:max-w-xs">
-                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" aria-hidden="true" />
-                <input
-                  type="search"
-                  aria-label="Search menu products"
-                  placeholder="Search menu..."
-                  value={menuSearch}
-                  onChange={(event) => setMenuSearch(event.target.value)}
-                  className="h-11 w-full rounded-md border border-slate-300 bg-white pl-9 pr-3 text-sm text-slate-900 outline-none placeholder:text-slate-400 focus:border-red-700 focus:ring-2 focus:ring-red-100"
-                />
-              </label>
+              <div className="pos-menu-tools">
+                <label className="relative block w-full sm:max-w-xs">
+                  <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" aria-hidden="true" />
+                  <input
+                    type="search"
+                    aria-label="Search menu products"
+                    placeholder="Search menu..."
+                    value={menuSearch}
+                    onChange={(event) => setMenuSearch(event.target.value)}
+                    className="h-11 w-full rounded-md border border-slate-300 bg-white pl-9 pr-3 text-sm text-slate-900 outline-none placeholder:text-slate-400 focus:border-red-700 focus:ring-2 focus:ring-red-100"
+                  />
+                </label>
+                <div className="pos-density-toggle" role="group" aria-label="Menu layout">
+                  <button type="button" aria-pressed={menuDensity === "compact"} onClick={() => setMenuDensity("compact")}>Compact</button>
+                  <button type="button" aria-pressed={menuDensity === "photos"} onClick={() => setMenuDensity("photos")}>Photos</button>
+                </div>
+              </div>
             </div>
             {unlimitedMenuActive && (
               <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2">
@@ -296,7 +322,7 @@ export default function PosOrderBuilder({
                     : "No products are currently available."}
               </p>
             )}
-            <div className="pos-menu-grid grid gap-3 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4">
+            <div className={`pos-menu-grid${menuDensity === "compact" ? " is-compact" : ""} grid gap-3`}>
               {visibleProducts.map((product) => {
                 const cartQuantity = items.filter((item) => item.product.id === product.id).reduce((sum, item) => sum + item.quantity, 0);
                 const availableStock = product.available_stock == null ? null : Math.floor(product.available_stock);
@@ -306,6 +332,7 @@ export default function PosOrderBuilder({
                 const addedItemOrderType = getAddedItemOrderType(product, orderType, cartKey);
                 const useUnlimitedPrice = isDineIn && addedItemOrderType === "unlimited";
                 const price = useUnlimitedPrice ? 0 : Number(product.price);
+                const imageUrl = resolveImageUrl(product.image_url);
 
                 return (
                   <button
@@ -313,11 +340,21 @@ export default function PosOrderBuilder({
                     className={`pos-menu-item${disabled ? " is-unavailable" : ""}`}
                     disabled={disabled}
                     type="button"
-                    onPointerDown={setRipplePosition}
                     onClick={() => addProduct(product, addedItemOrderType)}
                   >
                     <span className="pos-menu-image" aria-hidden="true">
                       <Utensils />
+                      {imageUrl ? (
+                        <img
+                          src={imageUrl}
+                          alt=""
+                          loading="lazy"
+                          decoding="async"
+                          onError={(event) => {
+                            event.currentTarget.hidden = true;
+                          }}
+                        />
+                      ) : null}
                       {cartQuantity > 0 && <span className="pos-menu-quantity">{cartQuantity}</span>}
                       {!disabled && <span className="pos-menu-add">+</span>}
                     </span>
@@ -335,9 +372,6 @@ export default function PosOrderBuilder({
                       </span>
                       <span className="pos-menu-price">{price === 0 ? "Included" : money(price)}</span>
                     </span>
-                    {flyDotProductId === product.id && !disabled && (
-                      <span key={flyDot} className="pos-menu-fly-dot" aria-hidden="true" />
-                    )}
                   </button>
                 );
               })}
@@ -352,10 +386,18 @@ export default function PosOrderBuilder({
       >
         <Card className="pos-order-card flex h-full min-h-0 flex-col">
           <CardHeader className="pos-order-header">
-            <CardTitle>{isPickup ? "Pickup order" : "Order"}</CardTitle>
+            <div className="min-w-0">
+              <CardTitle>{isPickup ? "Pickup order" : "Order"}</CardTitle>
+              {selectionSummary && (
+                <p className="pos-order-context" title={selectionSummary}>{selectionSummary}</p>
+              )}
+            </div>
+            {lastCommittedOrderNumber && onReprintLastOrder && (
+              <Button className="pos-reprint-action" size="sm" variant="ghost" onClick={onReprintLastOrder}>
+                Reprint
+              </Button>
+            )}
             <span
-              ref={cartBadgeRef}
-              key={cartPulse}
               className="pos-cart-count"
               aria-label={`${cartCount} items in order`}
             >
@@ -465,13 +507,15 @@ export default function PosOrderBuilder({
                   return (
                     <div key={`${item.product.id}-${item.diningOrderType ?? "default"}`} className="pos-cart-line rounded-md border border-slate-200 bg-white p-3">
                       <div className="flex items-start justify-between gap-3">
-                        <div>
-                        <span className="pos-cart-line-icon" aria-hidden="true"><ShoppingCart /></span>
+                        <div className="pos-cart-line-copy">
                         <p className="font-semibold text-slate-950">{item.quantity} × {item.product.name}</p>
-                          <p className="text-sm text-slate-500">
+                        <p className="pos-cart-line-price text-sm text-slate-500">
                             {item.diningOrderType === "unlimited"
                               ? "Unlimited included"
-                              : `${item.diningOrderType === "ala_carte" ? "A la carte · " : ""}${money(unitPrice)}`}
+                            : <>
+                                {item.diningOrderType === "ala_carte" && <span>A la carte · </span>}
+                                <strong>{money(unitPrice)}</strong>
+                              </>}
                           </p>
                         </div>
                         <Button size="sm" variant="ghost" aria-label={`Remove ${item.product.name}${item.diningOrderType ? ` ${item.diningOrderType}` : ""}`} onClick={() => onRemoveItem(item.product.id, item.diningOrderType)}>
@@ -515,16 +559,10 @@ export default function PosOrderBuilder({
                 </div>
               )}
               <div className="flex items-center justify-between text-lg font-semibold text-slate-950"><span>Total</span><span>{money(total)}</span></div>
-              {lastCommittedOrderNumber && onReprintLastOrder && (
-                <Button variant="outline" onClick={onReprintLastOrder}>
-                  Reprint last order · {lastCommittedOrderNumber}
-                </Button>
-              )}
               {!actionInSelectionView && (
                 <Button
                   className={`pos-primary-action mt-2 min-h-12${actionPending ? " is-processing" : ""}${showActionSuccess ? " is-success" : ""}`}
                   disabled={actionDisabled || actionPending}
-                  onPointerDown={setRipplePosition}
                   onClick={onAction}
                 >
                   {actionPending

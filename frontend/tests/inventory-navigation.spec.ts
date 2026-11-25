@@ -49,7 +49,7 @@ test("inventory has three primary tabs and keeps stock tools under Stock", async
   await expect(navigation.getByRole("button", { name: "Movements" })).toBeVisible();
   await expect(page.getByText("Overview", { exact: true })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Materials" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Batches & Expiry" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Stock In" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Waste Disposal" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Menu Products" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Yield Estimator" })).toBeVisible();

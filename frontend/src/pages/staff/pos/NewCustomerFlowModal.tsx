@@ -144,6 +144,7 @@ type Props = {
   open: boolean;
   onClose: () => void;
   onStartOrdering: (selection: NewCustomerSelection) => void;
+  initialMode?: "reservation" | "pickup" | null;
 };
 
 function isEditableTarget(target: EventTarget | null) {
@@ -161,7 +162,7 @@ function formatPickupTime(value: string) {
   }).format(date);
 }
 
-export default function NewCustomerFlowModal({ open, onClose, onStartOrdering }: Props) {
+export default function NewCustomerFlowModal({ open, onClose, onStartOrdering, initialMode = null }: Props) {
   const [flow, setFlow] = useState<FlowState>(initialFlow);
   const [direction, setDirection] = useState<"forward" | "back">("forward");
   const [selectedValue, setSelectedValue] = useState("");
@@ -218,7 +219,23 @@ export default function NewCustomerFlowModal({ open, onClose, onStartOrdering }:
   useEffect(() => {
     if (!open) return;
     returnFocusRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    setFlow(initialFlow);
+    setFlow(initialMode === "reservation"
+      ? {
+          ...initialFlow,
+          step: "reservations",
+          path: ["Dine-in", "Reservation"],
+          service: "dine_in",
+          entry: "reservation"
+        }
+      : initialMode === "pickup"
+        ? {
+            ...initialFlow,
+            step: "pickup",
+            path: ["Take-out", "Pickup"],
+            service: "takeout",
+            entry: "pickup"
+          }
+        : initialFlow);
     setDirection("forward");
     setSelectedValue("");
     setPickupSearch("");
@@ -230,7 +247,7 @@ export default function NewCustomerFlowModal({ open, onClose, onStartOrdering }:
       selectionTimerRef.current = null;
       returnFocusRef.current?.focus();
     };
-  }, [open]);
+  }, [open, initialMode]);
 
   useEffect(() => {
     if (!open) return;
@@ -240,7 +257,7 @@ export default function NewCustomerFlowModal({ open, onClose, onStartOrdering }:
         close();
         return;
       }
-      if (event.key === "Backspace" && !isEditableTarget(event.target) && flow.step !== "service") {
+      if (event.key === "Backspace" && !initialMode && !isEditableTarget(event.target) && flow.step !== "service") {
         event.preventDefault();
         goBack();
         return;
@@ -274,7 +291,7 @@ export default function NewCustomerFlowModal({ open, onClose, onStartOrdering }:
     return () => {
       document.removeEventListener("keydown", handleKeyDown);
     };
-  }, [open, flow.step, currentStepConfig]);
+  }, [open, flow.step, currentStepConfig, initialMode]);
 
   useEffect(() => {
     if (!open) return;
@@ -346,12 +363,22 @@ export default function NewCustomerFlowModal({ open, onClose, onStartOrdering }:
       selectionTimerRef.current = null;
       setSelectedValue("");
       setDirection("forward");
-      setFlow((current) => ({
-        ...current,
+      const nextFlow: FlowState = {
+        ...flow,
         step: "done",
         reservation,
-        path: [...current.path.slice(0, 2), `${reservation.customer_name} · ${reservation.time}`]
-      }));
+        path: [...flow.path.slice(0, 2), `${reservation.customer_name} · ${reservation.time}`]
+      };
+      setFlow(nextFlow);
+      if (initialMode) {
+        onStartOrdering({
+          service: "dine_in",
+          entry: "reservation",
+          reservation,
+          path: nextFlow.path
+        });
+        onClose();
+      }
     }, 240);
   }
 
@@ -362,12 +389,22 @@ export default function NewCustomerFlowModal({ open, onClose, onStartOrdering }:
       selectionTimerRef.current = null;
       setSelectedValue("");
       setDirection("forward");
-      setFlow((current) => ({
-        ...current,
+      const nextFlow: FlowState = {
+        ...flow,
         step: "done",
         pickupOrder: order,
-        path: [...current.path.slice(0, 2), `${order.customer_name} · ${order.order_number}`]
-      }));
+        path: [...flow.path.slice(0, 2), `${order.customer_name} · ${order.order_number}`]
+      };
+      setFlow(nextFlow);
+      if (initialMode) {
+        onStartOrdering({
+          service: "takeout",
+          entry: "pickup",
+          pickupOrder: order,
+          path: nextFlow.path
+        });
+        onClose();
+      }
     }, 240);
   }
 
@@ -404,21 +441,30 @@ export default function NewCustomerFlowModal({ open, onClose, onStartOrdering }:
       >
         <header className="pos-new-customer-header">
           <div className="pos-new-customer-header-content">
-            <p className="pos-new-customer-breadcrumb">POS <span>/</span> NEW CUSTOMER <span>/</span> {breadcrumb}</p>
+            <p className="pos-new-customer-breadcrumb">
+              POS <span>/</span> {initialMode ? (initialMode === "reservation" ? "DINE-IN" : "TAKEOUT") : "NEW CUSTOMER"} <span>/</span> {breadcrumb}
+            </p>
             <h2 id="pos-new-customer-title">{title}</h2>
             <p className="pos-new-customer-subtitle">{subtitle}</p>
           </div>
-          <button type="button" className="pos-new-customer-close" onClick={close} aria-label="Close New Customer flow">
+          <button
+            ref={initialMode ? (node) => { firstActionRef.current = node; } : undefined}
+            type="button"
+            className="pos-new-customer-close"
+            onClick={close}
+            aria-label={initialMode ? "Close order picker" : "Close New Customer flow"}
+          >
             <X aria-hidden="true" />
           </button>
-          <span className="pos-new-customer-sun" aria-hidden="true" />
         </header>
 
-        <div className="pos-new-customer-progress" aria-label={`Step ${progressIndex + 1} of 3`}>
-          {[0, 1, 2].map((step) => (
-            <span key={step} className={step <= progressIndex ? "is-filled" : ""} />
-          ))}
-        </div>
+        {!initialMode && (
+          <div className="pos-new-customer-progress" aria-label={`Step ${progressIndex + 1} of 3`}>
+            {[0, 1, 2].map((step) => (
+              <span key={step} className={step <= progressIndex ? "is-filled" : ""} />
+            ))}
+          </div>
+        )}
 
         <div className={`pos-new-customer-content is-${direction}`} key={flow.step}>
           {flow.step === "service" || flow.step === "entry" ? (
@@ -550,13 +596,17 @@ export default function NewCustomerFlowModal({ open, onClose, onStartOrdering }:
         </div>
 
         <footer className="pos-new-customer-footer">
-          {flow.step !== "service" ? (
+          {initialMode ? (
+            <span />
+          ) : flow.step !== "service" ? (
             <button type="button" className="pos-new-customer-back" onClick={goBack}>
               <ArrowLeft aria-hidden="true" /> Back
             </button>
           ) : <span />}
-          {currentStepConfig && <p>Choose an option <kbd>1</kbd> or <kbd>2</kbd></p>}
-          {flow.step !== "service" && <span className="pos-new-customer-escape-hint">Backspace to go back</span>}
+          {initialMode
+            ? <p>{initialMode === "reservation" ? "Choose a reservation to continue." : "Choose a pickup order to continue."}</p>
+            : currentStepConfig && <p>Choose an option <kbd>1</kbd> or <kbd>2</kbd></p>}
+          {!initialMode && flow.step !== "service" && <span className="pos-new-customer-escape-hint">Backspace to go back</span>}
         </footer>
       </div>
     </div>

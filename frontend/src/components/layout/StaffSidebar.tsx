@@ -13,6 +13,7 @@ import {
 } from "lucide-react";
 import { useState } from "react";
 import { NavLink, useNavigate } from "react-router-dom";
+import { api } from "../../lib/api";
 
 type StaffRole = "admin" | "inventory_manager" | "cashier" | "receptionist" | "event_coordinator" | string;
 
@@ -66,7 +67,13 @@ export default function StaffSidebar() {
   const topItems = visibleItems.filter((item) => item.label !== "Settings");
   const bottomItems = visibleItems.filter((item) => item.label === "Settings");
 
-  function logout() {
+  async function logout() {
+    try {
+      await api.post("/api/auth/logout");
+    } catch (error) {
+      console.error("Staff logout could not be recorded", error);
+    }
+
     localStorage.removeItem("katana_token");
     localStorage.removeItem("katana_role");
     localStorage.removeItem("katana_user");

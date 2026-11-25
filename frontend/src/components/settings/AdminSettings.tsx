@@ -128,6 +128,8 @@ export default function AdminSettings({ activeTab }: { activeTab: "users" | "act
     queryKey: ["admin", "activity-logs", activityPage],
     queryFn: () => fetchActivityLogs(activityPage, 10),
     staleTime: 30_000,
+    refetchInterval: activeTab === "activity" ? 15_000 : false,
+    refetchOnWindowFocus: true,
     enabled: activeTab === "activity"
   });
 

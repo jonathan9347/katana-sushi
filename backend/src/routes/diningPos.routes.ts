@@ -1688,7 +1688,7 @@ router.post(
         }
 
         return commitDineInOrder(tx, sessionId, creatorId, orderBody, orderNumber);
-      });
+      }, { maxWait: 10_000, timeout: 30_000 });
       return res.status(result.replayed ? 200 : 201).json(result);
     } catch (error) {
       if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
@@ -2209,7 +2209,7 @@ router.post(
         });
       }
       return { transaction, totals, replayed: false };
-    });
+    }, { maxWait: 10_000, timeout: 30_000 });
     return res.status(result.replayed ? 200 : 201).json(result);
   })
 );

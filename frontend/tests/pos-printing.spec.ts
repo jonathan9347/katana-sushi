@@ -56,6 +56,7 @@ test("printer test slip invokes print and keeps every line plain and within 32 c
   });
 
   await page.goto("/staff/pos");
+  await page.getByText("More", { exact: true }).click();
   const popupPromise = page.waitForEvent("popup");
   await page.getByRole("button", { name: "Print test slip" }).click();
   const popup = await popupPromise;
@@ -128,10 +129,10 @@ test("reprinting a committed order prints saved session totals without committin
   });
 
   await page.goto("/staff/pos");
-  await page.getByRole("button", { name: "Existing Table" }).click();
+  await page.getByRole("button", { name: "Existing table", exact: true }).click();
   await page.getByRole("button", { name: "Select Table 4, Occupied" }).click();
   const popupPromise = page.waitForEvent("popup");
-  await page.getByRole("button", { name: /Reprint last order/ }).click();
+  await page.getByRole("button", { name: "Reprint", exact: true }).click();
   const popup = await popupPromise;
 
   await expect(popup.locator("body")).toHaveAttribute("data-print-requested", "true");
@@ -210,10 +211,6 @@ test("takeout opens its receipt window before checkout finishes", async ({ page 
   });
 
   await page.goto("/staff/pos");
-  await page.getByRole("button", { name: "New Customer" }).click();
-  await page.getByRole("dialog", { name: "New Customer" }).getByRole("button", { name: /Take-out/ }).click();
-  await page.getByRole("dialog", { name: "Take-out" }).getByRole("button", { name: /Walk-in/ }).click();
-  await page.getByRole("dialog", { name: "Ready to order" }).getByRole("button", { name: "Start ordering" }).click();
   await page.getByRole("region", { name: "POS order builder" }).getByRole("button", { name: /California Roll Sushi/ }).click();
   await page.getByRole("button", { name: "Checkout" }).click();
   const payment = page.getByRole("dialog", { name: "Payment" });

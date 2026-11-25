@@ -82,10 +82,7 @@ test("takeout checkout creates one immediate sale and receipt without entering d
   });
 
   await page.goto("/staff/pos");
-  await page.getByRole("button", { name: "New Customer" }).click();
-  await page.getByRole("dialog", { name: "New Customer" }).getByRole("button", { name: /Take-out/ }).click();
-  await page.getByRole("dialog", { name: "Take-out" }).getByRole("button", { name: /Walk-in/ }).click();
-  await page.getByRole("dialog", { name: "Ready to order" }).getByRole("button", { name: "Start ordering" }).click();
+  await page.getByRole("button", { name: "Takeout", exact: true }).click();
   await expect(page.getByRole("region", { name: "POS order builder" })).toContainText("Menu");
   const menuProduct = page.getByRole("region", { name: "POS order builder" }).getByRole("button", { name: /California Roll Sushi/ });
   await menuProduct.click();
@@ -95,12 +92,16 @@ test("takeout checkout creates one immediate sale and receipt without entering d
 
   const payment = page.getByRole("dialog", { name: "Payment" });
   await expect(payment).toContainText("PHP 200.00");
+  await expect(payment.getByLabel("Enter Amount Received")).toBeFocused();
   await payment.getByRole("button", { name: "Cash", exact: true }).click();
+  await payment.getByRole("button", { name: "Exact", exact: true }).click();
+  await expect(payment.getByLabel("Enter Amount Received")).toHaveValue("200.00");
+  await expect(payment.getByText("Change: PHP 0.00")).toBeVisible();
   await payment.getByLabel("Enter Amount Received").fill("250");
   await expect(payment.getByText("Change: PHP 50.00")).toBeVisible();
 
   const receiptPopupPromise = page.waitForEvent("popup");
-  await payment.getByRole("button", { name: "Confirm" }).click();
+  await payment.getByLabel("Enter Amount Received").press("Enter");
   const receipt = await receiptPopupPromise;
   await expect(receipt.locator("body")).toContainText("POS-TAKEOUT-001");
   await expect(receipt.locator("body")).toContainText("2 x California Roll");
@@ -212,10 +213,7 @@ test("takeout checkout applies the shared Senior/PWD discount to the server-calc
   });
 
   await page.goto("/staff/pos");
-  await page.getByRole("button", { name: "New Customer" }).click();
-  await page.getByRole("dialog", { name: "New Customer" }).getByRole("button", { name: /Take-out/ }).click();
-  await page.getByRole("dialog", { name: "Take-out" }).getByRole("button", { name: /Walk-in/ }).click();
-  await page.getByRole("dialog", { name: "Ready to order" }).getByRole("button", { name: "Start ordering" }).click();
+  await page.getByRole("button", { name: "Takeout", exact: true }).click();
   await page.getByRole("region", { name: "POS order builder" }).getByRole("button", { name: /California Roll Sushi/ }).click();
   await page.getByRole("button", { name: "Checkout" }).click();
 

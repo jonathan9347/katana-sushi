@@ -31,7 +31,8 @@ import {
   getRecentDashboardSales,
   getDashboardReminders,
   getDashboardSummary,
-  getInventoryAlerts
+  getInventoryAlerts,
+  type DashboardNotification
 } from "./services/dashboard.service";
 import {
   getCateringPackagePrice as calculateCateringPackagePrice,
@@ -668,8 +669,7 @@ function requireRole(req: Request, res: Response, roles: string[]) {
     return null;
   }
 
-  const requiredRoles = req.path.startsWith("/api/staff/reservations/") ? ["admin"] : roles;
-  if (!requiredRoles.includes(role)) {
+  if (!roles.includes(role)) {
     res.status(403).json({ message: "Forbidden" });
     return null;
   }
@@ -754,6 +754,36 @@ app.use(
 app.use(morgan("dev"));
 app.use(cookieParser());
 app.use(jsonBodyParser());
+app.use((req, res, next) => {
+  const method = req.method.toUpperCase();
+  const isWrite = ["POST", "PUT", "PATCH", "DELETE"].includes(method);
+  const isStaffApi = req.path.startsWith("/api/") && !/^\/api\/auth\/(?:login|logout)$/.test(req.path);
+  const hasDedicatedAudit = /^\/api\/admin\/users(?:\/|$)/.test(req.path);
+  const actor = isWrite && isStaffApi && !hasDedicatedAudit ? getUserFromRequest(req) : null;
+
+  if (actor) {
+    res.once("finish", () => {
+      if (res.statusCode < 200 || res.statusCode >= 300) return;
+
+      void prisma.auditLog.create({
+        data: {
+          user_id: actor.sub,
+          action: "request",
+          entity: "staff_activity",
+          new_value: {
+            method,
+            path: req.path,
+            status: res.statusCode
+          }
+        }
+      }).catch((error: unknown) => {
+        console.error("Failed to record staff activity:", error);
+      });
+    });
+  }
+
+  return next();
+});
 app.use(
   "/images",
   express.static(path.resolve(__dirname, "..", "..", "frontend", "public", "images"), {
@@ -2625,7 +2655,7 @@ app.get("/api/settings/system", async (_req, res, next) => {
 
 app.put("/api/admin/settings/system", async (req, res, next) => {
   try {
-    const user = requireRole(req, res, ["admin", "cashier", "receptionist", "event_coordinator", "inventory_manager", "chef", "staff"]);
+    const user = requireRole(req, res, ["admin"]);
 
     if (!user) {
       return;
@@ -2698,6 +2728,15 @@ function formatAuditMessage(log: {
     return formatPasswordResetAuditMessage(targetName);
   }
 
+  if (log.entity === "staff_activity" && actionText === "request") {
+    const newValue = typeof log.new_value === "object" && log.new_value
+      ? log.new_value as Record<string, unknown>
+      : {};
+    const method = typeof newValue.method === "string" ? newValue.method : "updated";
+    const requestPath = typeof newValue.path === "string" ? newValue.path : "a staff record";
+    return `${actor} completed ${method} ${requestPath}.`;
+  }
+
   if (log.entity === "product" && actionText === "update") {
     const productName = typeof log.new_value === "object" && log.new_value && "name" in (log.new_value as Record<string, unknown>)
       ? String((log.new_value as Record<string, unknown>).name ?? "product")
@@ -2714,6 +2753,10 @@ function formatAuditMessage(log: {
 
   if (actionText === "login") {
     return `${actor} signed in.`;
+  }
+
+  if (actionText === "logout") {
+    return `${actor} signed out.`;
   }
 
   if (actionText === "create") {
@@ -4885,6 +4928,14 @@ app.get("/api/staff/reminders", async (req, res, next) => {
   }
 });
 
+function getDashboardTypesForRole(role: string): DashboardNotification["type"][] {
+  if (role === "admin") return ["table", "catering", "pickup"];
+  if (role === "receptionist" || role === "cashier") return ["table", "pickup"];
+  if (role === "event_coordinator") return ["catering"];
+  if (role === "chef") return ["pickup"];
+  return [];
+}
+
 app.get("/api/staff/dashboard/summary", async (req, res, next) => {
   try {
     const user = requireRole(req, res, ["admin", "inventory_manager", "cashier", "receptionist", "event_coordinator", "chef"]);
@@ -4929,7 +4980,9 @@ app.get("/api/staff/dashboard/reminders", async (req, res, next) => {
       days: z.coerce.number().int().min(1).max(31).default(7),
       limit: z.coerce.number().int().min(1).max(100).default(25)
     }).parse(req.query);
-    return res.json({ reminders: await getDashboardReminders(query.days, query.limit) });
+    const allowedTypes = getDashboardTypesForRole(user.role)
+      .filter((type): type is "table" | "catering" => type !== "pickup");
+    return res.json({ reminders: await getDashboardReminders(query.days, query.limit, allowedTypes) });
   } catch (error) {
     return next(error);
   }
@@ -4969,7 +5022,7 @@ app.get("/api/staff/notifications", async (req, res, next) => {
       status: z.enum(["pending"]).default("pending"),
       limit: z.coerce.number().int().min(1).max(100).default(50)
     }).parse(req.query);
-    const result = await getDashboardNotifications(query.limit);
+    const result = await getDashboardNotifications(query.limit, getDashboardTypesForRole(user.role));
     return res.json({ notifications: result.items, total: result.total });
   } catch (error) {
     return next(error);
@@ -4982,7 +5035,7 @@ app.get("/api/staff/reservations/overview", async (req, res, next) => {
     if (!user) {
       return;
     }
-    const canViewTables = ["admin", "receptionist"].includes(user.role);
+    const canViewTables = ["admin", "receptionist", "cashier"].includes(user.role);
     const canViewCatering = ["admin", "event_coordinator"].includes(user.role);
 
     const [tableReservations, cateringReservations] = await Promise.all([
@@ -5106,7 +5159,7 @@ app.get("/api/staff/reservations/overview/pickup", async (req, res, next) => {
 
 app.get("/api/staff/reservations/all", async (req, res, next) => {
   try {
-    const user = requireRole(req, res, ["admin", "receptionist"]);
+    const user = requireRole(req, res, ["admin", "receptionist", "cashier"]);
     if (!user) return;
 
     const date = typeof req.query.date === "string" ? manilaDateToUtc(req.query.date) : undefined;
@@ -6104,6 +6157,23 @@ app.post("/api/auth/login", async (req, res, next) => {
       return res.status(401).json({ message: "Invalid email or password" });
     }
 
+    await prisma.$transaction(async (tx) => {
+      await tx.user.update({
+        where: { id: user.id },
+        data: { last_login: new Date() },
+        select: { id: true }
+      });
+      await tx.auditLog.create({
+        data: {
+          user_id: user.id,
+          action: "login",
+          entity: "authentication",
+          entity_id: user.id,
+          new_value: { role: user.role }
+        }
+      });
+    });
+
     const expiresIn = jwtExpirationSeconds(process.env.JWT_EXPIRES_IN ?? "8h");
     const token = jwt.sign(
       { sub: user.id, email: user.email, role: user.role },
@@ -6118,6 +6188,30 @@ app.post("/api/auth/login", async (req, res, next) => {
       secure: process.env.NODE_ENV === "production"
     });
     return res.json({ token, user: { id: user.id, email: user.email, role: user.role, name: user.name } });
+  } catch (error) {
+    return next(error);
+  }
+});
+
+app.post("/api/auth/logout", async (req, res, next) => {
+  try {
+    const user = getUserFromRequest(req);
+    if (user) {
+      await prisma.auditLog.create({
+        data: {
+          user_id: user.sub,
+          action: "logout",
+          entity: "authentication",
+          entity_id: user.sub
+        }
+      });
+    }
+
+    res.clearCookie("token", {
+      sameSite: "lax",
+      secure: process.env.NODE_ENV === "production"
+    });
+    return res.json({ message: "Signed out." });
   } catch (error) {
     return next(error);
   }
@@ -7905,7 +7999,10 @@ type ProductStockSource = {
   }>;
 };
 
-async function getAvailableProductStocks(products: ProductStockSource[]) {
+async function getAvailableProductStocks(
+  products: ProductStockSource[],
+  stockClient: Prisma.TransactionClient | typeof prisma = prisma
+) {
   const ingredientMaterials = products.flatMap((product) =>
     (product.recipes[0]?.recipe_ingredients ?? []).map((ingredient) => ingredient.raw_material)
   );
@@ -7913,7 +8010,7 @@ async function getAvailableProductStocks(products: ProductStockSource[]) {
     .filter((product) => product.category.toLowerCase() === "beverage" && (product.recipes[0]?.recipe_ingredients.length ?? 0) === 0)
     .map((product) => getBeverageStockMaterialName(product.name));
   const beverageMaterials = beverageNames.length > 0
-    ? await prisma.rawMaterial.findMany({
+    ? await stockClient.rawMaterial.findMany({
         where: { name: { in: beverageNames }, is_deleted: false },
         select: { id: true, name: true, unit: true, current_stock: true }
       })
@@ -7925,8 +8022,8 @@ async function getAvailableProductStocks(products: ProductStockSource[]) {
   ]));
   const [reservedByMaterial, batches] = materialIds.length > 0
     ? await Promise.all([
-        getActiveCateringReservationQuantities(prisma, materialIds),
-        prisma.materialBatch.findMany({
+        getActiveCateringReservationQuantities(stockClient, materialIds),
+        stockClient.materialBatch.findMany({
           where: { raw_material_id: { in: materialIds }, is_disposed: false },
           select: { raw_material_id: true, remaining_quantity: true, expiration_date: true }
         })
@@ -8185,7 +8282,8 @@ app.get("/api/takeout/catalog", async (_req, res, next) => {
       price: Number(product.price),
       description: product.description,
       image_url: await normalizeProductImage(product),
-      is_available: product.is_available && (availableStock.get(product) ?? 0) > 0
+      is_available: product.is_available && (availableStock.get(product) ?? 0) > 0,
+      available_stock: availableStock.get(product) ?? 0
     })));
     return res.json({ products: productsWithImages });
   } catch (error) {
@@ -8228,6 +8326,28 @@ app.post("/api/takeout/orders", async (req, res, next) => {
       try {
         order = await prisma.$transaction(async (tx) => {
           const { productsById, needs } = await getTakeoutRequirements(tx, body.items);
+          const availableStockByProduct = await getAvailableProductStocks(
+            [...productsById.values()],
+            tx
+          );
+          const requestedQuantityByProduct = new Map<string, number>();
+          for (const item of body.items) {
+            requestedQuantityByProduct.set(
+              item.product_id,
+              (requestedQuantityByProduct.get(item.product_id) ?? 0) + item.quantity
+            );
+          }
+          for (const [productId, quantity] of requestedQuantityByProduct) {
+            const product = productsById.get(productId);
+            const available = product ? availableStockByProduct.get(product) ?? 0 : 0;
+            if (product && quantity > available) {
+              throw new InventoryError(
+                `${product.name} has only ${available} available. Reduce the pickup quantity and try again.`,
+                "INSUFFICIENT_PRODUCT_STOCK",
+                409
+              );
+            }
+          }
 
           for (const need of needs) {
             const material = await tx.rawMaterial.findFirst({
@@ -8733,7 +8853,7 @@ app.post("/api/pos/pickup-orders/:orderNumber/complete", async (req, res, next) 
           }))
         }
       };
-    });
+    }, { maxWait: 10_000, timeout: 30_000 });
     if ("preview" in order) {
       return res.json(order.preview);
     }
@@ -9906,7 +10026,7 @@ app.post("/api/pos/transaction", async (req, res, next) => {
           items: { include: { selling_product: true } }
         }
       });
-    });
+    }, { maxWait: 10_000, timeout: 30_000 });
 
     return res.status(201).json({ transaction });
   } catch (error) {
@@ -10899,7 +11019,7 @@ app.get("/api/admin/unlimited/settings", async (req, res, next) => {
 
 app.put("/api/admin/unlimited/settings", async (req, res, next) => {
   try {
-    const user = requireRole(req, res, ["admin", "cashier"]);
+    const user = requireRole(req, res, ["admin"]);
 
     if (!user) {
       return;

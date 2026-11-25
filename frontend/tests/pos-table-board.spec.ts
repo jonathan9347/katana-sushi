@@ -1,6 +1,18 @@
 import { expect, test, type Page } from "@playwright/test";
 
 const tables = [
+  ...Array.from({ length: 10 }, (_, index) => {
+    const table_number = index + 1;
+    return {
+      id: `table-extra-${table_number}`,
+      table_number,
+      capacity: 4,
+      status: "available",
+      linked_to_table_id: null,
+      unavailable_reason: null,
+      active_session: null
+    };
+  }),
   {
     id: "table-1",
     table_number: 11,
@@ -45,7 +57,19 @@ const tables = [
     linked_to_table_id: null,
     unavailable_reason: null,
     active_session: null
-  }
+  },
+  ...Array.from({ length: 2 }, (_, index) => {
+    const table_number = index + 15;
+    return {
+      id: `table-${table_number}`,
+      table_number,
+      capacity: 4,
+      status: "available",
+      linked_to_table_id: null,
+      unavailable_reason: null,
+      active_session: null
+    };
+  })
 ];
 
 async function openPosWithTableMocks(
@@ -158,14 +182,12 @@ test("walk-in board is a pure status grid and stages free-table choice without s
   let sessionCreationCount = 0;
   await openPosWithTableMocks(page, "cashier", undefined, () => { sessionCreationCount += 1; });
 
-  await page.getByRole("button", { name: "New Customer" }).click();
-  await page.getByRole("dialog", { name: "New Customer" }).getByRole("button", { name: /Dine-in/ }).click();
-  await page.getByRole("dialog", { name: "Dine-in" }).getByRole("button", { name: /Walk-in/ }).click();
-  await page.getByRole("dialog", { name: "Ready to order" }).getByRole("button", { name: "Start ordering" }).click();
+  await page.getByRole("button", { name: "Dine-in walk-in", exact: true }).click();
   await page.getByRole("button", { name: /California Roll/ }).click();
   await page.getByRole("button", { name: "Proceed" }).click();
 
   const tableBoard = page.getByRole("region", { name: "Table board" });
+  await expect(tableBoard.locator(".pos-table-grid > *")).toHaveCount(16);
   await expect(tableBoard).toBeVisible();
   await expect(tableBoard.getByRole("button", { name: "Select Table 14, Free" })).toBeVisible();
   await expect(tableBoard.getByRole("article", { name: "Table 11, Occupied" })).toBeVisible();
@@ -184,9 +206,34 @@ test("walk-in board is a pure status grid and stages free-table choice without s
   expect(sessionCreationCount).toBe(0);
 });
 
+test("all sixteen tables fit in the table board without scrolling", async ({ page }) => {
+  await page.setViewportSize({ width: 1920, height: 1080 });
+  await openPosWithTableMocks(page);
+  await page.getByRole("button", { name: "Dine-in walk-in", exact: true }).click();
+  await page.getByRole("button", { name: /California Roll/ }).click();
+  await page.getByRole("button", { name: "Proceed" }).click();
+
+  const tableBoard = page.getByRole("region", { name: "Table board" });
+  await expect(tableBoard.locator(".pos-table-grid > *")).toHaveCount(16);
+  for (const viewport of [{ width: 1920, height: 1080 }, { width: 800, height: 1024 }]) {
+    await page.setViewportSize(viewport);
+    const dimensions = await tableBoard.evaluate((board) => ({
+      scrollHeight: board.scrollHeight,
+      clientHeight: board.clientHeight,
+      lastTableBottom: Math.max(...Array.from(
+        board.querySelectorAll(".pos-table-grid > *"),
+        (table) => table.getBoundingClientRect().bottom
+      )),
+      viewportHeight: window.innerHeight
+    }));
+    expect(dimensions.scrollHeight).toBeLessThanOrEqual(dimensions.clientHeight);
+    expect(dimensions.lastTableBottom).toBeLessThanOrEqual(dimensions.viewportHeight);
+  }
+});
+
 test("existing-table board only selects occupied tables with a live session", async ({ page }) => {
   await openPosWithTableMocks(page);
-  await page.getByRole("button", { name: "Existing Table" }).click();
+  await page.getByRole("button", { name: "Existing table", exact: true }).click();
 
   const tableBoard = page.getByRole("region", { name: "Table board" });
   const orderBuilder = page.getByRole("region", { name: "POS order builder" });
@@ -206,21 +253,21 @@ test("existing-table board only selects occupied tables with a live session", as
 
 test("table board is presented as a dialog and Escape follows the existing Back behavior", async ({ page }) => {
   await openPosWithTableMocks(page);
-  await page.getByRole("button", { name: "Existing Table" }).click();
+  await page.getByRole("button", { name: "Existing table", exact: true }).click();
 
   const boardDialog = page.getByRole("dialog", { name: "Table board" });
   await expect(boardDialog).toBeVisible();
   await expect(boardDialog).toHaveAttribute("aria-modal", "true");
   await page.keyboard.press("Escape");
   await expect(boardDialog).toHaveCount(0);
-  await expect(page.getByRole("button", { name: "Existing Table" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "New Customer" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Existing table", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Dine-in walk-in", exact: true })).toBeVisible();
 });
 
 test("opens Manage tables from the main POS and preserves table creation and link controls", async ({ page }) => {
   let createTableCalled = false;
   await openPosWithTableMocks(page, "admin", () => { createTableCalled = true; });
-  await page.getByRole("button", { name: "Existing Table" }).click();
+  await page.getByRole("button", { name: "Existing table", exact: true }).click();
   await page.getByRole("button", { name: "Manage Tables" }).click();
 
   const dialog = page.getByRole("dialog", { name: "Manage tables" });

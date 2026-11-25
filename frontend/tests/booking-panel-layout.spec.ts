@@ -12,6 +12,7 @@ const products = ["Sushi", "Sashimi"].flatMap((category) =>
     name: `Test ${category} ${index + 1}`,
     category,
     price: 500,
+    available_stock: 10,
     is_available: true
   }))
 );

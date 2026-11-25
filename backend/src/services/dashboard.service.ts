@@ -237,7 +237,11 @@ export async function getInventoryAlerts(limit: number) {
   };
 }
 
-export async function getDashboardReminders(days: number, limit: number) {
+export async function getDashboardReminders(
+  days: number,
+  limit: number,
+  allowedTypes: Array<"table" | "catering"> = ["table", "catering"]
+) {
   // Reminders are approved table and catering bookings from now through the requested business-local day range.
   const timeZone = await getDashboardTimeZone();
   const now = new Date();
@@ -248,13 +252,13 @@ export async function getDashboardReminders(days: number, limit: number) {
     return localDateTimeToUtc(dateKey(date, timeZone), timeZone, hour, minute).getTime() >= now.getTime();
   };
   const [tables, catering] = await Promise.all([
-    prisma.reservation.findMany({
+    allowedTypes.includes("table") ? prisma.reservation.findMany({
       where: { status: { in: ["confirmed", "approved"] }, date: { gte: start, lt: end } },
       orderBy: [{ date: "asc" }, { time: "asc" }],
       take: limit,
       select: { id: true, booking_id: true, customer_name: true, date: true, time: true, party_size: true }
-    }),
-    prisma.cateringReservation.findMany({
+    }) : Promise.resolve([]),
+    allowedTypes.includes("catering") ? prisma.cateringReservation.findMany({
       where: {
         status: { in: ["confirmed", "approved"] },
         OR: [
@@ -274,7 +278,7 @@ export async function getDashboardReminders(days: number, limit: number) {
         event_time: true,
         package: { select: { name: true } }
       }
-    })
+    }) : Promise.resolve([])
   ]);
 
   return [
@@ -339,15 +343,21 @@ export async function getDashboardCalendar(month: string) {
   return dates.map((entry) => entry.date);
 }
 
-export async function getDashboardNotifications(limit: number): Promise<{ total: number; items: DashboardNotification[] }> {
+export async function getDashboardNotifications(
+  limit: number,
+  allowedTypes: DashboardNotification["type"][] = ["table", "catering", "pickup"]
+): Promise<{ total: number; items: DashboardNotification[] }> {
+  const includeTables = allowedTypes.includes("table");
+  const includeCatering = allowedTypes.includes("catering");
+  const includePickup = allowedTypes.includes("pickup");
   const [tables, catering, pickup, tableCount, cateringCount, pickupCount] = await Promise.all([
-    prisma.reservation.findMany({
+    includeTables ? prisma.reservation.findMany({
       where: { status: { in: ["pending", "pending_approval"] } },
       orderBy: [{ created_at: "desc" }, { id: "desc" }],
       take: limit,
       select: { id: true, booking_id: true, customer_name: true, date: true, time: true, party_size: true, status: true, created_at: true }
-    }),
-    prisma.cateringReservation.findMany({
+    }) : Promise.resolve([]),
+    includeCatering ? prisma.cateringReservation.findMany({
       where: { status: { in: ["pending", "pending_approval"] } },
       orderBy: [{ created_at: "desc" }, { id: "desc" }],
       take: limit,
@@ -355,16 +365,16 @@ export async function getDashboardNotifications(limit: number): Promise<{ total:
         id: true, reservation_id: true, customer_name: true, event_date: true, event_time: true,
         headcount: true, status: true, created_at: true, package: { select: { name: true } }
       }
-    }),
-    prisma.takeoutOrder.findMany({
+    }) : Promise.resolve([]),
+    includePickup ? prisma.takeoutOrder.findMany({
       where: { status: "pending_approval" },
       orderBy: [{ created_at: "desc" }, { id: "desc" }],
       take: limit,
       include: { items: { orderBy: { created_at: "asc" }, select: { name_snapshot: true, quantity: true } } }
-    }),
-    prisma.reservation.count({ where: { status: { in: ["pending", "pending_approval"] } } }),
-    prisma.cateringReservation.count({ where: { status: { in: ["pending", "pending_approval"] } } }),
-    prisma.takeoutOrder.count({ where: { status: "pending_approval" } })
+    }) : Promise.resolve([]),
+    includeTables ? prisma.reservation.count({ where: { status: { in: ["pending", "pending_approval"] } } }) : Promise.resolve(0),
+    includeCatering ? prisma.cateringReservation.count({ where: { status: { in: ["pending", "pending_approval"] } } }) : Promise.resolve(0),
+    includePickup ? prisma.takeoutOrder.count({ where: { status: "pending_approval" } }) : Promise.resolve(0)
   ]);
 
   const items: DashboardNotification[] = [

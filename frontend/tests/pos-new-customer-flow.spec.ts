@@ -37,42 +37,28 @@ async function routeDefaultPosApis(page: Page) {
 }
 
 async function openReservationPicker(page: Page) {
-  await page.getByRole("button", { name: "New Customer" }).click();
-  await page.getByRole("dialog", { name: "New Customer" }).getByRole("button", { name: /Dine-in/ }).click();
-  await page.getByRole("dialog", { name: "Dine-in" }).getByRole("button", { name: /Reservation/ }).click();
+  await page.getByRole("button", { name: "Reservation", exact: true }).click();
   return page.getByRole("dialog", { name: "Today's reservations" });
 }
 
 async function openPickupPicker(page: Page) {
-  await page.getByRole("button", { name: "New Customer" }).click();
-  await page.getByRole("dialog", { name: "New Customer" }).getByRole("button", { name: /Take-out/ }).click();
-  await page.getByRole("dialog", { name: "Take-out" }).getByRole("button", { name: /Pickup/ }).click();
+  await page.getByRole("button", { name: "Pickup", exact: true }).click();
   return page.getByRole("dialog", { name: "Select pickup order" });
 }
 
-test("supports keyboard choices, Backspace, Escape and focus restoration", async ({ page }) => {
+test("inline order paths open accessible pickers and Escape restores focus", async ({ page }) => {
   await setupCashier(page);
   await routeDefaultPosApis(page);
   await page.goto("/staff/pos");
 
-  const trigger = page.getByRole("button", { name: "New Customer" });
-  await trigger.click();
-  const dialog = page.getByRole("dialog", { name: "New Customer" });
-  await expect(dialog.getByRole("button", { name: /Dine-in/ })).toBeFocused();
-
-  await page.keyboard.press("1");
-  await expect(page.getByRole("dialog", { name: "Dine-in" })).toBeVisible();
-  await page.keyboard.press("Backspace");
-  await expect(page.getByRole("dialog", { name: "New Customer" })).toBeVisible();
-  await page.keyboard.press("2");
-  await expect(page.getByRole("dialog", { name: "Take-out" })).toBeVisible();
+  const trigger = page.getByRole("button", { name: "Reservation", exact: true });
+  await trigger.focus();
+  await page.keyboard.press("Enter");
+  await expect(page.getByRole("dialog", { name: "Today's reservations" })).toBeVisible();
   await page.keyboard.press("Escape");
   await expect(page.getByRole("dialog")).toHaveCount(0);
   await expect(trigger).toBeFocused();
-
-  await trigger.click();
-  await expect(page.getByRole("dialog", { name: "New Customer" })).toBeVisible();
-  await expect(page.getByRole("dialog", { name: "New Customer" }).getByRole("button", { name: /Dine-in/ })).toBeFocused();
+  await expect(page.getByRole("button", { name: "Dine-in walk-in", exact: true })).toHaveAttribute("aria-pressed", "false");
 });
 
 test("reservation picker shows loading, empty, and retryable error states", async ({ page }) => {
@@ -107,9 +93,8 @@ test("reservation picker shows loading, empty, and retryable error states", asyn
   let dialog = await openReservationPicker(page);
   await expect(dialog.getByRole("status")).toHaveText("Loading reservations…");
   await expect(dialog.getByText("No reservations for today")).toBeVisible();
-  await dialog.getByRole("button", { name: "Back" }).click();
-  await page.getByRole("dialog", { name: "Dine-in" }).getByRole("button", { name: /Reservation/ }).click();
-  dialog = page.getByRole("dialog", { name: "Today's reservations" });
+  await dialog.getByRole("button", { name: "Close order picker" }).click();
+  dialog = await openReservationPicker(page);
   await expect(dialog.getByRole("alert")).toContainText("Unable to load today’s reservations.");
   await dialog.getByRole("button", { name: "Retry" }).click();
   await expect(dialog.getByText("No reservations for today")).toBeVisible();
@@ -151,7 +136,6 @@ test("reservation selection continues through the existing table assignment flow
 
   const dialog = await openReservationPicker(page);
   await dialog.getByRole("button", { name: /Dela Cruz/ }).click();
-  await page.getByRole("dialog", { name: "Ready to order" }).getByRole("button", { name: "Start ordering" }).click();
   await expect(page.getByRole("region", { name: "Table board" })).toContainText("Assign table(s) for Dela Cruz");
   await expect(page.getByRole("region", { name: "Current order" })).toContainText("Dela Cruz · 06:30 PM");
 });
@@ -191,9 +175,26 @@ test("pickup picker loads matching orders and the selected order continues to ch
   const dialog = await openPickupPicker(page);
   await dialog.getByLabel("Search pickup orders by customer or reference").fill("PICK-42");
   await dialog.getByRole("button", { name: /Mika Tan/ }).click();
-  await page.getByRole("dialog", { name: "Ready to order" }).getByRole("button", { name: "Start ordering" }).click();
   await expect(page.getByRole("region", { name: "Current order" })).toContainText("Mika Tan · PICK-42");
   await expect(page.getByRole("button", { name: "Checkout" })).toBeEnabled();
+});
+
+test("keeps the main order action visible at cashier PC and tablet sizes", async ({ page }) => {
+  await setupCashier(page);
+  await routeDefaultPosApis(page);
+  await page.goto("/staff/pos");
+
+  for (const viewport of [{ width: 1920, height: 1080 }, { width: 800, height: 1024 }]) {
+    await page.setViewportSize(viewport);
+    const builder = page.getByRole("region", { name: "POS order builder" });
+    const primaryAction = builder.getByRole("button", { name: "Checkout", exact: true });
+    await expect(primaryAction).toBeVisible();
+    const bounds = await primaryAction.boundingBox();
+    expect(bounds).not.toBeNull();
+    expect(bounds?.y ?? -1).toBeGreaterThanOrEqual(0);
+    expect((bounds?.y ?? 0) + (bounds?.height ?? 0)).toBeLessThanOrEqual(viewport.height);
+    await expect(page.getByRole("button", { name: "Dine-in walk-in", exact: true })).toHaveCSS("min-height", "44px");
+  }
 });
 
 test("pickup picker shows empty and retryable error states", async ({ page }) => {

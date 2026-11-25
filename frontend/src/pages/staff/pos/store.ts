@@ -5,6 +5,7 @@ export type PosProduct = {
   name: string;
   category: string;
   price: string | number;
+  image_url?: string | null;
   is_available?: boolean;
   available_stock?: number | null;
   is_included?: boolean;

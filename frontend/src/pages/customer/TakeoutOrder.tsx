@@ -20,6 +20,7 @@ type TakeoutProduct = {
   price: number;
   description?: string | null;
   image_url?: string | null;
+  available_stock: number;
   is_available: boolean;
 };
 
@@ -211,7 +212,9 @@ export default function TakeoutOrder() {
 
   function adjustQuantity(productId: string, amount: number) {
     setQuantities((current) => {
-      const next = Math.max(0, Math.min(100, (current[productId] ?? 0) + amount));
+      const product = products.find((entry) => entry.id === productId);
+      const availableStock = product ? Math.max(0, Math.floor(product.available_stock)) : 0;
+      const next = Math.max(0, Math.min(100, availableStock, (current[productId] ?? 0) + amount));
       return { ...current, [productId]: next };
     });
   }
@@ -369,7 +372,8 @@ export default function TakeoutOrder() {
                           </div>
                           <div className="customer-menu-product-grid grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-3 xl:grid-cols-4">
                             {group.products.map((product, index) => {
-                              const disabled = !product.is_available;
+                              const availableStock = Math.max(0, Math.floor(product.available_stock));
+                              const disabled = !product.is_available || availableStock === 0;
                               const image = resolveImageUrl(product.image_url);
                               const quantity = quantities[product.id] ?? 0;
                               const eagerImage = groupIndex === 0 && index < 6;
@@ -384,12 +388,14 @@ export default function TakeoutOrder() {
                                     <h4 className="customer-menu-product-name line-clamp-2 font-display text-sm font-bold leading-tight sm:text-base">{product.name}</h4>
                                     <span className="customer-menu-price-badge text-sm">{formatMoney(product.price)}</span>
                                     <p className="customer-menu-product-description line-clamp-2 min-h-8 text-[11px] leading-relaxed sm:text-xs">{product.description ?? "House specialty"}</p>
-                                    <span className={`customer-menu-product-status ${disabled ? "is-unavailable" : "is-available"}`}>{disabled ? "Not available" : "Available"}</span>
+                                    <span className={`customer-menu-product-status ${disabled ? "is-unavailable" : "is-available"}`}>
+                                      {disabled ? "Not available" : `${availableStock} available`}
+                                    </span>
                                     {quantity > 0 ? (
                                       <div className="customer-menu-quantity-control" aria-label={`Quantity of ${product.name}`}>
                                         <button type="button" aria-label={`Remove one ${product.name}`} onClick={() => adjustQuantity(product.id, -1)}>−</button>
                                         <span aria-live="polite">{quantity}</span>
-                                        <button type="button" aria-label={`Add one ${product.name}`} disabled={disabled || quantity >= 100} onClick={() => adjustQuantity(product.id, 1)}>+</button>
+                                        <button type="button" aria-label={`Add one ${product.name}`} disabled={disabled || quantity >= Math.min(100, availableStock)} onClick={() => adjustQuantity(product.id, 1)}>+</button>
                                       </div>
                                     ) : (
                                       <button type="button" onClick={() => adjustQuantity(product.id, 1)} disabled={disabled} className="customer-menu-order-button">
@@ -449,7 +455,7 @@ export default function TakeoutOrder() {
                           <div className="customer-pickup-item-quantity" aria-label={`Quantity of ${product.name}`}>
                             <button type="button" aria-label={`Remove one ${product.name}`} onClick={() => adjustQuantity(product.id, -1)}>−</button>
                             <span>{quantity}</span>
-                            <button type="button" aria-label={`Add one ${product.name}`} disabled={quantity >= 100} onClick={() => adjustQuantity(product.id, 1)}>+</button>
+                            <button type="button" aria-label={`Add one ${product.name}`} disabled={quantity >= Math.min(100, product.available_stock)} onClick={() => adjustQuantity(product.id, 1)}>+</button>
                           </div>
                           <strong className="customer-pickup-item-total">{formatMoney(product.price * quantity)}</strong>
                         </article>

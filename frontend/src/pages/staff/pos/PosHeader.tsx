@@ -1,12 +1,16 @@
 import { Link } from "react-router-dom";
-import { ArrowLeft } from "lucide-react";
+import { ArrowLeft, ChevronDown, Printer } from "lucide-react";
+import { useAuth } from "../../../hooks/useAuth";
 
 type Props = {
   section?: string;
   showBack?: boolean;
+  onPrintTestSlip?: () => void;
 };
 
-export default function PosHeader({ section, showBack = false }: Props) {
+export default function PosHeader({ section, showBack = false, onPrintTestSlip }: Props) {
+  const { user } = useAuth();
+
   return (
     <header className="flex flex-wrap items-center justify-between gap-4 border-b border-slate-200 pb-4">
       <div className="flex items-center gap-3">
@@ -25,19 +29,21 @@ export default function PosHeader({ section, showBack = false }: Props) {
           {section && <p className="text-sm text-slate-600">{section}</p>}
         </div>
       </div>
-      <nav aria-label="POS pages" className="flex gap-2">
-        <Link
-          to="/staff/pos/history"
-          className="inline-flex h-10 items-center justify-center rounded-md border border-slate-300 bg-white px-4 text-sm font-medium text-slate-900 hover:bg-slate-50"
-        >
-          Transaction History
-        </Link>
-        <Link
-          to="/staff/pos/unlimited-settings"
-          className="inline-flex h-10 items-center justify-center rounded-md border border-slate-300 bg-white px-4 text-sm font-medium text-slate-900 hover:bg-slate-50"
-        >
-          Unli Settings
-        </Link>
+      <nav aria-label="POS pages" className="flex items-center gap-2">
+        <details className="pos-more-menu">
+          <summary>
+            More <ChevronDown aria-hidden="true" />
+          </summary>
+          <div className="pos-more-menu-panel">
+            <Link to="/staff/pos/history">Transaction history</Link>
+            {user?.role === "admin" && <Link to="/staff/pos/unlimited-settings">Unlimited settings</Link>}
+            {onPrintTestSlip && (
+              <button type="button" onClick={onPrintTestSlip}>
+                <Printer aria-hidden="true" /> Print test slip
+              </button>
+            )}
+          </div>
+        </details>
       </nav>
     </header>
   );

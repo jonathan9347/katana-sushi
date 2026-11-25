@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Check, Printer, X } from "lucide-react";
+import { Check, Printer } from "lucide-react";
 import { Dialog } from "../../../components/ui/dialog";
 import UnlimitedTimer from "../../../components/pos/UnlimitedTimer";
 import { usePosCart, type PosCartKey } from "./store";
@@ -928,16 +928,6 @@ export default function DiningService({
             )}
             {boardOnly && !embedded && <ActionButton tone="muted" className="min-h-8 px-2 text-xs" onClick={() => setManageTablesOpen(true)}>Manage Tables</ActionButton>}
             {!embedded && !boardOnly && !reservationOnly && <ActionButton tone="muted" onClick={() => setManageTablesOpen(true)}>Manage tables</ActionButton>}
-            {boardOnly && embedded && onBackToBoard && (
-              <button
-                type="button"
-                aria-label="Close table board"
-                className="pos-table-modal-close"
-                onClick={onBackToBoard}
-              >
-                <X aria-hidden="true" />
-              </button>
-            )}
           </div>
         </header>
         {boardOnly && (
@@ -962,7 +952,7 @@ export default function DiningService({
             {tablesQuery.isLoading ? (
               <p className="text-sm text-slate-600">Loading tables...</p>
             ) : (
-              <div className="pos-table-grid grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+              <div className="pos-table-grid grid gap-4">
                 {(tablesQuery.data ?? []).map((table) => {
                   const status = normalizeTableStatus(table.status);
                   const reservation = reservationsByTableNumber.get(table.table_number);
@@ -992,7 +982,7 @@ export default function DiningService({
                       {reservationTableSelected && <span className="pos-table-check"><Check aria-hidden="true" /></span>}
                       <span className="text-xl font-bold">Table {table.table_number}</span>
                       <span className="text-sm">{table.capacity} seats</span>
-                      <span className="mt-2 inline-flex rounded-full bg-white/80 px-3 py-1 text-sm font-bold">{label}</span>
+                      <span className="pos-table-status-label mt-2 text-sm font-semibold">{label}</span>
                       {table.active_session && (
                         <span className="mt-2 grid gap-1 text-xs">
                           <span>Order ID {table.active_session.display_order_id ?? "—"}</span>
@@ -1010,7 +1000,7 @@ export default function DiningService({
                       type="button"
                       aria-label={`${boardPurpose === "reservation" ? "Choose" : "Select"} Table ${table.table_number}, ${label}`}
                       aria-pressed={boardPurpose === "reservation" ? reservationTableSelected : undefined}
-                      className={`pos-table-card is-selectable grid min-h-36 place-items-center rounded-xl border p-4 shadow-sm transition ${stateClass} ${reservationTableSelected ? "is-selected" : ""}`}
+                      className={`pos-table-card is-selectable grid min-h-20 place-items-center rounded-lg border px-2 py-2 transition ${stateClass} ${reservationTableSelected ? "is-selected" : ""}`}
                       onClick={() => {
                         if (boardPurpose === "reservation") {
                           const nextSelection = reservationTableSelection.includes(table.id)
@@ -1040,7 +1030,7 @@ export default function DiningService({
                       {contents}
                     </button>
                   ) : (
-                    <article key={table.id} aria-label={`Table ${table.table_number}, ${label}`} className={`pos-table-card grid min-h-36 place-items-center rounded-xl border p-4 shadow-sm ${stateClass}`}>
+                    <article key={table.id} aria-label={`Table ${table.table_number}, ${label}`} className={`pos-table-card grid min-h-20 place-items-center rounded-lg border px-2 py-2 ${stateClass}`}>
                       {contents}
                     </article>
                   );
