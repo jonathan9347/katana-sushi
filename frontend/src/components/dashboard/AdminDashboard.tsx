@@ -364,7 +364,7 @@ export default function AdminDashboard() {
             </span>
             <ChevronRight aria-hidden="true" className="admin-quick-stat-chevron" />
           </Link>
-          <Link to="/staff/catering" className="admin-quick-stat">
+          <Link to="/staff/reservations?view=catering" className="admin-quick-stat">
             <span className="admin-quick-stat-icon is-green"><CalendarDays aria-hidden="true" size={16} /></span>
             <span className="admin-quick-stat-copy">
               <span className="admin-quick-stat-value">{summaryQuery.isError ? "—" : summaryQuery.data?.upcomingEvents ?? "…"}</span>

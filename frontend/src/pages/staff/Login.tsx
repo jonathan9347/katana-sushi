@@ -57,7 +57,7 @@ function defaultRouteForRole(role: string) {
     return "/staff/reservations";
   }
   if (normalized === "event_coordinator") {
-    return "/staff/catering";
+    return "/staff/reservations?view=catering";
   }
   if (normalized === "chef") {
     return "/staff/inventory/read-only";

@@ -143,7 +143,9 @@ export default function App() {
         path="/staff/catering"
         element={
           <StaffPage roles={["admin", "event_coordinator"]}>
-            <CateringReservations />
+            {localStorage.getItem("katana_role")?.toLowerCase() === "event_coordinator"
+              ? <DineInReservations />
+              : <CateringReservations />}
           </StaffPage>
         }
       />

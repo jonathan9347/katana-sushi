@@ -2,11 +2,14 @@ import { useMemo, useState, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { isAxiosError } from "axios";
 import {
+  Bell,
+  CalendarDays,
   Check,
   ChevronLeft,
   ChevronRight,
   Clock3,
-  Settings,
+  Package,
+  ReceiptText,
   X
 } from "lucide-react";
 import { Link } from "react-router-dom";
@@ -68,10 +71,12 @@ function DashboardCard({
   className?: string;
 }) {
   return (
-    <section className={`min-w-0 rounded-lg border border-slate-200 bg-white p-5 shadow-sm ${className}`}>
-      <div className="mb-4">
-        <h2 className="text-lg font-bold text-slate-950">{title}</h2>
-        {subtitle && <p className="mt-1 text-sm text-slate-500">{subtitle}</p>}
+    <section className={`admin-card min-w-0 ${className}`}>
+      <div className="admin-card-heading">
+        <div className="min-w-0">
+          <h2 className="admin-card-title">{title}</h2>
+          {subtitle && <p className="admin-card-subtitle">{subtitle}</p>}
+        </div>
       </div>
       {children}
     </section>
@@ -116,7 +121,7 @@ function bookingActionError(error: unknown) {
 }
 
 function getNotificationPath(notification: DashboardNotification) {
-  if (notification.type === "catering") return "/staff/catering";
+  if (notification.type === "catering") return "/staff/reservations?view=catering";
   return `/staff/reservations?view=${notification.type === "pickup" ? "pickup" : "tables"}`;
 }
 
@@ -234,298 +239,244 @@ export default function StaffDashboard() {
     : role === "inventory_manager" || role === "chef"
       ? { title: "Low stock alerts", value: summaryQuery.data?.lowStockCount }
       : { title: "Open requests", value: summaryQuery.data?.pendingApprovals };
+  const updatedLabel = updatedAt
+    ? new Intl.DateTimeFormat("en-PH", { hour: "numeric", minute: "2-digit", timeZone: "Asia/Manila" }).format(updatedAt)
+    : "Loading";
+  const todayDate = new Date(`${today}T12:00:00+08:00`);
+  const todayLabel = new Intl.DateTimeFormat("en-PH", {
+    weekday: "short", month: "short", day: "numeric", timeZone: "Asia/Manila"
+  }).format(todayDate);
 
   return (
-    <main className="staff-dashboard min-h-screen w-full bg-[#f8f5f7] p-4 pb-24 md:p-6 lg:p-8 min-[1100px]:h-screen min-[1100px]:overflow-hidden">
-      <div className="grid min-w-0 gap-5 min-[1100px]:h-full min-[1100px]:grid-cols-[minmax(0,3fr)_minmax(320px,1.35fr)]">
-        <div className="min-w-0 space-y-5 min-[1100px]:min-h-0 min-[1100px]:overflow-y-auto min-[1100px]:pb-8 min-[1100px]:pr-1">
-          <header className="flex flex-col justify-between gap-4 sm:flex-row sm:items-end">
-            <div className="min-w-0">
-              <p className="text-xs font-bold uppercase tracking-[0.18em] text-red-800">Operations</p>
-              <h1 className="mt-1 text-3xl font-black tracking-tight text-slate-950 sm:text-4xl">
-                Welcome back, {user?.name ?? "Team member"}
-              </h1>
-              <p className="mt-2 text-xs text-slate-500" aria-live="polite">
-                {updatedAt ? `Last updated ${new Intl.DateTimeFormat("en-PH", { hour: "numeric", minute: "2-digit" }).format(updatedAt)}` : "Loading dashboard data"}
-              </p>
-            </div>
-            <div className="flex items-center gap-3">
-              <span className="rounded-full bg-amber-100 px-3 py-2 text-xs font-bold text-amber-900">
-                Role · {displayRole}
-              </span>
-              {role === "admin" && (
-                <Link
-                  to="/staff/settings"
-                  className="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-4 py-2.5 text-sm font-semibold text-slate-900 hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-700"
-                >
-                  <Settings className="h-4 w-4" aria-hidden="true" /> Settings
-                </Link>
-              )}
-            </div>
-          </header>
+    <main className="admin-dashboard staff-dashboard">
+      <div className="admin-dashboard-grid">
+        <header className="admin-dashboard-header">
+          <div className="min-w-0">
+            <p className="admin-dashboard-eyebrow">Operations</p>
+            <h1>Welcome back, {user?.name ?? "Team member"}</h1>
+            <p className="admin-dashboard-subtitle" aria-live="polite">
+              Here&apos;s what&apos;s happening at your store today.
+            </p>
+          </div>
+          <div className="admin-dashboard-header-tools">
+            <span className="admin-header-pill">{todayLabel} · Updated {updatedLabel}</span>
+            <span className="admin-header-pill admin-header-pill-role">Role · {displayRole}</span>
+          </div>
+        </header>
 
-          <div className={`grid min-w-0 gap-4 ${canViewSales ? "min-[800px]:grid-cols-[minmax(0,3fr)_minmax(240px,2fr)]" : "min-[800px]:grid-cols-2"}`}>
+        <section className="admin-card admin-dashboard-sales" aria-labelledby="staff-focus-title">
+          <div className="admin-dashboard-sales-top">
+            <p id="staff-focus-title" className="admin-dashboard-sales-label">
+              {canViewSales ? "Today's sales" : "Today's focus"}
+            </p>
             {canViewSales ? (
-              <section className="relative flex min-h-56 flex-col justify-between overflow-hidden rounded-lg bg-gradient-to-br from-[#a43930] to-[#76221b] p-6 text-white shadow-sm sm:min-h-64">
-                <div aria-hidden="true" className="pointer-events-none absolute -right-10 -top-20 h-64 w-64 rounded-full bg-white/10" />
-                <div className="relative z-10">
-                  <p className="text-sm font-medium">Today&apos;s sales</p>
-                  {summaryQuery.isPending ? (
-                    <div className="mt-3 h-12 w-56 animate-pulse rounded-md bg-white/20" role="status" aria-label="Loading sales" />
-                  ) : summaryQuery.isError ? (
-                    <div role="alert" className="mt-3 text-sm">
-                      <p>Sales are temporarily unavailable.</p>
-                      <Retry onClick={() => void summaryQuery.refetch()} />
-                    </div>
-                  ) : (
-                    <>
-                      <p className="mt-1 text-4xl font-black tracking-tight sm:text-5xl">{money(summaryQuery.data.todaySales.total)}</p>
-                      <p className="mt-3 inline-flex rounded-full bg-amber-100 px-3 py-1 text-xs font-semibold text-amber-950">
-                        {summaryQuery.data.todaySales.transactionCount} completed transactions
-                      </p>
-                    </>
-                  )}
-                </div>
-                {!summaryQuery.isError && !summaryQuery.isPending && (
-                  <svg className="relative z-10 mt-5 h-16 w-full" viewBox="0 0 600 90" preserveAspectRatio="none" role="img" aria-label="Hourly sales sparkline">
-                    <path d={salesSparkline(summaryQuery.data.todaySales.series.map((item) => Number(item.total)))} fill="none" stroke="white" strokeWidth="3" vectorEffect="non-scaling-stroke" />
-                  </svg>
-                )}
-              </section>
+              summaryQuery.isPending ? (
+                <div className="mt-3 h-12 w-48 animate-pulse rounded-lg bg-white/20" role="status" aria-label="Loading sales" />
+              ) : summaryQuery.isError ? (
+                <div role="alert" className="mt-3 text-sm">Sales are unavailable. <Retry onClick={() => void summaryQuery.refetch()} /></div>
+              ) : (
+                <p className="admin-dashboard-sales-amount">{money(summaryQuery.data.todaySales.total)}</p>
+              )
             ) : (
-              <section className="flex min-h-56 flex-col justify-between rounded-lg bg-gradient-to-br from-[#a43930] to-[#76221b] p-6 text-white shadow-sm sm:min-h-64">
-                <div>
-                  <p className="text-sm font-medium">Today&apos;s focus</p>
-                  <h2 className="mt-2 text-xl font-bold">{roleFocus.title}</h2>
-                </div>
+              <>
+                <p className="mt-2 text-sm font-semibold text-white/85">{roleFocus.title}</p>
                 {summaryQuery.isPending ? (
-                  <div className="h-12 w-24 animate-pulse rounded-md bg-white/20" role="status" aria-label="Loading dashboard summary" />
+                  <div className="mt-3 h-12 w-20 animate-pulse rounded-lg bg-white/20" role="status" aria-label="Loading dashboard summary" />
                 ) : summaryQuery.isError ? (
-                  <div role="alert" className="text-sm">
-                    <p>Dashboard summary is temporarily unavailable.</p>
-                    <Retry onClick={() => void summaryQuery.refetch()} />
-                  </div>
+                  <div role="alert" className="mt-3 text-sm">Dashboard summary is unavailable. <Retry onClick={() => void summaryQuery.refetch()} /></div>
                 ) : (
-                  <p className="text-5xl font-black">{roleFocus.value ?? 0}</p>
+                  <p className="admin-dashboard-sales-amount">{roleFocus.value ?? 0}</p>
                 )}
-              </section>
+              </>
             )}
-
-            <div className="grid gap-3">
-              {canViewReservations && (
-                <Link to="/staff/reservations" className="flex min-h-20 items-center gap-4 rounded-lg bg-[#191517] p-4 text-white hover:bg-[#282225] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-700">
-                  <span className="min-w-10 text-3xl font-black">{summaryQuery.isError ? "—" : summaryQuery.data?.pendingApprovals ?? "…"}</span>
-                  <span><span className="block font-bold">Pending approvals</span><span className="mt-1 block text-xs text-white/70">Open requests for your role</span></span>
-                </Link>
-              )}
-              {canViewInventory && (
-                <Link to={role === "chef" ? "/staff/inventory/read-only" : "/staff/inventory"} className="flex min-h-20 items-center gap-4 rounded-lg bg-[#fff1df] p-4 text-slate-950 hover:bg-[#ffe8cb] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-700">
-                  <span className="min-w-10 text-3xl font-black">{summaryQuery.isError ? "—" : summaryQuery.data?.lowStockCount ?? "…"}</span>
-                  <span><span className="block font-bold">Low stock alerts</span><span className="mt-1 block text-xs text-slate-600">Materials need restocking</span></span>
-                </Link>
-              )}
-              {canViewCatering && (
-                <Link to="/staff/catering" className="flex min-h-20 items-center gap-4 rounded-lg bg-[#e7f0e9] p-4 text-slate-950 hover:bg-[#dceade] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-700">
-                  <span className="min-w-10 text-3xl font-black">{summaryQuery.isError ? "—" : summaryQuery.data?.upcomingEvents ?? "…"}</span>
-                  <span><span className="block font-bold">Upcoming events</span><span className="mt-1 block text-xs text-slate-600">Approved catering events scheduled</span></span>
-                </Link>
+          </div>
+          {canViewSales && !summaryQuery.isPending && !summaryQuery.isError && (
+            <div className="admin-dashboard-sales-bottom">
+              <div className="admin-dashboard-sales-chips">
+                <span className="admin-dashboard-sales-chip">{summaryQuery.data.todaySales.transactionCount} completed transactions</span>
+                {summaryQuery.data.todaySales.transactionCount > 0 && (
+                  <span className="admin-dashboard-sales-chip admin-dashboard-sales-chip-muted">
+                    {money(String(Number(summaryQuery.data.todaySales.total) / summaryQuery.data.todaySales.transactionCount))} avg. sale
+                  </span>
+                )}
+              </div>
+              {summaryQuery.data.todaySales.series.length > 0 && (
+                <svg className="admin-sales-wave" viewBox="0 0 600 90" preserveAspectRatio="none" aria-hidden="true">
+                  <path d={salesSparkline(summaryQuery.data.todaySales.series.map((item) => Number(item.total)))} fill="none" stroke="white" strokeWidth="2.5" vectorEffect="non-scaling-stroke" />
+                </svg>
               )}
             </div>
-          </div>
+          )}
+        </section>
 
-          <div className="grid min-w-0 gap-4 min-[800px]:grid-cols-2">
-            {canViewSales && <DashboardCard title="Recent sales" subtitle="Latest completed transactions" className="min-h-64">
-              {salesQuery.isPending ? <Skeleton rows={3} /> : salesQuery.isError ? (
-                <div role="alert"><p className="text-sm text-slate-700">Sales could not be loaded.</p><Retry onClick={() => void salesQuery.refetch()} /></div>
-              ) : latestSales.length === 0 ? (
-                <p className="py-6 text-center text-sm text-slate-500">No completed sales yet.</p>
-              ) : (
-                <ul className="divide-y divide-slate-100">
-                  {latestSales.map((sale) => (
-                    <li key={sale.id} className="flex items-center justify-between gap-3 py-3 text-sm">
-                      <span className="truncate font-semibold text-slate-900">#{sale.orderNumber}</span>
-                      <span className="shrink-0 text-slate-700">{money(sale.total)}</span>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </DashboardCard>}
-
-            {canViewInventory && <DashboardCard title="Inventory alerts" subtitle="Lowest available stock · below par level" className="min-h-64">
-              {inventoryQuery.isPending ? <Skeleton rows={4} /> : inventoryQuery.isError ? (
-                <div role="alert"><p className="text-sm text-slate-700">Inventory alerts could not be loaded.</p><Retry onClick={() => void inventoryQuery.refetch()} /></div>
-              ) : alerts.length === 0 ? (
-                <p className="py-6 text-center text-sm text-slate-500">No low stock alerts.</p>
-              ) : (
-                <ul className="space-y-3">
-                  {alerts.map((item) => (
-                    <li key={item.id}>
-                      <div className="flex items-baseline justify-between gap-2 text-sm">
-                        <span className="truncate font-semibold text-slate-900">{item.name}</span>
-                        <span className="shrink-0 text-right text-xs text-slate-600">
-                          {item.quantityLeft} {item.unit} left · <strong className={item.severity === "critical" ? "text-red-800" : "text-amber-800"}>{item.severity}</strong>
-                        </span>
-                      </div>
-                      <div
-                        className="mt-1.5 h-2 overflow-hidden rounded-full bg-rose-100"
-                        role="progressbar"
-                        aria-label={`${item.name} stock relative to par level`}
-                        aria-valuemin={0}
-                        aria-valuemax={100}
-                        aria-valuenow={Math.max(0, Math.min(100, item.percentOfPar))}
-                      >
-                        <div
-                          className={`h-full ${item.severity === "critical" ? "bg-red-800" : "bg-amber-500"}`}
-                          style={{ width: `${Math.max(0, Math.min(100, item.percentOfPar))}%` }}
-                        />
-                      </div>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </DashboardCard>}
-          </div>
-
-          {canViewReminders && <DashboardCard title="Reminders" subtitle="Approved bookings and events in the next 7 days">
-            {remindersQuery.isPending ? <Skeleton rows={3} /> : remindersQuery.isError ? (
-              <div role="alert"><p className="text-sm text-slate-700">Reminders could not be loaded.</p><Retry onClick={() => void remindersQuery.refetch()} /></div>
-            ) : reminders.length === 0 ? (
-              <p className="py-6 text-center text-sm text-slate-500">No upcoming reminders</p>
-            ) : (
-              <ul className="divide-y divide-slate-100">
-                {reminders.map((reminder) => (
-                  <li key={`${reminder.type}-${reminder.id}`} className="flex flex-col justify-between gap-2 py-3 sm:flex-row sm:items-center">
-                    <div className="min-w-0">
-                      <p className="truncate text-sm font-semibold text-slate-900">{reminder.customerName} · {reminder.details}</p>
-                      <p className="mt-1 text-xs text-slate-500">{reminder.type === "table" ? "Table booking" : "Catering event"} · {reminder.reference}</p>
-                    </div>
-                    <p className="flex shrink-0 items-center gap-1.5 text-xs text-slate-600">
-                      <Clock3 className="h-3.5 w-3.5" aria-hidden="true" />
-                      {formatManilaDate(reminder.date, { month: "short", day: "numeric" })}
-                      {reminder.time ? ` · ${formatTime12(reminder.time)}` : ""}
-                    </p>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </DashboardCard>}
-
-          {canViewFeedback && <DashboardCard title="Customer feedback" subtitle="Latest 25 feedback entries">
-            {feedbackQuery.isPending ? <Skeleton rows={4} /> : feedbackQuery.isError ? (
-              <div role="alert"><p className="text-sm text-slate-700">Customer feedback could not be loaded.</p><Retry onClick={() => void feedbackQuery.refetch()} /></div>
-            ) : feedback.length === 0 ? (
-              <p className="py-6 text-center text-sm text-slate-500">No customer feedback yet.</p>
-            ) : (
-              <ul className="max-h-96 divide-y divide-slate-100 overflow-y-auto">
-                {feedback.map((entry) => (
-                  <li key={entry.id} className="flex flex-col gap-1 py-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
-                    <div className="min-w-0">
-                      <p className="text-sm font-semibold text-slate-900">{entry.customer_name} · {entry.visit_type.replace(/_/g, " ")}</p>
-                      <p className="mt-1 whitespace-pre-wrap text-sm text-slate-700">{entry.message}</p>
-                    </div>
-                    <span className="shrink-0 text-xs font-semibold text-slate-600" aria-label={`${entry.rating} out of 5 stars`}>
-                      {entry.rating}/5 · {formatManilaDate(entry.created_at, { month: "short", day: "numeric" })}
-                    </span>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </DashboardCard>}
-        </div>
-
-        <aside className="min-w-0 min-[1100px]:sticky min-[1100px]:top-4 min-[1100px]:h-[calc(100dvh-3rem)] min-[1100px]:self-start">
-          <section className="flex h-full min-h-[520px] flex-col overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm">
-            <header className="flex shrink-0 items-center justify-between gap-3 border-b border-slate-100 px-5 py-4">
-              <div>
-                <h2 className="text-lg font-bold text-slate-950">Notifications</h2>
-                <p className="text-sm text-slate-500">Updates</p>
-              </div>
-              <span className="rounded-full bg-amber-100 px-3 py-2 text-xs font-bold text-amber-900">
-                {notificationsQuery.isError ? "—" : notificationsQuery.data?.total ?? "…"} pending
+        <section className="admin-card admin-dashboard-quick-stats" aria-label="Quick stats">
+          {canViewReservations && (
+            <Link to={role === "event_coordinator" ? "/staff/reservations?view=catering" : "/staff/reservations"} className="admin-quick-stat">
+              <span className="admin-quick-stat-icon"><Clock3 aria-hidden="true" size={16} /></span>
+              <span className="admin-quick-stat-copy">
+                <span className="admin-quick-stat-value">{summaryQuery.isError ? "—" : summaryQuery.data?.pendingApprovals ?? "…"}</span>
+                <span className="admin-quick-stat-label">Pending approvals</span>
               </span>
-            </header>
+              <ChevronRight aria-hidden="true" className="admin-quick-stat-chevron" />
+            </Link>
+          )}
+          {canViewInventory && (
+            <Link to={role === "chef" ? "/staff/inventory/read-only" : "/staff/inventory"} className="admin-quick-stat">
+              <span className="admin-quick-stat-icon is-amber"><Package aria-hidden="true" size={16} /></span>
+              <span className="admin-quick-stat-copy">
+                <span className="admin-quick-stat-value">{summaryQuery.isError ? "—" : summaryQuery.data?.lowStockCount ?? "…"}</span>
+                <span className="admin-quick-stat-label">Low stock alerts</span>
+              </span>
+              <ChevronRight aria-hidden="true" className="admin-quick-stat-chevron" />
+            </Link>
+          )}
+          {canViewCatering && (
+            <Link to="/staff/reservations?view=catering" className="admin-quick-stat">
+              <span className="admin-quick-stat-icon is-green"><CalendarDays aria-hidden="true" size={16} /></span>
+              <span className="admin-quick-stat-copy">
+                <span className="admin-quick-stat-value">{summaryQuery.isError ? "—" : summaryQuery.data?.upcomingEvents ?? "…"}</span>
+                <span className="admin-quick-stat-label">Upcoming events</span>
+              </span>
+              <ChevronRight aria-hidden="true" className="admin-quick-stat-chevron" />
+            </Link>
+          )}
+        </section>
 
-            <div className="min-h-0 flex-1 overflow-y-auto px-4">
-              {notificationsQuery.isPending ? <div className="py-4"><Skeleton rows={4} /></div> : notificationsQuery.isError ? (
-                <div className="py-8 text-center" role="alert">
-                  <p className="text-sm font-semibold text-slate-800">Could not load notifications.</p>
-                  <Retry onClick={() => void notificationsQuery.refetch()} />
-                </div>
-              ) : notifications.length === 0 ? (
-                <div className="flex min-h-36 flex-col items-center justify-center py-8 text-center">
-                  <Check className="h-7 w-7 text-emerald-700" aria-hidden="true" />
-                  <p className="mt-2 text-sm font-semibold text-slate-900">You&apos;re all caught up</p>
-                </div>
-              ) : (
-                <ul className="divide-y divide-slate-100">
-                  {notifications.map((notification) => {
-                    const actionable = canChangeBooking(notification.type, role);
-                    return (
-                      <li key={`${notification.type}-${notification.id}`} className="py-3">
-                        <div className="flex items-start justify-between gap-2">
-                          <div className="min-w-0">
-                            <p className="break-words text-sm font-semibold text-slate-900">{notification.customerName}</p>
-                            <p className="mt-1 text-xs capitalize text-slate-500">{notification.type} · {notification.reference}</p>
-                            <p className="mt-1 text-xs text-slate-600">
-                              {formatManilaDate(notification.date, { month: "short", day: "numeric" })}
-                              {notification.time ? ` · ${formatTime12(notification.time)}` : ""}
-                            </p>
-                            {notification.details && <p className="mt-1 line-clamp-2 text-xs text-slate-600">{notification.details}</p>}
-                          </div>
-                          {actionable ? (
-                            <div className="flex shrink-0 gap-1.5">
-                              <button
-                                type="button"
-                                aria-label={`Approve ${notification.customerName} ${notification.type} booking`}
-                                disabled={mutation.isPending}
-                                onClick={() => mutation.mutate({ notification, status: "approved" })}
-                                className="inline-flex h-9 w-9 items-center justify-center rounded-lg bg-[#a43930] text-white hover:bg-[#842920] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-800 disabled:opacity-50"
-                              ><Check className="h-4 w-4" aria-hidden="true" /></button>
-                              <button
-                                type="button"
-                                aria-label={`Decline ${notification.customerName} ${notification.type} booking`}
-                                disabled={mutation.isPending}
-                                onClick={() => mutation.mutate({ notification, status: "declined" })}
-                                className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-slate-300 bg-white text-slate-800 hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-800 disabled:opacity-50"
-                              ><X className="h-4 w-4" aria-hidden="true" /></button>
-                            </div>
-                          ) : (
-                            <Link
-                              to={getNotificationPath(notification)}
-                              className="shrink-0 rounded-lg border border-slate-300 px-2 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-800"
-                            >View</Link>
-                          )}
-                        </div>
-                      </li>
-                    );
-                  })}
-                </ul>
-              )}
-              {mutation.isError && (
-                <p role="alert" className="my-3 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">
-                  {bookingActionError(mutation.error)}
-                </p>
-              )}
-            </div>
-
-            {canViewCalendar && <div className="shrink-0 border-t border-slate-100 p-4">
-              <div className="mb-3 flex items-center justify-between">
-                <h3 className="font-bold text-slate-950">{monthLabel(month)}</h3>
-                <div className="flex gap-1">
-                  <button type="button" aria-label="Previous month" onClick={() => setMonth((current) => nextMonth(current, -1))} className="rounded-lg p-2 text-slate-700 hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-700">
-                    <ChevronLeft className="h-4 w-4" aria-hidden="true" />
-                  </button>
-                  <button type="button" aria-label="Next month" onClick={() => setMonth((current) => nextMonth(current, 1))} className="rounded-lg p-2 text-slate-700 hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-700">
-                    <ChevronRight className="h-4 w-4" aria-hidden="true" />
-                  </button>
-                </div>
+        <section className="admin-card admin-dashboard-notifications" aria-labelledby="staff-notifications-title">
+          <div className="admin-card-heading">
+            <div className="admin-card-heading-main">
+              <span className="admin-card-heading-icon" aria-hidden="true"><Bell size={15} /></span>
+              <div>
+                <h2 id="staff-notifications-title" className="admin-card-title">Notifications</h2>
+                <p className="admin-card-subtitle">Updates that need your attention</p>
               </div>
-              {calendarQuery.isPending ? <Skeleton rows={2} /> : calendarQuery.isError ? (
-                <div role="alert" className="text-sm text-slate-700">Calendar could not be loaded.<Retry onClick={() => void calendarQuery.refetch()} /></div>
-              ) : (
-                <div className="grid grid-cols-7 gap-1 text-center text-xs">
+            </div>
+            <span className={`admin-notification-count ${notificationsQuery.data?.total ? "is-pending" : "is-clear"}`}>
+              {notificationsQuery.isError ? "—" : `${notificationsQuery.data?.total ?? "…"} pending`}
+            </span>
+          </div>
+          {notificationsQuery.isPending ? <Skeleton rows={2} /> : notificationsQuery.isError ? (
+            <div className="admin-dashboard-error" role="alert">
+              Could not load notifications. <Retry onClick={() => void notificationsQuery.refetch()} />
+            </div>
+          ) : notifications.length === 0 ? (
+            <div className="admin-notifications-empty">
+              <span className="admin-notifications-empty-icon"><Check aria-hidden="true" size={16} /></span>
+              <span>You&apos;re all caught up.</span>
+            </div>
+          ) : (
+            <ul className="staff-notification-list">
+              {notifications.map((notification) => {
+                const actionable = canChangeBooking(notification.type, role);
+                return (
+                  <li key={`${notification.type}-${notification.id}`} className="staff-notification-item">
+                    <div className="min-w-0">
+                      <p className="staff-notification-name">{notification.customerName}</p>
+                      <p className="staff-notification-meta">{notification.type} · {notification.reference}</p>
+                      <p className="staff-notification-meta">
+                        {formatManilaDate(notification.date, { month: "short", day: "numeric" })}
+                        {notification.time ? ` · ${formatTime12(notification.time)}` : ""}
+                      </p>
+                      {notification.details && <p className="staff-notification-meta">{notification.details}</p>}
+                    </div>
+                    {actionable ? (
+                      <div className="staff-notification-actions">
+                        <button
+                          type="button"
+                          aria-label={`Approve ${notification.customerName} ${notification.type} booking`}
+                          disabled={mutation.isPending}
+                          onClick={() => mutation.mutate({ notification, status: "approved" })}
+                          className="admin-icon-button staff-notification-approve"
+                        ><Check aria-hidden="true" size={15} /></button>
+                        <button
+                          type="button"
+                          aria-label={`Decline ${notification.customerName} ${notification.type} booking`}
+                          disabled={mutation.isPending}
+                          onClick={() => mutation.mutate({ notification, status: "declined" })}
+                          className="admin-icon-button staff-notification-decline"
+                        ><X aria-hidden="true" size={15} /></button>
+                      </div>
+                    ) : (
+                      <Link to={getNotificationPath(notification)} className="admin-button admin-button-secondary">View</Link>
+                    )}
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+          {mutation.isError && (
+            <p role="alert" className="admin-dashboard-error">{bookingActionError(mutation.error)}</p>
+          )}
+        </section>
+
+        {canViewSales && (
+          <DashboardCard title="Recent sales" subtitle="Latest completed transactions" className="admin-dashboard-recent">
+            {salesQuery.isPending ? <Skeleton rows={3} /> : salesQuery.isError ? (
+              <div role="alert" className="admin-dashboard-error">Sales could not be loaded. <Retry onClick={() => void salesQuery.refetch()} /></div>
+            ) : latestSales.length === 0 ? (
+              <div className="admin-empty-state">
+                <span className="admin-empty-icon"><ReceiptText aria-hidden="true" /></span>
+                <strong>No completed sales yet</strong>
+                <p>Completed transactions will appear here.</p>
+              </div>
+            ) : (
+              <ul className="admin-sales-list">
+                {latestSales.map((sale) => (
+                  <li key={sale.id}>
+                    <span className="admin-sale-icon"><ReceiptText aria-hidden="true" size={13} /></span>
+                    <span className="admin-sale-order">#{sale.orderNumber}</span>
+                    <span className="admin-sale-total">{money(sale.total)}</span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </DashboardCard>
+        )}
+
+        {canViewInventory && (
+          <DashboardCard title="Inventory alerts" subtitle="Lowest available stock · below par level" className="admin-dashboard-inventory">
+            {inventoryQuery.isPending ? <Skeleton rows={3} /> : inventoryQuery.isError ? (
+              <div role="alert" className="admin-dashboard-error">Inventory alerts could not be loaded. <Retry onClick={() => void inventoryQuery.refetch()} /></div>
+            ) : alerts.length === 0 ? (
+              <div className="admin-empty-state">
+                <span className="admin-empty-icon"><Package aria-hidden="true" /></span>
+                <strong>Stock levels look good</strong>
+                <p>Low-stock materials will appear here.</p>
+              </div>
+            ) : (
+              <ul className="admin-inventory-list">
+                {alerts.map((item) => (
+                  <li key={item.id}>
+                    <span className="admin-inventory-name">{item.name}</span>
+                    <span className="admin-inventory-quantity">{item.quantityLeft} {item.unit} left</span>
+                    <span className="admin-critical-badge">Critical</span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </DashboardCard>
+        )}
+
+        {canViewCalendar && (
+          <section className="admin-card admin-dashboard-calendar" aria-labelledby="staff-calendar-title">
+            <div className="admin-calendar-month">
+              <h2 id="staff-calendar-title">{monthLabel(month)}</h2>
+              <div className="admin-calendar-controls">
+                <button type="button" className="admin-icon-button" aria-label="Previous month" onClick={() => setMonth((current) => nextMonth(current, -1))}>
+                  <ChevronLeft aria-hidden="true" />
+                </button>
+                <button type="button" className="admin-icon-button" aria-label="Next month" onClick={() => setMonth((current) => nextMonth(current, 1))}>
+                  <ChevronRight aria-hidden="true" />
+                </button>
+              </div>
+            </div>
+            {calendarQuery.isPending ? <Skeleton rows={2} /> : calendarQuery.isError ? (
+              <div role="alert" className="admin-dashboard-error">Calendar could not be loaded. <Retry onClick={() => void calendarQuery.refetch()} /></div>
+            ) : (
+              <>
+                <div className="admin-calendar-grid" role="group" aria-label={monthLabel(month)}>
                   {["S", "M", "T", "W", "T", "F", "S"].map((label, index) => (
-                    <span key={`${label}-${index}`} className="py-1 font-semibold text-slate-400">{label}</span>
+                    <span key={`${label}-${index}`} className="admin-calendar-weekday">{label}</span>
                   ))}
                   {Array.from({ length: firstWeekday }, (_, index) => <span key={`blank-${index}`} aria-hidden="true" />)}
                   {Array.from({ length: daysInMonth }, (_, index) => {
@@ -537,22 +488,53 @@ export default function StaffDashboard() {
                       <span
                         key={key}
                         aria-label={`${key}${isToday ? ", today" : ""}${hasBooking ? ", approved booking" : ""}`}
-                        className={`relative inline-flex h-8 items-center justify-center rounded-md border text-slate-700 ${
-                          isToday ? "border-[#a43930] bg-[#a43930] font-bold text-white" :
-                          hasBooking ? "border-[#a43930] font-semibold text-slate-950" :
-                          "border-transparent"
-                        }`}
+                        className={`admin-calendar-day${isToday ? " is-today" : ""}${hasBooking ? " has-booking" : ""}`}
                       >
                         {day}
-                        {hasBooking && !isToday && <span className="absolute bottom-0.5 h-1 w-1 rounded-full bg-[#a43930]" aria-hidden="true" />}
                       </span>
                     );
                   })}
                 </div>
-              )}
-            </div>}
+                <div className="admin-calendar-legend">
+                  <span className="admin-legend-dot">Today</span>
+                  <span className="admin-legend-dot is-booking">Has booking</span>
+                </div>
+              </>
+            )}
           </section>
-        </aside>
+        )}
+
+        {canViewReminders && (
+          <DashboardCard title="Reminders" subtitle="Approved bookings and events in the next 7 days" className="admin-dashboard-reminders">
+            {remindersQuery.isPending ? <Skeleton rows={3} /> : remindersQuery.isError ? (
+              <div role="alert" className="admin-dashboard-error">Reminders could not be loaded. <Retry onClick={() => void remindersQuery.refetch()} /></div>
+            ) : reminders.length === 0 ? (
+              <div className="admin-empty-state">
+                <span className="admin-empty-icon"><CalendarDays aria-hidden="true" /></span>
+                <strong>No upcoming reminders</strong>
+                <p>You&apos;re all caught up for the next 7 days.</p>
+              </div>
+            ) : (
+              <ul className="admin-reminder-list">
+                {reminders.map((reminder) => (
+                  <li key={`${reminder.type}-${reminder.id}`}>
+                    <div className="admin-reminder-row">
+                      <div className="min-w-0">
+                        <p className="admin-reminder-name">{reminder.customerName} · {reminder.details}</p>
+                        <p className="admin-reminder-meta">{reminder.type === "table" ? "Table booking" : "Catering event"} · {reminder.reference}</p>
+                      </div>
+                      <p className="admin-reminder-meta shrink-0">
+                        <Clock3 aria-hidden="true" className="mr-1 inline" size={12} />
+                        {formatManilaDate(reminder.date, { month: "short", day: "numeric" })}
+                        {reminder.time ? ` · ${formatTime12(reminder.time)}` : ""}
+                      </p>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </DashboardCard>
+        )}
       </div>
     </main>
   );

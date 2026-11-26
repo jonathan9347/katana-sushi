@@ -262,6 +262,14 @@
 .admin-notifications-view-all { display: inline-flex; align-items: center; gap: 5px; margin-top: 10px; border: 0; background: transparent; padding: 0; color: #7e1720; font: inherit; font-size: 10px; font-weight: 650; cursor: pointer; text-decoration: none; }
 .admin-notifications-empty { display: flex; min-height: 73px; align-items: center; gap: 10px; color: #647064; font-size: 12px; }
 .admin-notifications-empty-icon { display: inline-flex; width: 32px; height: 32px; align-items: center; justify-content: center; border-radius: 50%; background: #e5f4eb; color: #216945; }
+.staff-notification-list { display: grid; max-height: 340px; gap: 8px; overflow-y: auto; margin: 0; padding: 0; list-style: none; }
+.staff-notification-item { display: flex; align-items: flex-start; justify-content: space-between; gap: 9px; border-radius: 12px; background: #faf6f6; padding: 10px; }
+.staff-notification-name { margin: 0; color: #252a38; font-size: 11px; font-weight: 750; }
+.staff-notification-meta { margin: 3px 0 0; color: #626b79; font-size: 9px; line-height: 1.4; overflow-wrap: anywhere; }
+.staff-notification-actions { display: flex; flex: 0 0 auto; gap: 5px; }
+.staff-notification-approve { border-color: #a51d24; background: #a51d24; color: #fff; }
+.staff-notification-approve:hover:not(:disabled) { background: #83171d; }
+.staff-notification-decline:hover:not(:disabled) { background: #f8f6f6; }
 
 .admin-dashboard-recent { grid-column: span 4; }
 .admin-dashboard-inventory { grid-column: span 4; }
