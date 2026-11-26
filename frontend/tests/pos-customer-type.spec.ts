@@ -113,7 +113,8 @@ test("inline order paths open table, reservation, and pickup selection views", a
   await page.getByRole("button", { name: "Proceed" }).click();
   await expect(page.getByRole("region", { name: "Table board" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Select Table 12, Free" })).toBeVisible();
-  await expect(page.getByRole("region", { name: "POS order builder" })).toContainText("1 × Iced Tea");
+  await expect(page.locator(".pos-cart-line-name")).toHaveText("Iced Tea");
+  await expect(page.locator(".pos-quantity-stepper")).toContainText("1");
   await expect(page.getByText("Upcoming reservations")).toHaveCount(0);
   await expect(page.getByText("Active tables")).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Seat walk-in" })).toHaveCount(0);
@@ -128,7 +129,8 @@ test("inline order paths open table, reservation, and pickup selection views", a
   const reservationBoard = page.getByRole("region", { name: "Table board" });
   await expect(reservationBoard).toBeVisible();
   await expect(reservationBoard).toContainText("Assign table(s) for Ava Guest");
-  await expect(page.getByRole("region", { name: "POS order builder" })).toContainText("1 × Iced Tea");
+  await expect(page.locator(".pos-cart-line-name")).toHaveText("Iced Tea");
+  await expect(page.locator(".pos-quantity-stepper")).toContainText("1");
   const reservationConfirmButton = page.getByRole("button", { name: "Select table/s", exact: true });
   await expect(reservationConfirmButton).toBeVisible();
   await expect(reservationConfirmButton).toBeDisabled();
@@ -150,7 +152,8 @@ test("inline order paths open table, reservation, and pickup selection views", a
   await page.getByRole("button", { name: "Pickup", exact: true }).click();
   await page.getByLabel("Search pickup orders by customer or reference").fill("PICK");
   await page.getByRole("dialog", { name: "Select pickup order" }).getByRole("button", { name: /Mika Customer.*PICK-123/ }).click();
-  await expect(page.getByRole("region", { name: "POS order builder" })).toContainText("1 × Iced Tea");
+  await expect(page.locator(".pos-cart-line-name")).toHaveText("Iced Tea");
+  await expect(page.locator(".pos-quantity-stepper")).toContainText("1");
   await expect(page.getByRole("region", { name: "POS order builder" })).toContainText("PHP 250.00");
   await expect(page.getByRole("button", { name: "Checkout" })).toBeVisible();
   await expect(page.getByRole("region", { name: "POS order builder" })).toContainText("Menu");
@@ -232,10 +235,10 @@ test("confirms a walk-in dine-in order atomically after table selection and rese
   await page.getByRole("button", { name: "Dine-in walk-in", exact: true }).click();
   await expect(builder.getByLabel("Headcount")).toHaveCount(0);
   await builder.getByRole("button", { name: /California Roll/ }).click();
-  await expect(builder).toContainText("1 × California Roll");
+  await expect(builder.locator(".pos-cart-line-name")).toHaveText("California Roll");
   await page.getByRole("button", { name: "Proceed" }).click();
   await expect(page.getByRole("region", { name: "Table board" })).toBeVisible();
-  await expect(builder).toContainText("1 × California Roll");
+  await expect(builder.locator(".pos-cart-line-name")).toHaveText("California Roll");
   await page.getByRole("button", { name: "Select Table 12, Free" }).click();
 
   const popupPromise = page.waitForEvent("popup");
@@ -245,7 +248,7 @@ test("confirms a walk-in dine-in order atomically after table selection and rese
   await expect(slip.locator("body")).toContainText("Table: 12");
   await slip.close();
   await expect(builder).toContainText("Menu");
-  await expect(builder).toContainText("Cart is empty");
+  await expect(builder).toContainText("Your cart is empty");
   const reprintPromise = page.waitForEvent("popup");
   await page.getByRole("button", { name: "Reprint", exact: true }).click();
   const reprint = await reprintPromise;

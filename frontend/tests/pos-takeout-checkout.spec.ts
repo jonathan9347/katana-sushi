@@ -87,15 +87,17 @@ test("takeout checkout creates one immediate sale and receipt without entering d
   const menuProduct = page.getByRole("region", { name: "POS order builder" }).getByRole("button", { name: /California Roll Sushi/ });
   await menuProduct.click();
   await page.getByRole("button", { name: "Increase California Roll" }).click();
-  await expect(page.getByText("2 × California Roll")).toBeVisible();
+  const cart = page.getByTestId("pos-cart-panel");
+  await expect(cart.locator(".pos-cart-line-name")).toHaveText("California Roll");
+  await expect(cart.locator(".pos-quantity-stepper")).toContainText("2");
   await page.getByRole("button", { name: "Checkout" }).click();
 
   const payment = page.getByRole("dialog", { name: "Payment" });
   await expect(payment).toContainText("PHP 200.00");
-  await expect(payment.getByLabel("Enter Amount Received")).toBeFocused();
+  await expect(payment.getByRole("button", { name: "Close dialog" })).toBeFocused();
   await payment.getByRole("button", { name: "Cash", exact: true }).click();
-  await payment.getByRole("button", { name: "Exact", exact: true }).click();
-  await expect(payment.getByLabel("Enter Amount Received")).toHaveValue("200.00");
+  await payment.getByLabel("Enter Amount Received").fill("200");
+  await expect(payment.getByLabel("Enter Amount Received")).toHaveValue("200");
   await expect(payment.getByText("Change: PHP 0.00")).toBeVisible();
   await payment.getByLabel("Enter Amount Received").fill("250");
   await expect(payment.getByText("Change: PHP 50.00")).toBeVisible();
@@ -235,7 +237,7 @@ test("takeout checkout applies the shared Senior/PWD discount to the server-calc
   await expect(payment.getByText("Change: PHP 60.00")).toBeVisible();
 
   const receiptPopupPromise = page.waitForEvent("popup");
-  await payment.getByRole("button", { name: "Confirm" }).click();
+  await payment.getByRole("button", { name: "Complete payment" }).click();
   const receipt = await receiptPopupPromise;
   await expect(receipt.locator("body")).toContainText("Senior/PWD discount");
   await expect(receipt.locator("body")).toContainText("PHP 60.00");

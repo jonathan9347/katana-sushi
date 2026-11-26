@@ -1081,8 +1081,7 @@ export default function PosPage() {
 
   return (
     <main className="pos-page min-h-screen bg-slate-100 px-4 py-4 lg:pr-6">
-      <div className="grid w-full gap-4">
-        <PosHeader onPrintTestSlip={handlePrintTestSlip} />
+      <div className="pos-page-content grid w-full gap-4">
         {orderPrintWarning && <p role="alert" className="rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">{orderPrintWarning}</p>}
         {billOutMismatchWarning && <p role="alert" className="rounded-md border border-red-300 bg-red-50 p-3 text-sm font-semibold text-red-900">{billOutMismatchWarning}</p>}
         {lastPickupReceipt && (
@@ -1109,6 +1108,7 @@ export default function PosPage() {
           onTakeoutWalkIn={beginTakeoutWalkIn}
           onPickup={beginPickupSelection}
           onExistingTable={beginExistingTable}
+          workspaceHeader={<PosHeader onPrintTestSlip={handlePrintTestSlip} />}
           selectionContent={selectionContent}
           actionInSelectionView={selectionView === "table-board"}
           cartSelectionStatus={selectedReservation && !selectedTable ? (
@@ -1249,8 +1249,8 @@ export default function PosPage() {
           onAddItem={(product, itemOrderType) => {
             if (!isPickupCustomer) addOrderBuilderItem(product, itemOrderType);
           }}
-          onRemoveItem={(productId) => removeItemFrom(cartKey, productId)}
-          onDecrementItem={(productId) => decrementItemFrom(cartKey, productId)}
+          onRemoveItem={(productId, itemOrderType) => removeItemFrom(cartKey, productId, itemOrderType)}
+          onDecrementItem={(productId, itemOrderType) => decrementItemFrom(cartKey, productId, itemOrderType)}
           customerName={customerName}
           onCustomerNameChange={setCustomerName}
           lastCommittedOrderNumber={isPickupCustomer ? null : lastCommittedOrderQuery.data?.order_number}
@@ -1328,6 +1328,7 @@ export default function PosPage() {
         open={paymentOpen}
         pending={isPickupCustomer ? pickupCompletionMutation.isPending : checkoutMutation.isPending}
         total={isPickupCustomer ? selectedPickupOrder?.total ?? 0 : totals.total}
+        tableName={activeSession?.table.table_number ? String(activeSession.table.table_number) : null}
         previewRequest={isPickupCustomer && selectedPickupOrder
           ? {
             url: `/api/pos/pickup-orders/${encodeURIComponent(selectedPickupOrder.order_number)}/complete`,

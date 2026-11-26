@@ -1,4 +1,4 @@
-import { Check, LoaderCircle, Minus, Plus, Search, ShoppingCart, Trash2, Utensils } from "lucide-react";
+import { ArrowRight, CalendarDays, Check, LoaderCircle, Minus, PackageCheck, Plus, Printer, Search, ShoppingBag, Trash2, Utensils, UserRound } from "lucide-react";
 import type { ReactNode } from "react";
 import { useEffect, useMemo, useState } from "react";
 import { Button } from "../../../components/ui/button";
@@ -22,6 +22,7 @@ type Props = {
   onTakeoutWalkIn: () => void;
   onPickup: () => void;
   onExistingTable: () => void;
+  workspaceHeader?: ReactNode;
   selectionContent?: ReactNode;
   actionInSelectionView?: boolean;
   cartSelectionStatus?: ReactNode;
@@ -105,6 +106,7 @@ export default function PosOrderBuilder({
   onTakeoutWalkIn,
   onPickup,
   onExistingTable,
+  workspaceHeader,
   selectionContent,
   actionInSelectionView = false,
   cartSelectionStatus,
@@ -129,7 +131,6 @@ export default function PosOrderBuilder({
   items,
   pickupOrder = null,
   onAddItem,
-  onRemoveItem,
   onDecrementItem,
   customerName,
   onCustomerNameChange,
@@ -215,16 +216,17 @@ export default function PosOrderBuilder({
       className={`pos-order-builder grid gap-4${isSelectingExistingTable ? " is-existing-table-selection xl:grid-cols-1" : " xl:grid-cols-[minmax(0,1fr)_minmax(18rem,0.34fr)]"}`}
       aria-label="POS order builder"
     >
-      <div className="min-w-0 space-y-4">
+      <div className="pos-order-workspace min-w-0 space-y-4">
+        {workspaceHeader}
         <section aria-label="Customer type" className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
           <div className="pos-customer-paths" role="group" aria-label="Choose order path">
             {([
-              ["dine_in_walk_in", "Dine-in walk-in", onDineInWalkIn],
-              ["reservation", "Reservation", onReservation],
-              ["takeout_walk_in", "Takeout", onTakeoutWalkIn],
-              ["pickup", "Pickup", onPickup],
-              ["existing_table", "Existing table", onExistingTable]
-            ] as const).map(([path, label, onSelect]) => (
+              ["dine_in_walk_in", "Dine-in walk-in", onDineInWalkIn, Utensils],
+              ["reservation", "Reservation", onReservation, CalendarDays],
+              ["takeout_walk_in", "Takeout", onTakeoutWalkIn, ShoppingBag],
+              ["pickup", "Pickup", onPickup, PackageCheck],
+              ["existing_table", "Existing table", onExistingTable, UserRound]
+            ] as const).map(([path, label, onSelect, Icon]) => (
               <button
                 key={path}
                 type="button"
@@ -232,7 +234,8 @@ export default function PosOrderBuilder({
                 aria-pressed={customerPath === path}
                 onClick={onSelect}
               >
-                {label}
+                <Icon aria-hidden="true" />
+                <span>{label}</span>
               </button>
             ))}
           </div>
@@ -343,7 +346,6 @@ export default function PosOrderBuilder({
                     onClick={() => addProduct(product, addedItemOrderType)}
                   >
                     <span className="pos-menu-image" aria-hidden="true">
-                      <Utensils />
                       {imageUrl ? (
                         <img
                           src={imageUrl}
@@ -355,21 +357,15 @@ export default function PosOrderBuilder({
                           }}
                         />
                       ) : null}
+                      {(isSoldOut || product.is_available === false) && <span className="pos-sold-out-pill">Sold out</span>}
                       {cartQuantity > 0 && <span className="pos-menu-quantity">{cartQuantity}</span>}
-                      {!disabled && <span className="pos-menu-add">+</span>}
+                      {!disabled && <span className="pos-menu-add" aria-hidden="true">+</span>}
                     </span>
                     <span className="pos-menu-copy">
                       <span className="pos-menu-name">{product.name}</span>
                       <span className="pos-menu-category">{product.category}</span>
                     </span>
                     <span className="pos-menu-meta">
-                      <span className={`pos-stock-chip ${isSoldOut || product.is_available === false ? "is-out" : availableStock === null ? "is-unknown" : "is-available"}`}>
-                        {product.is_available === false
-                          ? `Unavailable · ${availableStock ?? "stock unknown"}`
-                          : isSoldOut
-                            ? "Out of stock · 0 available"
-                            : availableStock === null ? "Stock not provided" : `${availableStock} available`}
-                      </span>
                       <span className="pos-menu-price">{price === 0 ? "Included" : money(price)}</span>
                     </span>
                   </button>
@@ -391,10 +387,14 @@ export default function PosOrderBuilder({
               {selectionSummary && (
                 <p className="pos-order-context" title={selectionSummary}>{selectionSummary}</p>
               )}
+              <span className="pos-order-type-chip">
+                {isPickup ? "Pickup" : customerService === "takeout" ? "Takeout" : customerType === "existing_table" ? "Existing table" : customerType === "new_customer" ? (customerPath === "reservation" ? "Reservation" : "Dine-in walk-in") : "Dine-in"}
+                {isDineIn && (customerType === "new_customer" || customerType === "existing_table") && ` · ${orderType === "unlimited" ? "Unlimited" : "A la carte"}`}
+              </span>
             </div>
             {lastCommittedOrderNumber && onReprintLastOrder && (
-              <Button className="pos-reprint-action" size="sm" variant="ghost" onClick={onReprintLastOrder}>
-                Reprint
+              <Button className="pos-reprint-action" size="sm" variant="ghost" aria-label="Reprint" onClick={onReprintLastOrder}>
+                <Printer aria-hidden="true" />
               </Button>
             )}
             <span
@@ -463,11 +463,12 @@ export default function PosOrderBuilder({
               </>
             )}
             {customerType === "new_customer" && customerService === "takeout" && (
-              <label className="grid gap-1 text-sm font-medium text-slate-700">
-                Customer name
+              <label className="pos-cart-customer">
+                <span className="sr-only">Customer name</span>
+                <UserRound aria-hidden="true" />
                 <input
-                  className="h-10 rounded-md border border-slate-300 px-3"
-                  placeholder="Optional"
+                  aria-label="Customer name"
+                  placeholder="Customer name (optional)"
                   value={customerName}
                   onChange={(event) => onCustomerNameChange(event.target.value)}
                 />
@@ -483,9 +484,14 @@ export default function PosOrderBuilder({
                     {pickupOrder.pickup_time && <p>Pickup Time: {formatManilaDateTime(pickupOrder.pickup_time, { hour: "numeric", minute: "2-digit" })}</p>}
                   </div>
                   {pickupOrder.items.map((item, index) => (
-                    <div key={`${pickupOrder.order_number}-${index}`} className="flex justify-between gap-3 rounded-md border border-slate-200 p-3 text-sm">
-                      <span>{item.quantity} × {item.name}</span>
-                      <span className="font-semibold">{money(item.total_price)}</span>
+                    <div key={`${pickupOrder.order_number}-${index}`} className="pos-cart-line pos-cart-readonly-line">
+                      <span className="pos-cart-thumbnail" aria-hidden="true"><span className="pos-cart-placeholder" /></span>
+                      <div className="pos-cart-line-copy">
+                        <p className="pos-cart-line-name" title={item.name}>{item.name}</p>
+                        <p className="pos-cart-line-price">{money(item.total_price / item.quantity)}</p>
+                      </div>
+                      <span className="pos-quantity-stepper" aria-label={`${item.quantity} items`}><span>{item.quantity}</span></span>
+                      <p className="pos-cart-line-total">{item.total_price.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
                     </div>
                   ))}
                   <p className="text-xs text-slate-500">Pickup order items are read-only.</p>
@@ -496,54 +502,60 @@ export default function PosOrderBuilder({
                 </div>
               )
             ) : (
-              <div className="pos-cart-lines grid max-h-[52vh] gap-2 overflow-y-auto pr-1">
+              <>
+              {items.length > 0 && (
+                <div className="pos-cart-section-header">
+                  <span>Items</span>
+                  {onClearCurrentOrder && (
+                    <button type="button" onClick={onClearCurrentOrder}><Trash2 aria-hidden="true" /> Clear</button>
+                  )}
+                </div>
+              )}
+              <div className="pos-cart-lines grid gap-2 overflow-y-auto pr-1">
                 {items.length === 0 ? (
                     <div className="pos-cart-empty grid justify-items-center gap-2 rounded-md border border-dashed border-slate-300 p-6 text-center text-sm text-slate-500">
-                    <ShoppingCart className="h-8 w-8" />
-                    Cart is empty
+                    <span className="pos-empty-roll" aria-hidden="true"><span /></span>
+                    <strong>Your cart is empty</strong>
+                    <span>Tap + on any item to add it.</span>
                   </div>
                 ) : items.map((item) => {
                   const unitPrice = getCartPrice(item, cartKey);
+                  const thumbnail = resolveImageUrl(item.product.image_url);
                   return (
-                    <div key={`${item.product.id}-${item.diningOrderType ?? "default"}`} className="pos-cart-line rounded-md border border-slate-200 bg-white p-3">
-                      <div className="flex items-start justify-between gap-3">
-                        <div className="pos-cart-line-copy">
-                        <p className="font-semibold text-slate-950">{item.quantity} × {item.product.name}</p>
-                        <p className="pos-cart-line-price text-sm text-slate-500">
-                            {item.diningOrderType === "unlimited"
-                              ? "Unlimited included"
-                            : <>
-                                {item.diningOrderType === "ala_carte" && <span>A la carte · </span>}
-                                <strong>{money(unitPrice)}</strong>
-                              </>}
-                          </p>
-                        </div>
-                        <Button size="sm" variant="ghost" aria-label={`Remove ${item.product.name}${item.diningOrderType ? ` ${item.diningOrderType}` : ""}`} onClick={() => onRemoveItem(item.product.id, item.diningOrderType)}>
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
+                    <div key={`${item.product.id}-${item.diningOrderType ?? "default"}`} className="pos-cart-line">
+                      <span className="pos-cart-thumbnail" aria-hidden="true">
+                        {thumbnail ? <img src={thumbnail} alt="" /> : <span className="pos-cart-placeholder" />}
+                      </span>
+                      <div className="pos-cart-line-copy">
+                        <p className="pos-cart-line-name" title={item.product.name}>{item.product.name}</p>
+                        <p className="pos-cart-line-price">
+                          {item.diningOrderType === "unlimited" ? "Unlimited included" : money(unitPrice)}
+                        </p>
                       </div>
-                      <div className="mt-3 flex items-center justify-between">
-                        <div className="flex items-center gap-2">
-                          <Button size="sm" variant="outline" aria-label={`Decrease ${item.product.name}${item.diningOrderType ? ` ${item.diningOrderType}` : ""}`} onClick={() => onDecrementItem(item.product.id, item.diningOrderType)}>
-                            <Minus className="h-4 w-4" />
-                          </Button>
-                          <span className="grid h-10 min-w-10 place-items-center rounded-md border border-slate-200 text-sm font-semibold">{item.quantity}</span>
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            aria-label={`Increase ${item.product.name}${item.diningOrderType ? ` ${item.diningOrderType}` : ""}`}
-                            disabled={item.product.available_stock != null && items.filter((cartItem) => cartItem.product.id === item.product.id).reduce((sum, cartItem) => sum + cartItem.quantity, 0) >= item.product.available_stock}
-                            onClick={() => onAddItem(item.product, item.diningOrderType)}
-                          >
-                            <Plus className="h-4 w-4" />
-                          </Button>
-                        </div>
-                        <p className="font-semibold text-slate-950">{money(unitPrice * item.quantity)}</p>
-                      </div>
+                      <span className="pos-quantity-stepper">
+                        <button
+                          type="button"
+                          aria-label={item.quantity === 1 ? `Remove ${item.product.name}` : `Decrease ${item.product.name}${item.diningOrderType ? ` ${item.diningOrderType}` : ""}`}
+                          onClick={() => onDecrementItem(item.product.id, item.diningOrderType)}
+                        >
+                          {item.quantity === 1 ? <Trash2 aria-hidden="true" /> : <Minus aria-hidden="true" />}
+                        </button>
+                        <span>{item.quantity}</span>
+                        <button
+                          type="button"
+                          aria-label={`Increase ${item.product.name}${item.diningOrderType ? ` ${item.diningOrderType}` : ""}`}
+                          disabled={item.product.available_stock != null && items.filter((cartItem) => cartItem.product.id === item.product.id).reduce((sum, cartItem) => sum + cartItem.quantity, 0) >= item.product.available_stock}
+                          onClick={() => onAddItem(item.product, item.diningOrderType)}
+                        >
+                          <Plus aria-hidden="true" />
+                        </button>
+                      </span>
+                      <p className="pos-cart-line-total">{(unitPrice * item.quantity).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
                     </div>
                   );
                 })}
               </div>
+              </>
             )}
 
             {sessionControls}
@@ -569,7 +581,7 @@ export default function PosOrderBuilder({
                     ? <><LoaderCircle className="pos-action-spinner" aria-hidden="true" />Processing…</>
                     : showActionSuccess
                       ? <><Check aria-hidden="true" />Done</>
-                      : actionLabel}
+                      : <>{actionLabel}<ArrowRight aria-hidden="true" /></>}
                 </Button>
               )}
           </div>

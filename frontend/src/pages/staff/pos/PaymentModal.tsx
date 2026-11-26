@@ -20,6 +20,7 @@ type DiscountPreview = {
 type PaymentModalProps = {
   open: boolean;
   total: number;
+  tableName?: string | null;
   pending: boolean;
   previewRequest: { url: string; body: Record<string, unknown> } | null;
   onClose: () => void;
@@ -34,7 +35,7 @@ type PaymentModalProps = {
 
 const comingSoonTitle = "Coming soon - Online payments will be available in future update";
 
-export default function PaymentModal({ open, total, pending, previewRequest, onClose, onConfirm }: PaymentModalProps) {
+export default function PaymentModal({ open, total, tableName = null, pending, previewRequest, onClose, onConfirm }: PaymentModalProps) {
   const [method, setMethod] = useState<PaymentMethod>("cash");
   const [cashReceived, setCashReceived] = useState("");
   const [applyDiscount, setApplyDiscount] = useState(false);
@@ -72,15 +73,6 @@ export default function PaymentModal({ open, total, pending, previewRequest, onC
     && !previewQuery.isLoading
     && !previewQuery.isError
     && Boolean(preview);
-  const quickCashAmounts = [
-    { label: "Exact", amount: amountDue },
-    { label: "PHP 100", amount: 100 },
-    { label: "PHP 500", amount: 500 },
-    { label: "PHP 1,000", amount: 1000 }
-  ].filter((option, index, options) =>
-    options.findIndex((candidate) => candidate.amount === option.amount) === index
-  );
-
   useEffect(() => {
     if (open) {
       setMethod("cash");
@@ -108,7 +100,7 @@ export default function PaymentModal({ open, total, pending, previewRequest, onC
   }
 
   return (
-    <Dialog open={open} title="Payment" panelClassName="max-w-4xl" onClose={onClose}>
+    <Dialog open={open} title={tableName ? `Checkout Table ${tableName}` : "Payment"} panelClassName="pos-payment-dialog max-w-[520px]" overlayClassName="pos-payment-backdrop" onClose={onClose}>
       <form className="grid gap-5" onSubmit={submit}>
         <div className="rounded-md border border-slate-200 bg-slate-50 p-4">
           <div className="grid gap-2 text-sm">
@@ -165,20 +157,6 @@ export default function PaymentModal({ open, total, pending, previewRequest, onC
                 onChange={(event) => setCashReceived(event.target.value)}
               />
             </label>
-            <div className="flex flex-wrap gap-2" role="group" aria-label="Quick cash amounts">
-              {quickCashAmounts.map(({ label, amount }) => (
-                <Button
-                  key={label}
-                  className="min-h-11"
-                  type="button"
-                  variant="outline"
-                  disabled={amount < amountDue}
-                  onClick={() => setCashReceived(amount.toFixed(2))}
-                >
-                  {label}
-                </Button>
-              ))}
-            </div>
             <p className="text-lg font-semibold text-slate-950">Change: PHP {changeDue.toFixed(2)}</p>
           </section>
         )}
@@ -187,8 +165,8 @@ export default function PaymentModal({ open, total, pending, previewRequest, onC
           <Button className="min-h-11" type="button" variant="outline" onClick={onClose}>
             Cancel
           </Button>
-          <Button className="min-h-11" disabled={!canConfirm || pending}>
-            {pending ? "Processing..." : "Confirm"}
+          <Button className="min-h-11 pos-payment-primary" disabled={!canConfirm || pending}>
+            {pending ? "Processing..." : "Complete payment"}
           </Button>
         </div>
       </form>

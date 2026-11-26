@@ -180,18 +180,36 @@ test("existing table order can be committed, previewed with Senior/PWD discount,
     await route.fulfill({ json: {} });
   });
 
+  await page.setViewportSize({ width: 1366, height: 768 });
   await page.goto("/staff/pos");
+  const workspace = page.locator(".pos-order-workspace");
+  const pageHeader = workspace.locator(":scope > header");
+  await expect(pageHeader).toHaveCount(1);
+  await expect(pageHeader).toHaveCSS("position", "static");
   await page.getByRole("button", { name: "Existing table", exact: true }).click();
   await page.getByRole("button", { name: "Select Table 4, Occupied" }).click();
   const orderBuilder = page.getByRole("region", { name: "POS order builder" });
   const cartPanel = page.getByTestId("pos-cart-panel");
-  await expect(cartPanel).toHaveCSS("position", "sticky");
+  await expect(cartPanel).toHaveCSS("position", "static");
   const cartHeight = await cartPanel.evaluate((element) => element.getBoundingClientRect().height);
   const viewportHeight = await page.evaluate(() => window.innerHeight);
   expect(cartHeight).toBeLessThan(viewportHeight - 32);
   expect(cartHeight).toBeGreaterThan(400);
+  const pageLayout = await page.evaluate(() => ({
+    documentHeight: document.documentElement.scrollHeight,
+    viewportHeight: window.innerHeight,
+    cartBottom: document.querySelector<HTMLElement>('[data-testid="pos-cart-panel"]')?.getBoundingClientRect().bottom ?? 0
+  }));
+  expect(pageLayout.documentHeight).toBeLessThanOrEqual(pageLayout.viewportHeight);
+  expect(Math.abs(pageLayout.cartBottom - (pageLayout.viewportHeight - 24))).toBeLessThanOrEqual(1);
   await expect(orderBuilder.getByRole("button", { name: "Checkout" })).toHaveCount(0);
   await expect(orderBuilder.getByText(/checkout/i)).toHaveCount(0);
+  await page.getByRole("button", { name: /Sushi Set Sushi/ }).click();
+  await expect(cartPanel.locator(".pos-cart-line-name")).toHaveText("Sushi Set");
+  await expect(cartPanel.locator(".pos-quantity-stepper")).toContainText("1");
+  await expect(cartPanel.locator(".pos-cart-line-name")).toHaveCSS("white-space", "nowrap");
+  await cartPanel.getByRole("button", { name: "Remove Sushi Set" }).click();
+  await expect(cartPanel).toContainText("Your cart is empty");
   await page.getByRole("button", { name: /Sushi Set Sushi/ }).click();
 
   const slipPopup = page.waitForEvent("popup");
@@ -575,7 +593,7 @@ test("active Unlimited session filters to included products and allows the full 
   await expect(builder.getByText("Showing all menu items")).toBeVisible();
   await expect(builder.getByRole("button", { name: /Iced Tea/ })).toBeVisible();
   await builder.getByRole("button", { name: /A la carte Maki/ }).click();
-  await expect(builder).toContainText("1 × A la carte Maki");
+  await expect(builder.locator(".pos-cart-line-name")).toHaveText("A la carte Maki");
 });
 
 test("Unlimited cart mode does not start a timer until staff starts the existing table session", async ({ page }) => {
@@ -772,7 +790,7 @@ test("one table cart keeps regular a-la-carte and Unlimited items together with 
   await page.getByRole("button", { name: "Select Table 4, Occupied" }).click();
   const builder = page.getByRole("region", { name: "POS order builder" });
   await builder.getByRole("button", { name: /A la carte Maki/ }).click();
-  await expect(builder).toContainText("A la carte · PHP 250.00");
+  await expect(builder.locator(".pos-cart-line-price")).toHaveText("PHP 250.00");
   await page.getByRole("button", { name: "Unlimited", exact: true }).click();
   const guestCountDialog = page.getByRole("dialog", { name: "Unlimited guest count" });
   await guestCountDialog.getByLabel("Unlimited guest count").fill("3");
