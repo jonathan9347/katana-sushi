@@ -90,7 +90,7 @@ function transactionMock(rawMaterial: object) {
   };
 }
 
-async function createMaterial(unit = "sheet") {
+async function createMaterial(unit = "sheet", category: "Beverage" | "Raw Material" = "Raw Material") {
   return fetch(`${baseUrl}/api/inventory/materials`, {
     method: "POST",
     headers: {
@@ -99,13 +99,29 @@ async function createMaterial(unit = "sheet") {
     },
     body: JSON.stringify({
       name: "Nori",
-      category: "Raw Material",
+      category,
       unit,
       reorder_level: 5,
       cost_per_unit: 12
     })
   });
 }
+
+test("accepts cans as a beverage material unit", async () => {
+  let createdData: Record<string, unknown> | undefined;
+  mockTransaction(transactionMock({
+    findUnique: async () => null,
+    create: async ({ data }: { data: Record<string, unknown> }) => {
+      createdData = data;
+      return { id: "material-can", ...data };
+    }
+  }));
+
+  const response = await createMaterial("can", "Beverage");
+  assert.equal(response.status, 201);
+  assert.equal(createdData?.unit, "can");
+  assert.equal(createdData?.category, "Beverage");
+});
 
 test("restores a deleted material while preserving its historical unit and stock", async () => {
   const archived = {

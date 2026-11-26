@@ -978,6 +978,7 @@ function MaterialFields({
               <option value="ml">ml</option>
               <option value="piece">piece</option>
               <option value="bottle">bottle</option>
+              <option value="can">can</option>
               <option value="cup">cup</option>
               <option value="sheet">sheet</option>
             </select>

@@ -6634,7 +6634,7 @@ app.post("/api/inventory/materials", async (req, res, next) => {
       .object({
         name: z.string().min(1),
         category: z.enum(["Beverage", "Raw Material"]).default("Raw Material"),
-        unit: z.enum(["g", "ml", "piece", "sheet", "bottle", "cup"]),
+        unit: z.enum(["g", "ml", "piece", "sheet", "bottle", "can", "cup"]),
         reorder_level: z.coerce.number().int().nonnegative(),
         cost_per_unit: z.coerce.number().finite().nonnegative()
       })
@@ -6694,7 +6694,7 @@ app.put("/api/inventory/materials/:id", async (req, res, next) => {
       .object({
         name: z.string().min(1),
         category: z.enum(["Beverage", "Raw Material"]).default("Raw Material"),
-        unit: z.enum(["g", "ml", "piece", "sheet", "bottle", "cup"]),
+        unit: z.enum(["g", "ml", "piece", "sheet", "bottle", "can", "cup"]),
         reorder_level: z.coerce.number().int().nonnegative(),
         cost_per_unit: z.coerce.number().finite().nonnegative()
       })
