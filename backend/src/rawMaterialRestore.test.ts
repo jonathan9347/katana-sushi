@@ -78,9 +78,14 @@ function mockTransaction(tx: object) {
   });
 }
 
-function transactionMock(rawMaterial: object) {
+function transactionMock(rawMaterial: object, sellingProduct: object = {
+  findMany: async () => [],
+  findFirst: async () => null,
+  create: async () => ({})
+}) {
   return {
     rawMaterial,
+    sellingProduct,
     $queryRaw: async () => [],
     materialBatch: { count: async () => 0 },
     recipeIngredient: { count: async () => 0 },
@@ -109,18 +114,34 @@ async function createMaterial(unit = "sheet", category: "Beverage" | "Raw Materi
 
 test("accepts cans as a beverage material unit", async () => {
   let createdData: Record<string, unknown> | undefined;
-  mockTransaction(transactionMock({
-    findUnique: async () => null,
-    create: async ({ data }: { data: Record<string, unknown> }) => {
-      createdData = data;
-      return { id: "material-can", ...data };
+  let createdProductData: Record<string, unknown> | undefined;
+  mockTransaction(transactionMock(
+    {
+      findUnique: async () => null,
+      create: async ({ data }: { data: Record<string, unknown> }) => {
+        createdData = data;
+        return { id: "material-can", ...data };
+      }
+    },
+    {
+      findMany: async () => [],
+      findFirst: async () => null,
+      create: async ({ data }: { data: Record<string, unknown> }) => {
+        createdProductData = data;
+        return { id: "product-can", ...data };
+      }
     }
-  }));
+  ));
 
   const response = await createMaterial("can", "Beverage");
   assert.equal(response.status, 201);
   assert.equal(createdData?.unit, "can");
   assert.equal(createdData?.category, "Beverage");
+  assert.equal(createdProductData?.name, "Nori");
+  assert.equal(createdProductData?.category, "Beverage");
+  assert.equal(createdProductData?.price, 0);
+  assert.equal(createdProductData?.image_url, null);
+  assert.equal((await response.json()).product_created, true);
 });
 
 test("restores a deleted material while preserving its historical unit and stock", async () => {

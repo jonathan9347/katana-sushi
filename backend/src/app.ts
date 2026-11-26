@@ -6242,6 +6242,49 @@ async function ensureBeverageStockMaterials() {
   );
 }
 
+async function ensureBeverageMenuProduct(tx: Prisma.TransactionClient, materialName: string) {
+  const beverageProducts = await tx.sellingProduct.findMany({
+    where: { is_deleted: false, category: { equals: "Beverage", mode: "insensitive" } },
+    select: { name: true }
+  });
+  const normalizedMaterialName = materialName.trim().toLowerCase();
+  const matchingBeverage = beverageProducts.some(
+    (product) => getBeverageStockMaterialName(product.name).trim().toLowerCase() === normalizedMaterialName
+  );
+  if (matchingBeverage) {
+    return false;
+  }
+
+  const sameNameProduct = await tx.sellingProduct.findFirst({
+    where: { name: { equals: materialName, mode: "insensitive" }, is_deleted: false },
+    select: { category: true }
+  });
+  if (sameNameProduct) {
+    throw new InventoryError(
+      "A menu product with this name already exists. Change its category to Beverage or use a different material name.",
+      "BEVERAGE_PRODUCT_NAME_CONFLICT",
+      409
+    );
+  }
+
+  await tx.sellingProduct.create({
+    data: {
+      name: materialName,
+      category: "Beverage",
+      price: 0,
+      description: null,
+      image_url: null,
+      recipes: {
+        create: {
+          total_yield_quantity: 1,
+          yield_unit: "serving"
+        }
+      }
+    }
+  });
+  return true;
+}
+
 app.get("/api/inventory/materials", async (_req, res, next) => {
   try {
     await ensureBeverageStockMaterials();
@@ -6646,7 +6689,10 @@ app.post("/api/inventory/materials", async (req, res, next) => {
         const material = await tx.rawMaterial.create({
           data: { ...body, current_stock: 0 }
         });
-        return { material, unit_preserved: false };
+        const product_created = body.category === "Beverage"
+          ? await ensureBeverageMenuProduct(tx, material.name)
+          : false;
+        return { material, unit_preserved: false, product_created };
       }
 
       await lockMaterialForUpdate(tx, existing.id);
@@ -6669,7 +6715,10 @@ app.post("/api/inventory/materials", async (req, res, next) => {
         where: { id: current.id },
         data: { ...body, unit: unitPreserved ? current.unit : body.unit, is_deleted: false }
       });
-      return { material, unit_preserved: unitPreserved };
+      const product_created = body.category === "Beverage"
+        ? await ensureBeverageMenuProduct(tx, material.name)
+        : false;
+      return { material, unit_preserved: unitPreserved, product_created };
     });
     return res.status(201).json(result);
   } catch (error) {
@@ -6699,7 +6748,7 @@ app.put("/api/inventory/materials/:id", async (req, res, next) => {
         cost_per_unit: z.coerce.number().finite().nonnegative()
       })
       .parse(req.body);
-    const material = await prisma.$transaction(async (tx) => {
+    const result = await prisma.$transaction(async (tx) => {
       await lockMaterialForUpdate(tx, req.params.id);
       const current = await tx.rawMaterial.findFirst({
         where: { id: req.params.id, is_deleted: false }
@@ -6710,13 +6759,17 @@ app.put("/api/inventory/materials/:id", async (req, res, next) => {
 
       await assertRawMaterialUnitCanChange(tx, current, body.unit);
 
-      return tx.rawMaterial.update({
+      const material = await tx.rawMaterial.update({
         where: { id: req.params.id },
         data: body
       });
+      const product_created = body.category === "Beverage"
+        ? await ensureBeverageMenuProduct(tx, material.name)
+        : false;
+      return { material, product_created };
     });
 
-    return res.json({ material });
+    return res.json(result);
   } catch (error) {
     return next(error);
   }
@@ -9380,10 +9433,11 @@ app.post("/api/products", upload.single("imageFile"), async (req, res, next) => 
           where: { name: materialName },
           update: {
             is_deleted: false,
-            unit: beverageUnit
+            category: "Beverage"
           },
           create: {
             name: materialName,
+            category: "Beverage",
             unit: beverageUnit,
             current_stock: 0,
             reorder_level: 0,
@@ -9452,10 +9506,11 @@ app.put("/api/products/:id", upload.single("imageFile"), async (req, res, next) 
         where: { name: materialName },
         update: {
           is_deleted: false,
-          unit: beverageUnit
+          category: "Beverage"
         },
         create: {
           name: materialName,
+          category: "Beverage",
           unit: beverageUnit,
           current_stock: 0,
           reorder_level: 0,

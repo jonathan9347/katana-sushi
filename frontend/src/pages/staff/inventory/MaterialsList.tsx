@@ -232,6 +232,9 @@ export default function MaterialsList({ role, onNavigateStockView, onOpenReserva
       setAddOpen(false);
       setMaterialForm(emptyMaterialForm);
       refreshInventoryQueries();
+      if (response?.data?.product_created) {
+        queryClient.invalidateQueries({ queryKey: ["products"] });
+      }
       showToast(
         response.data.unit_preserved
           ? `Material restored. Its original unit (${response.data.material.unit}) was kept because it has inventory history.`
@@ -256,10 +259,13 @@ export default function MaterialsList({ role, onNavigateStockView, onOpenReserva
         cost_per_unit: Number(materialForm.cost_per_unit)
       });
     },
-    onSuccess: () => {
+    onSuccess: (response) => {
       setEditMaterial(null);
       setEditDialogOpen(false);
       refreshInventoryQueries();
+      if (response?.data?.product_created) {
+        queryClient.invalidateQueries({ queryKey: ["products"] });
+      }
       showToast("Material updated.", "success");
     },
     onError: (error: unknown) => {

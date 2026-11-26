@@ -24,7 +24,7 @@ const emptyBatchForm: BatchForm = {
   batch_number: "",
   quantity: "",
   expiration_date: "",
-  cost_per_unit: "",
+  cost_per_unit: "0",
   notes: ""
 };
 
@@ -60,6 +60,10 @@ function expiryLabel(status: MaterialBatch["expiryStatus"]) {
 
 function costDisplayFactor(unit: string) {
   return ["g", "ml"].includes(unit.trim().toLowerCase()) ? 100 : 1;
+}
+
+function costInputValue(costPerBaseUnit: string | number, unit: string) {
+  return String(Number((Number(costPerBaseUnit) * costDisplayFactor(unit)).toFixed(8)));
 }
 
 function costDisplayUnit(unit: string) {
@@ -180,7 +184,9 @@ export default function BatchManagement({
         batch_number: batchForm.batch_number,
         quantity: Number(batchForm.quantity),
         expiration_date: batchForm.expiration_date,
-        cost_per_unit: Number(batchForm.cost_per_unit),
+        cost_per_unit: Number(batchForm.cost_per_unit) / costDisplayFactor(
+          materialsQuery.data?.find((material) => material.id === batchForm.raw_material_id)?.unit ?? ""
+        ),
         notes: batchForm.notes || undefined
       }, { timeout: 60000 }),
     onSuccess: (response) => {
@@ -218,7 +224,7 @@ export default function BatchManagement({
     setBatchForm((current) => ({
       ...current,
       raw_material_id: materialId,
-      cost_per_unit: material ? String(material.cost_per_unit) : ""
+      cost_per_unit: material ? costInputValue(material.cost_per_unit, material.unit) : "0"
     }));
   }
 
@@ -431,20 +437,12 @@ export default function BatchManagement({
             Cost per {selectedBatchMaterial ? costDisplayUnit(selectedBatchMaterial.unit) : "base unit"}
             <input
               required
-              min="0"
-              step={selectedBatchMaterial && costDisplayFactor(selectedBatchMaterial.unit) === 100
-                ? "0.000001"
-                : "0.00000001"}
-              type="number"
+              inputMode="decimal"
+              pattern="[0-9]+([.][0-9]+)?"
+              type="text"
               className="h-10 rounded-md border border-slate-300 px-3"
-              value={(() => {
-                const factor = selectedBatchMaterial ? costDisplayFactor(selectedBatchMaterial.unit) : 1;
-                return (Number(batchForm.cost_per_unit) * factor).toFixed(factor === 100 ? 6 : 8);
-              })()}
-              onChange={(event) => {
-                const factor = selectedBatchMaterial ? costDisplayFactor(selectedBatchMaterial.unit) : 1;
-                setBatchForm((current) => ({ ...current, cost_per_unit: String(Number(event.target.value) / factor) }));
-              }}
+              value={batchForm.cost_per_unit}
+              onChange={(event) => setBatchForm((current) => ({ ...current, cost_per_unit: event.target.value }))}
             />
           </label>
           <label className="grid gap-1 text-sm">

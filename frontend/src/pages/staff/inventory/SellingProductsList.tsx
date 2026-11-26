@@ -111,6 +111,7 @@ export default function SellingProductsList({ role }: SellingProductsListProps) 
       setModalOpen(false);
       setSelectedProduct(null);
       queryClient.invalidateQueries({ queryKey: ["products"] });
+      queryClient.invalidateQueries({ queryKey: ["inventory"] });
       queryClient.invalidateQueries({ queryKey: ["inventory", "yield"] });
       toast(selectedProduct ? "Product updated." : "Product added.");
     },
