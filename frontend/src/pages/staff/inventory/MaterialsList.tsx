@@ -224,11 +224,16 @@ export default function MaterialsList({ role, onNavigateStockView, onOpenReserva
         reorder_level: Number(materialForm.reorder_level),
         cost_per_unit: Number(materialForm.cost_per_unit)
       }),
-    onSuccess: () => {
+    onSuccess: (response) => {
       setAddOpen(false);
       setMaterialForm(emptyMaterialForm);
       refreshInventoryQueries();
-      showToast("Material added.", "success");
+      showToast(
+        response.data.unit_preserved
+          ? `Material restored. Its original unit (${response.data.material.unit}) was kept because it has inventory history.`
+          : "Material added.",
+        "success"
+      );
     },
     onError: () => showToast("Unable to add material.", "error")
   });
@@ -465,7 +470,7 @@ export default function MaterialsList({ role, onNavigateStockView, onOpenReserva
 
       <Card className="materials-card">
         <div className="materials-toolbar">
-          <div className="materials-filter-row">
+          <div className="materials-toolbar-left materials-filter-row">
             <label className="materials-search">
               <span className="sr-only">Search materials</span>
               <Search aria-hidden="true" />
@@ -501,7 +506,7 @@ export default function MaterialsList({ role, onNavigateStockView, onOpenReserva
               ))}
             </div>
           </div>
-          <div className="materials-actions">
+          <div className="materials-toolbar-right materials-actions">
             {isAdmin && (
               <Button type="button" className="inventory-control materials-add-button" onClick={openAddModal}>
                 Add material

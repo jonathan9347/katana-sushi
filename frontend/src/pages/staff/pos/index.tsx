@@ -1632,6 +1632,6 @@ function printReceipt(transaction: PosTransaction, settings: SystemSettings, rec
     lines.push("-".repeat(32));
     lines.push(...wrapPrintText(settings.receipt_footer));
   }
-  printPlainLines(receipt, transaction.transaction_number, lines, settings.receipt_paper_size, () => receipt.close());
+  printPlainLines(receipt, transaction.transaction_number, lines, settings.receipt_paper_size, () => receipt.close(), true);
   return true;
 }

@@ -1,10 +1,10 @@
 import { Link, Navigate, Route, Routes } from "react-router-dom";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { ProtectedRoute } from "./components/layout/ProtectedRoute";
 import { useSessionTimeout } from "./hooks/useSessionTimeout";
 import CustomerNav from "./components/layout/CustomerNav";
 import Footer from "./components/layout/Footer";
-import StaffSidebar from "./components/layout/StaffSidebar";
+import Sidebar from "./components/layout/Sidebar";
 import UnlimitedSettings from "./pages/admin/UnlimitedSettings";
 import CateringInquiry from "./pages/customer/CateringInquiry";
 import CateringReservation from "./pages/customer/CateringReservation";
@@ -29,8 +29,26 @@ import PosHistory from "./pages/staff/pos/PosHistory";
 import DineInReservations from "./pages/staff/reservations/DineInReservations";
 import CateringReservations from "./pages/staff/catering/CateringReservations";
 
+const SIDEBAR_HIDDEN_KEY = "katana_sidebar_hidden";
+
+function getInitialSidebarHidden() {
+  const hiddenByDefault = window.matchMedia("(max-width: 759px)").matches;
+
+  try {
+    const stored = localStorage.getItem(SIDEBAR_HIDDEN_KEY);
+    if (stored === "true") return true;
+    if (stored === "false") return false;
+  } catch (error) {
+    console.error("Sidebar preference could not be read.", error);
+  }
+
+  return hiddenByDefault;
+}
+
 function StaffPage({ roles, children }: { roles: string[]; children: JSX.Element }) {
   useSessionTimeout();
+  const [sidebarHidden, setSidebarHidden] = useState(getInitialSidebarHidden);
+  const role = (localStorage.getItem("katana_role") ?? "staff").toLowerCase();
 
   useEffect(() => {
     document.documentElement.setAttribute("data-theme", "light");
@@ -39,12 +57,26 @@ function StaffPage({ roles, children }: { roles: string[]; children: JSX.Element
     };
   }, []);
 
+  useEffect(() => {
+    try {
+      localStorage.setItem(SIDEBAR_HIDDEN_KEY, String(sidebarHidden));
+    } catch (error) {
+      console.error("Sidebar preference could not be saved.", error);
+    }
+  }, [sidebarHidden]);
+
   return (
     <ProtectedRoute allowedRoles={roles}>
-      <div className="min-h-screen bg-slate-100 text-slate-900">
-        <div className="min-h-screen md:flex">
-          <StaffSidebar />
-          <div className="flex-1">{children}</div>
+      <div className="staff-page-shell min-h-screen bg-slate-100 text-slate-900">
+        <Sidebar
+          role={role}
+          hidden={sidebarHidden}
+          onToggle={() => setSidebarHidden((current) => !current)}
+        />
+        <div className="staff-layout-viewport">
+          <div className={`staff-layout-content${sidebarHidden ? " is-sidebar-hidden" : ""}`}>
+            {children}
+          </div>
         </div>
       </div>
     </ProtectedRoute>

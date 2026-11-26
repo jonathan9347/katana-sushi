@@ -103,6 +103,13 @@ test("takeout checkout creates one immediate sale and receipt without entering d
   const receiptPopupPromise = page.waitForEvent("popup");
   await payment.getByLabel("Enter Amount Received").press("Enter");
   const receipt = await receiptPopupPromise;
+  const receiptLogo = receipt.locator("img.receipt-logo");
+  await expect(receiptLogo).toHaveAttribute("src", /^data:image\/png;base64,/);
+  expect(await receiptLogo.evaluate((logo) => parseFloat(getComputedStyle(logo).width))).toBeGreaterThan(110);
+  expect(await receipt.locator(".receipt-branding").evaluate((header) => parseFloat(getComputedStyle(header).paddingBottom))).toBeGreaterThan(15);
+  await expect(receipt.locator(".receipt-branding + pre")).toContainText("POS-TAKEOUT-001");
+  await expect(receiptLogo).toHaveJSProperty("complete", true);
+  expect(await receiptLogo.evaluate((logo) => logo.naturalWidth)).toBeGreaterThan(0);
   await expect(receipt.locator("body")).toContainText("POS-TAKEOUT-001");
   await expect(receipt.locator("body")).toContainText("2 x California Roll");
   await expect(receipt.locator("body")).toHaveAttribute("data-print-requested", "true");

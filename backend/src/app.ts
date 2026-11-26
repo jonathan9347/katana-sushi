@@ -6640,11 +6640,44 @@ app.post("/api/inventory/materials", async (req, res, next) => {
       })
       .parse(req.body);
 
-    const material = await prisma.rawMaterial.create({
-      data: { ...body, current_stock: 0 }
+    const result = await prisma.$transaction(async (tx) => {
+      const existing = await tx.rawMaterial.findUnique({ where: { name: body.name } });
+      if (!existing) {
+        const material = await tx.rawMaterial.create({
+          data: { ...body, current_stock: 0 }
+        });
+        return { material, unit_preserved: false };
+      }
+
+      await lockMaterialForUpdate(tx, existing.id);
+      const current = await tx.rawMaterial.findUnique({ where: { id: existing.id } });
+      if (!current) {
+        throw new InventoryError("Material not found.", "MATERIAL_NOT_FOUND", 404);
+      }
+      if (!current.is_deleted) {
+        throw new InventoryError(
+          "A raw material with this name already exists.",
+          "RAW_MATERIAL_NAME_CONFLICT",
+          409
+        );
+      }
+
+      const canChangeUnit = await canChangeRawMaterialUnit(tx, current, body.unit);
+      const unitPreserved = !canChangeUnit;
+
+      const material = await tx.rawMaterial.update({
+        where: { id: current.id },
+        data: { ...body, unit: unitPreserved ? current.unit : body.unit, is_deleted: false }
+      });
+      return { material, unit_preserved: unitPreserved };
     });
-    return res.status(201).json({ material });
+    return res.status(201).json(result);
   } catch (error) {
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
+      return res.status(409).json({
+        message: "A raw material with this name already exists."
+      });
+    }
     return next(error);
   }
 });
@@ -6675,29 +6708,7 @@ app.put("/api/inventory/materials/:id", async (req, res, next) => {
         throw new InventoryError("Material not found.", "MATERIAL_NOT_FOUND", 404);
       }
 
-      if (body.unit !== current.unit) {
-        const [batchCount, recipeCount, activeLockCount, movementCount, legacyTransactionCount] = await Promise.all([
-          tx.materialBatch.count({ where: { raw_material_id: current.id } }),
-          tx.recipeIngredient.count({ where: { raw_material_id: current.id } }),
-          tx.cateringIngredientLock.count({ where: { raw_material_id: current.id, is_released: false } }),
-          tx.inventoryMovement.count({ where: { raw_material_id: current.id } }),
-          tx.inventoryTransaction.count({ where: { raw_material_id: current.id } })
-        ]);
-
-        if (
-          Number(current.current_stock) !== 0 ||
-          batchCount > 0 ||
-          recipeCount > 0 ||
-          activeLockCount > 0 ||
-          movementCount > 0 ||
-          legacyTransactionCount > 0
-        ) {
-          throw new InventoryError(
-            "A material's base unit cannot change after it has stock, batches, recipes, reservations, or movement history.",
-            "MATERIAL_UNIT_IN_USE"
-          );
-        }
-      }
+      await assertRawMaterialUnitCanChange(tx, current, body.unit);
 
       return tx.rawMaterial.update({
         where: { id: req.params.id },
@@ -6710,6 +6721,46 @@ app.put("/api/inventory/materials/:id", async (req, res, next) => {
     return next(error);
   }
 });
+
+async function assertRawMaterialUnitCanChange(
+  tx: Prisma.TransactionClient,
+  current: { id: string; unit: string; current_stock: bigint },
+  nextUnit: string
+) {
+  if (await canChangeRawMaterialUnit(tx, current, nextUnit)) {
+    return;
+  }
+
+  throw new InventoryError(
+    "A material's base unit cannot change after it has stock, batches, recipes, reservations, or movement history.",
+    "MATERIAL_UNIT_IN_USE"
+  );
+}
+
+async function canChangeRawMaterialUnit(
+  tx: Prisma.TransactionClient,
+  current: { id: string; unit: string; current_stock: bigint },
+  nextUnit: string
+) {
+  if (nextUnit === current.unit) {
+    return true;
+  }
+
+  const [batchCount, recipeCount, activeLockCount, movementCount, legacyTransactionCount] = await Promise.all([
+    tx.materialBatch.count({ where: { raw_material_id: current.id } }),
+    tx.recipeIngredient.count({ where: { raw_material_id: current.id } }),
+    tx.cateringIngredientLock.count({ where: { raw_material_id: current.id, is_released: false } }),
+    tx.inventoryMovement.count({ where: { raw_material_id: current.id } }),
+    tx.inventoryTransaction.count({ where: { raw_material_id: current.id } })
+  ]);
+
+  return Number(current.current_stock) === 0 &&
+    batchCount === 0 &&
+    recipeCount === 0 &&
+    activeLockCount === 0 &&
+    movementCount === 0 &&
+    legacyTransactionCount === 0;
+}
 
 app.put("/api/inventory/materials/:id/cost", async (req, res, next) => {
   try {

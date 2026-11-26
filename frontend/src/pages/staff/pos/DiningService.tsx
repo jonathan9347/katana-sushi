@@ -6,7 +6,7 @@ import UnlimitedTimer from "../../../components/pos/UnlimitedTimer";
 import { usePosCart, type PosCartKey } from "./store";
 import { api } from "../../../lib/api";
 import { useToast } from "../../../hooks/useToast";
-import { PRINT_LINE_WIDTH, addPrintAmount, addPrintPair, printPlainLines, wrapPrintText } from "./printLayout";
+import { PRINT_LINE_WIDTH, addPrintAmount, addPrintPair, loadReceiptLogoDataUrl, printPlainLines, wrapPrintText } from "./printLayout";
 
 type Guest = {
   id: string;
@@ -1879,10 +1879,13 @@ function printCheckoutReceipt(transaction: CheckoutTransaction) {
       `<tr><td>${charge.quantity} × ${escapeHtml(charge.name_snapshot)}</td><td class="right">${money(charge.total_price)}</td></tr>`
     )
   ].join("");
-  receipt.document.write(`
+  const renderReceipt = (logoDataUrl?: string) => {
+    receipt.document.write(`
     <html><head><title>${escapeHtml(transaction.transaction_number)}</title>
       <style>
         body{font-family:Arial,sans-serif;margin:18px;color:#111827}
+        .receipt-branding{padding:3mm 0 4mm}
+        .receipt-logo{display:block;width:32mm;height:32mm;margin:0 auto;object-fit:contain;filter:grayscale(1) invert(1) contrast(2)}
         h1{text-align:center;font-size:20px;margin:0 0 8px}
         p{margin:5px 0;font-size:12px}
         table{border-collapse:collapse;width:100%;margin:12px 0}
@@ -1892,6 +1895,7 @@ function printCheckoutReceipt(transaction: CheckoutTransaction) {
         .total{font-weight:bold;font-size:15px}
       </style>
     </head><body>
+      ${logoDataUrl ? `<header class="receipt-branding"><img class="receipt-logo" src="${escapeHtml(logoDataUrl)}" alt="Katana Sushi"></header>` : ""}
       <h1>Katana Sushi</h1>
       <p>Table ${transaction.table_number_snapshot ?? transaction.dining_session.table.table_number}</p>
       <p>Transaction: ${escapeHtml(transaction.transaction_number)}</p>
@@ -1907,10 +1911,30 @@ function printCheckoutReceipt(transaction: CheckoutTransaction) {
       ${transaction.cash_received === null ? "" : `<p class="right">Cash received: ${money(transaction.cash_received)}</p>`}
       ${transaction.change_due === null ? "" : `<p class="right">Change: ${money(transaction.change_due)}</p>`}
       <p style="text-align:center;margin-top:18px">Thank you!</p>
-      <script>window.print();</script>
     </body></html>
   `);
-  receipt.document.close();
+    receipt.document.close();
+    let printed = false;
+    const printWhenReady = () => {
+      if (printed) return;
+      printed = true;
+      receipt.focus();
+      receipt.print();
+    };
+    const logo = logoDataUrl ? receipt.document.querySelector<HTMLImageElement>(".receipt-logo") : null;
+    if (logo && !logo.complete) {
+      logo.addEventListener("load", printWhenReady, { once: true });
+      logo.addEventListener("error", printWhenReady, { once: true });
+    } else {
+      printWhenReady();
+    }
+  };
+  void loadReceiptLogoDataUrl()
+    .then(renderReceipt)
+    .catch((error: unknown) => {
+      console.error("Table receipt logo could not be loaded for printing:", error);
+      renderReceipt();
+    });
 }
 
 function ActionButton({

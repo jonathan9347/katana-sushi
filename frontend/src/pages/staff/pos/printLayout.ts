@@ -65,12 +65,36 @@ function escapeHtml(value: string) {
   })[character] ?? character);
 }
 
+export function loadReceiptLogoDataUrl() {
+  return new Promise<string>((resolve, reject) => {
+    const logo = new Image();
+    logo.onload = () => {
+      try {
+        const canvas = document.createElement("canvas");
+        canvas.width = logo.naturalWidth;
+        canvas.height = logo.naturalHeight;
+        const context = canvas.getContext("2d");
+        if (!context) {
+          throw new Error("Unable to prepare the receipt logo for printing.");
+        }
+        context.drawImage(logo, 0, 0);
+        resolve(canvas.toDataURL("image/png"));
+      } catch (error) {
+        reject(error);
+      }
+    };
+    logo.onerror = () => reject(new Error("Unable to load the Katana Sushi receipt logo."));
+    logo.src = new URL("/images/katana-logo.jpg", window.location.origin).href;
+  });
+}
+
 export function printPlainLines(
   target: Window,
   title: string,
   lines: string[],
   paperSize: string,
-  afterPrint?: () => void
+  afterPrint?: () => void,
+  includeLogo = false
 ) {
   const selectedPaperSize = paperSize || "58mm";
   const pageSettings = {
@@ -84,8 +108,9 @@ export function printPlainLines(
   const content = lines
     .flatMap((line) => wrapPrintText(line))
     .join("\n");
-  target.document.open();
-  target.document.write(`<!doctype html>
+  const render = (logoDataUrl?: string) => {
+    target.document.open();
+    target.document.write(`<!doctype html>
     <html>
       <head>
         <meta charset="utf-8">
@@ -95,13 +120,39 @@ export function printPlainLines(
           html, body { width: ${pageSettings.width}; margin: 0; padding: 0; }
           body { color: #000; background: #fff; font: 7pt/1.2 "Courier New", monospace; }
           pre { box-sizing: border-box; width: 32ch; max-width: ${PRINTABLE_WIDTH_MM}mm; margin: 0 auto; padding: 0; white-space: pre; overflow-wrap: normal; }
+          .receipt-branding { padding: 3mm 0 4mm; }
+          .receipt-logo { display: block; width: 32mm; height: 32mm; margin: 0 auto; object-fit: contain; filter: grayscale(1) invert(1) contrast(2); }
           @media print { html, body { margin: 0 !important; padding: 0 !important; } }
         </style>
       </head>
-      <body><pre data-testid="print-lines">${escapeHtml(content)}</pre></body>
+      <body>${logoDataUrl ? `<header class="receipt-branding"><img class="receipt-logo" src="${escapeHtml(logoDataUrl)}" alt="Katana Sushi"></header>` : ""}<pre data-testid="print-lines">${escapeHtml(content)}</pre></body>
     </html>`);
-  target.document.close();
-  if (afterPrint) target.onafterprint = afterPrint;
-  target.focus();
-  target.print();
+    target.document.close();
+    if (afterPrint) target.onafterprint = afterPrint;
+    let printed = false;
+    const printWhenReady = () => {
+      if (printed) return;
+      printed = true;
+      target.focus();
+      target.print();
+    };
+    const logo = logoDataUrl ? target.document.querySelector<HTMLImageElement>(".receipt-logo") : null;
+    if (logo && !logo.complete) {
+      logo.addEventListener("load", printWhenReady, { once: true });
+      logo.addEventListener("error", printWhenReady, { once: true });
+    } else {
+      printWhenReady();
+    }
+  };
+
+  if (!includeLogo) {
+    render();
+    return;
+  }
+  void loadReceiptLogoDataUrl()
+    .then((logoDataUrl) => render(logoDataUrl))
+    .catch((error: unknown) => {
+      console.error("Receipt logo could not be loaded for printing:", error);
+      render();
+    });
 }
