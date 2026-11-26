@@ -162,7 +162,9 @@ export default function PosOrderBuilder({
       counts.set(product.category, (counts.get(product.category) ?? 0) + 1);
     });
     return [{ name: "All", count: [...counts.values()].reduce((total, count) => total + count, 0) },
-      ...[...counts].map(([name, count]) => ({ name, count }))];
+      ...[...counts]
+        .map(([name, count]) => ({ name, count }))
+        .sort((left, right) => left.name.localeCompare(right.name, undefined, { sensitivity: "base" }))];
   }, [cartKey, menuProducts]);
   const visibleProducts = menuProducts.filter((product) =>
     canAddToCart(product, cartKey)
@@ -170,7 +172,10 @@ export default function PosOrderBuilder({
     && (!normalizedSearch
       || product.name.toLocaleLowerCase().includes(normalizedSearch)
       || product.category.toLocaleLowerCase().includes(normalizedSearch))
-  ).sort((left, right) => Number(left.available_stock === 0) - Number(right.available_stock === 0));
+  ).sort((left, right) =>
+    left.category.localeCompare(right.category, undefined, { sensitivity: "base" })
+      || left.name.localeCompare(right.name, undefined, { sensitivity: "base" })
+  );
   const isPickup = customerType === "pickup_customer";
   const isDineIn = cartKey !== "takeout";
   const isSelectingExistingTable = customerType === "existing_table" && !selectionSummary;
