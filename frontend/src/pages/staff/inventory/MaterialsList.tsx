@@ -80,6 +80,10 @@ function costDisplayFactor(unit: string) {
   return ["g", "ml"].includes(unit.trim().toLowerCase()) ? 100 : 1;
 }
 
+function costInputValue(costPerBaseUnit: string | number, unit: string) {
+  return String(Number((Number(costPerBaseUnit) * costDisplayFactor(unit)).toFixed(8)));
+}
+
 function costDisplayUnit(unit: string) {
   const normalized = unit.trim().toLowerCase();
   if (normalized === "g") return "100 g";
@@ -934,6 +938,12 @@ function MaterialFields({
   onChange: (form: MaterialForm) => void;
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
 }) {
+  const [costInput, setCostInput] = useState(() => costInputValue(form.cost_per_unit, form.unit));
+
+  useEffect(() => {
+    setCostInput(costInputValue(form.cost_per_unit, form.unit));
+  }, [form.unit]);
+
   const fields: Array<{ key: keyof MaterialForm; label: string; editable: boolean }> = [
     { key: "name", label: "Name", editable: true },
     { key: "category", label: "Category", editable: true },
@@ -976,20 +986,29 @@ function MaterialFields({
               className="h-10 rounded-md border border-slate-300 px-3 text-sm outline-none focus:border-red-700 focus:ring-2 focus:ring-red-100 disabled:bg-slate-100"
               disabled={!field.editable}
               required
-              min={field.key === "name" ? undefined : "0"}
-              type={field.key === "name" ? "text" : "number"}
-              step={field.key === "cost_per_unit"
-                ? costDisplayFactor(form.unit) === 100 ? "0.000001" : "0.00000001"
-                : "1"}
-              value={field.key === "cost_per_unit"
-                ? (Number(form.cost_per_unit) * costDisplayFactor(form.unit)).toFixed(costDisplayFactor(form.unit) === 100 ? 6 : 8)
-                : form[field.key]}
-              onChange={(event) => onChange({
-                ...form,
-                [field.key]: field.key === "cost_per_unit"
-                  ? String(Number(event.target.value) / costDisplayFactor(form.unit))
-                  : event.target.value
-              })}
+              min={field.key === "reorder_level" ? "0" : undefined}
+              type={field.key === "cost_per_unit" || field.key === "name" ? "text" : "number"}
+              inputMode={field.key === "cost_per_unit" ? "decimal" : undefined}
+              pattern={field.key === "cost_per_unit" ? "[0-9]+([.][0-9]+)?" : undefined}
+              step={field.key === "reorder_level" ? "1" : undefined}
+              value={field.key === "cost_per_unit" ? costInput : form[field.key]}
+              onChange={(event) => {
+                const value = event.target.value;
+                if (field.key === "cost_per_unit") {
+                  setCostInput(value);
+                  const numericValue = Number(value);
+                  onChange({
+                    ...form,
+                    cost_per_unit: value === "" || !Number.isFinite(numericValue)
+                      ? ""
+                      : String(numericValue / costDisplayFactor(form.unit))
+                  });
+                } else if (field.key === "name") {
+                  onChange({ ...form, name: value });
+                } else if (field.key === "reorder_level") {
+                  onChange({ ...form, reorder_level: value });
+                }
+              }}
             />
           )}
         </label>
