@@ -105,6 +105,10 @@ test("inline order paths open table, reservation, and pickup selection views", a
   await expect(page.getByRole("region", { name: "POS order builder" })).toContainText("Menu");
   await expect(page.getByRole("button", { name: /Iced Tea/ })).toBeVisible();
   await expect(page.getByRole("button", { name: /Iced Tea/ }).locator("img")).toHaveAttribute("src", "/test-roll-photo.jpg");
+  await expect(page.getByRole("group", { name: "Menu layout" })).toHaveCount(0);
+  const menuGrid = page.locator(".pos-menu-grid");
+  await expect(menuGrid).not.toHaveClass(/is-compact/);
+  expect(await menuGrid.evaluate((element) => getComputedStyle(element).gridTemplateColumns.split(" ").length)).toBeGreaterThan(1);
   await page.getByRole("region", { name: "POS order builder" }).getByRole("button", { name: /Iced Tea Beverage/ }).click();
   await page.getByRole("button", { name: "Proceed" }).click();
   await expect(page.getByRole("region", { name: "Table board" })).toBeVisible();

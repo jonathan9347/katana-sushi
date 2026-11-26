@@ -53,7 +53,7 @@ function tooltipClass() {
 
 function iconClass(isActive: boolean) {
   return `group relative mx-auto flex h-14 w-14 items-center justify-center rounded-2xl transform transition duration-200 ${
-    isActive ? "bg-red-700 text-white scale-110 shadow-lg" : "text-slate-600 hover:bg-slate-100 hover:text-slate-950 hover:scale-110"
+    isActive ? "bg-red-700 text-white shadow-md ring-2 ring-red-200" : "text-slate-600 hover:bg-slate-100 hover:text-slate-950"
   }`;
 }
 
@@ -89,8 +89,8 @@ export default function StaffSidebar() {
               const Icon = item.icon;
 
               return (
-                <NavLink key={item.to} to={item.to} className={({ isActive }) => iconClass(isActive)}>
-                  <Icon className="h-6 w-6" />
+                <NavLink key={item.to} to={item.to} aria-label={item.label} title={item.label} className={({ isActive }) => iconClass(isActive)}>
+                  <Icon aria-hidden="true" className="h-6 w-6" />
                   <span className={tooltipClass()}>{item.label}</span>
                 </NavLink>
               );
@@ -105,16 +105,16 @@ export default function StaffSidebar() {
               const Icon = item.icon;
 
               return (
-                <NavLink key={item.to} to={item.to} className={({ isActive }) => iconClass(isActive)}>
-                  <Icon className="h-6 w-6" />
+                <NavLink key={item.to} to={item.to} aria-label={item.label} title={item.label} className={({ isActive }) => iconClass(isActive)}>
+                  <Icon aria-hidden="true" className="h-6 w-6" />
                   <span className={tooltipClass()}>{item.label}</span>
                 </NavLink>
               );
             })}
 
             <div className="relative w-full">
-              <button onClick={() => setProfileOpen((current) => !current)} className="group relative flex h-12 w-full items-center justify-center rounded-md text-slate-600 transition hover:bg-slate-100 hover:text-slate-950">
-                <User className="h-6 w-6" />
+              <button type="button" aria-label="Profile menu" aria-expanded={profileOpen} onClick={() => setProfileOpen((current) => !current)} className="group relative flex h-12 w-full items-center justify-center rounded-md text-slate-600 transition hover:bg-slate-100 hover:text-slate-950 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-700">
+                <User aria-hidden="true" className="h-6 w-6" />
                 <span className={tooltipClass()}>Profile</span>
               </button>
               {profileOpen && (
@@ -138,8 +138,8 @@ export default function StaffSidebar() {
           const Icon = item.icon;
 
           return (
-            <NavLink key={item.to} to={item.to} className={({ isActive }) => `flex min-h-14 flex-col items-center justify-center gap-1 rounded-md text-[11px] font-bold ${isActive ? "text-red-700" : "text-slate-600"}`}>
-              <Icon className="h-5 w-5" />
+            <NavLink key={item.to} to={item.to} aria-label={item.label} className={({ isActive }) => `flex min-h-14 flex-col items-center justify-center gap-1 rounded-md text-[11px] font-bold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-700 ${isActive ? "bg-red-50 text-red-800" : "text-slate-600"}`}>
+              <Icon aria-hidden="true" className="h-5 w-5" />
               <span>{item.label}</span>
             </NavLink>
           );

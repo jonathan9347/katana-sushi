@@ -7547,9 +7547,15 @@ app.post("/api/inventory/waste", async (req, res, next) => {
       return { material: consumed.material, transactions };
     });
 
-    await captureInventorySnapshot();
+    let snapshotWarning: string | undefined;
+    try {
+      await captureInventorySnapshot();
+    } catch (error) {
+      console.error("Waste was recorded, but the inventory snapshot could not be refreshed:", error);
+      snapshotWarning = "The inventory snapshot could not be refreshed; the disposal and stock update were saved.";
+    }
 
-    return res.status(201).json(result);
+    return res.status(201).json({ ...result, warning: snapshotWarning });
   } catch (error) {
     return next(error);
   }

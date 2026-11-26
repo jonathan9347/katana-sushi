@@ -1,13 +1,13 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { AlertTriangle, CalendarClock, PackagePlus } from "lucide-react";
+import axios from "axios";
+import { AlertCircle, AlertTriangle, CalendarClock, CheckCircle2, LoaderCircle, PackagePlus, TriangleAlert } from "lucide-react";
 import { api } from "../../../lib/api";
 import { Button } from "../../../components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "../../../components/ui/card";
 import { Dialog } from "../../../components/ui/dialog";
 import { Select } from "../../../components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../../../components/ui/table";
-import { useToast } from "../../../hooks/useToast";
 import { MaterialBatch, RawMaterial } from "./types";
 
 type BatchForm = {
@@ -69,18 +69,27 @@ function costDisplayUnit(unit: string) {
   return unit;
 }
 
-function isExpiryToday(expirationDate?: string | null, daysUntilExpiry?: number | null) {
-  if (!expirationDate) return false;
+function isExpired(batch: MaterialBatch) {
+  if (batch.expiryStatus === "expired" || (batch.daysUntilExpiry !== null && batch.daysUntilExpiry !== undefined && batch.daysUntilExpiry < 0)) {
+    return true;
+  }
+  if (!batch.expiration_date) return false;
 
   const today = new Date();
   const todayStart = new Date(today.getFullYear(), today.getMonth(), today.getDate());
-  const expiryDateValue = new Date(expirationDate);
+  const expiryDateValue = new Date(batch.expiration_date);
   const expiryStart = new Date(expiryDateValue.getFullYear(), expiryDateValue.getMonth(), expiryDateValue.getDate());
+  return expiryStart.getTime() < todayStart.getTime();
+}
 
-  if (daysUntilExpiry === 0) {
-    return true;
-  }
+function isExpiryToday(batch: MaterialBatch) {
+  if (batch.daysUntilExpiry === 0) return true;
+  if (!batch.expiration_date) return false;
 
+  const today = new Date();
+  const todayStart = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+  const expiryDateValue = new Date(batch.expiration_date);
+  const expiryStart = new Date(expiryDateValue.getFullYear(), expiryDateValue.getMonth(), expiryDateValue.getDate());
   return expiryStart.getTime() === todayStart.getTime();
 }
 
@@ -100,8 +109,11 @@ export default function BatchManagement({
   const [showExpiringOnly, setShowExpiringOnly] = useState(initialExpiringOnly);
   const [batchSortMode, setBatchSortMode] = useState<BatchSortMode>("received");
   const [batchForm, setBatchForm] = useState<BatchForm>(emptyBatchForm);
+  const [submissionNotice, setSubmissionNotice] = useState<{
+    type: "success" | "warning" | "error";
+    message: string;
+  } | null>(null);
   const queryClient = useQueryClient();
-  const { toast } = useToast();
 
   useEffect(() => {
     setShowExpiringOnly(initialExpiringOnly);
@@ -170,20 +182,27 @@ export default function BatchManagement({
         expiration_date: batchForm.expiration_date,
         cost_per_unit: Number(batchForm.cost_per_unit),
         notes: batchForm.notes || undefined
-      }),
+      }, { timeout: 60000 }),
     onSuccess: (response) => {
       setAddOpen(false);
       setBatchForm(emptyBatchForm);
       queryClient.invalidateQueries({ queryKey: ["inventory"] });
-      toast(response.data.warning ?? "Batch received and stock updated.");
+      setSubmissionNotice(response.data.warning
+        ? { type: "warning", message: `Batch received and stock updated. ${response.data.warning}` }
+        : { type: "success", message: "Batch received and stock updated." });
     },
     onError: async (error: unknown) => {
-      const message =
-        error && typeof error === "object" && "response" in error
-          ? (error as { response?: { data?: { message?: string } } }).response?.data?.message
-          : undefined;
+      const serverMessage = axios.isAxiosError<{ message?: string }>(error)
+        ? error.response?.data?.message
+        : undefined;
+      const timedOut = axios.isAxiosError(error) && (error.code === "ECONNABORTED" || error.code === "ETIMEDOUT");
       await queryClient.invalidateQueries({ queryKey: ["inventory"] });
-      toast(message ?? "Could not confirm receipt. Check the batch list before retrying; stock may already have been updated.");
+      setSubmissionNotice({
+        type: "error",
+        message: serverMessage ?? (timedOut
+          ? "The request timed out before receipt was confirmed. Check the batch list before retrying; stock may already have been updated."
+          : "Could not confirm receipt. Check the batch list before retrying; stock may already have been updated.")
+      });
     }
   });
 
@@ -205,6 +224,7 @@ export default function BatchManagement({
 
   function handleSubmit(event: FormEvent) {
     event.preventDefault();
+    setSubmissionNotice(null);
     createBatchMutation.mutate();
   }
 
@@ -220,28 +240,30 @@ export default function BatchManagement({
           </CardHeader>
           <CardContent className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
             {expiringQuery.data?.map((batch) => {
-              const expiresToday = isExpiryToday(batch.expiration_date, batch.daysUntilExpiry);
+              const expired = isExpired(batch);
+              const expiresToday = isExpiryToday(batch);
+              const canDisposeNow = (expired || expiresToday) && Number(batch.remaining_quantity) > 0;
               return (
                 <div
                   key={batch.id}
-                  className={`rounded-lg border p-4 ${batch.expiryStatus === "expired" || expiresToday ? "border-red-200 bg-red-50" : "border-amber-200 bg-white"} text-slate-900`}
+                  className={`rounded-lg border p-4 ${expired || expiresToday ? "border-red-200 bg-red-50" : "border-amber-200 bg-white"} text-slate-900`}
                 >
                   <p className="font-semibold text-slate-950">{batch.raw_material.name}</p>
                   <p className="mt-1 text-sm text-slate-600">
                     Batch {batch.batch_number} · {Number(batch.remaining_quantity).toLocaleString()} {batch.raw_material.unit}
                   </p>
-                  <p className={`mt-1 text-sm font-medium ${expiresToday ? "text-red-700" : "text-slate-700"}`}>
-                    {batch.expiration_date && batch.daysUntilExpiry !== null && batch.daysUntilExpiry !== undefined
-                      ? batch.daysUntilExpiry < 0
-                        ? `Expired ${Math.abs(batch.daysUntilExpiry)} day(s) ago`
+                  <p className={`mt-1 text-sm font-medium ${expired || expiresToday ? "text-red-700" : "text-slate-700"}`}>
+                    {batch.expiration_date
+                      ? expired
+                        ? `Expired — ${new Date(batch.expiration_date).toLocaleDateString()}`
                         : expiresToday
                           ? `Expires today — ${new Date(batch.expiration_date).toLocaleDateString()}`
-                          : `Expires in ${batch.daysUntilExpiry} day(s) — ${new Date(batch.expiration_date).toLocaleDateString()}`
-                      : batch.expiration_date
-                      ? `Expires ${new Date(batch.expiration_date).toLocaleDateString()}`
+                          : batch.daysUntilExpiry !== null && batch.daysUntilExpiry !== undefined
+                           ? `Expires in ${batch.daysUntilExpiry} day(s) — ${new Date(batch.expiration_date).toLocaleDateString()}`
+                           : `Expires ${new Date(batch.expiration_date).toLocaleDateString()}`
                       : "No expiration date"}
                   </p>
-                  {expiresToday && onQuickDispose && (
+                  {canDisposeNow && onQuickDispose && (
                     <Button type="button" variant="danger" size="sm" className="mt-3" onClick={() => onQuickDispose(batch)}>
                       Dispose Now
                     </Button>
@@ -277,7 +299,10 @@ export default function BatchManagement({
             <Button variant={showExpiringOnly ? "default" : "outline"} onClick={toggleExpiringOnly}>
               Expiring within 7 days
             </Button>
-            <Button onClick={() => setAddOpen(true)}>
+            <Button onClick={() => {
+              setSubmissionNotice(null);
+              setAddOpen(true);
+            }}>
               <PackagePlus className="mr-2 h-4 w-4" />
               Receive Batch
             </Button>
@@ -305,16 +330,19 @@ export default function BatchManagement({
                 </TableHeader>
                 <TableBody>
                   {sortedBatches.map((batch) => {
-                    const expiresToday = isExpiryToday(batch.expiration_date, batch.daysUntilExpiry);
+                    const expired = isExpired(batch);
+                    const expiresToday = isExpiryToday(batch);
+                    const expiredOrToday = expired || expiresToday;
+                    const canDisposeNow = expiredOrToday && Number(batch.remaining_quantity) > 0;
                     return (
-                      <TableRow key={batch.id} className={expiresToday ? "bg-red-50/80" : undefined}>
+                      <TableRow key={batch.id} className={expiredOrToday ? "bg-red-50/80" : undefined}>
                         <TableCell className="font-medium">{batch.raw_material.name}</TableCell>
                         <TableCell>{batch.batch_number}</TableCell>
                         <TableCell>
                           {Number(batch.remaining_quantity).toLocaleString()} / {Number(batch.quantity).toLocaleString()} {batch.raw_material.unit}
                         </TableCell>
                         <TableCell>{new Date(batch.received_at).toLocaleDateString()}</TableCell>
-                        <TableCell className={expiresToday ? "font-semibold text-red-700" : undefined}>
+                        <TableCell className={expiredOrToday ? "font-semibold text-red-700" : undefined}>
                           {batch.expiration_date ? new Date(batch.expiration_date).toLocaleDateString() : "—"}
                         </TableCell>
                         <TableCell>
@@ -323,7 +351,7 @@ export default function BatchManagement({
                           </span>
                         </TableCell>
                         <TableCell>
-                          {expiresToday && onQuickDispose ? (
+                          {canDisposeNow && onQuickDispose ? (
                             <Button type="button" variant="danger" size="sm" onClick={() => onQuickDispose(batch)}>
                               Dispose Now
                             </Button>
@@ -340,6 +368,19 @@ export default function BatchManagement({
           )}
         </CardContent>
       </Card>
+
+      {submissionNotice && (
+        <div
+          className={`batch-submission-feedback is-${submissionNotice.type}`}
+          role={submissionNotice.type === "error" ? "alert" : "status"}
+          aria-live={submissionNotice.type === "error" ? "assertive" : "polite"}
+        >
+          {submissionNotice.type === "success" && <CheckCircle2 aria-hidden="true" />}
+          {submissionNotice.type === "warning" && <TriangleAlert aria-hidden="true" />}
+          {submissionNotice.type === "error" && <AlertCircle aria-hidden="true" />}
+          <span>{submissionNotice.message}</span>
+        </div>
+      )}
 
       <Dialog open={addOpen} title="Receive New Batch" onClose={() => setAddOpen(false)}>
         <form className="grid gap-4" onSubmit={handleSubmit}>
@@ -419,10 +460,18 @@ export default function BatchManagement({
             <Button type="button" variant="outline" onClick={() => setAddOpen(false)}>
               Cancel
             </Button>
-            <Button disabled={createBatchMutation.isPending} type="submit">
-              {createBatchMutation.isPending ? "Saving..." : "Receive Batch"}
+            <Button className="batch-submit-button" disabled={createBatchMutation.isPending} type="submit">
+              {createBatchMutation.isPending
+                ? <><LoaderCircle aria-hidden="true" className="batch-submit-spinner" /> Receiving batch…</>
+                : <><PackagePlus aria-hidden="true" /> Receive Batch</>}
             </Button>
           </div>
+          {createBatchMutation.isPending && (
+            <div className="batch-submission-feedback is-pending" role="status" aria-live="polite">
+              <LoaderCircle aria-hidden="true" className="batch-submit-spinner" />
+              <span>Saving the batch and updating inventory. This may take a little while.</span>
+            </div>
+          )}
         </form>
       </Dialog>
     </div>

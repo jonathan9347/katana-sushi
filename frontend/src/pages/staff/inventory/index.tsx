@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import { ClipboardList, Package, ReceiptText } from "lucide-react";
-import SectionNav, { SectionNavTab } from "../../../components/layout/SectionNav";
+import { SectionNavTab } from "../../../components/layout/SectionNav";
 import BatchManagement from "./BatchManagement";
 import InventoryMovements from "./InventoryMovements";
 import InventoryReservations from "./InventoryReservations";
@@ -10,15 +10,16 @@ import SellingProductsList from "./SellingProductsList";
 import WasteDisposal from "./WasteDisposal";
 import YieldEstimator from "./YieldEstimator";
 import { MaterialBatch, StaffRole } from "./types";
+import "./InventoryMaterials.css";
 
 type InventoryTab = "stock" | "reservations" | "movements";
 type StockView = "materials" | "batches" | "waste" | "menu-products" | "yield";
 type MaterialsStockFilter = "all" | "issues" | "low" | "negative" | "expiring";
 
 const tabs: Array<SectionNavTab<InventoryTab>> = [
-  { id: "stock", label: "Stock", icon: <Package className="h-4 w-4" /> },
-  { id: "reservations", label: "Reservations", icon: <ClipboardList className="h-4 w-4" /> },
-  { id: "movements", label: "Movements", icon: <ReceiptText className="h-4 w-4" /> }
+  { id: "stock", label: "Stock", icon: <Package aria-hidden="true" className="h-4 w-4" /> },
+  { id: "reservations", label: "Reservations", icon: <ClipboardList aria-hidden="true" className="h-4 w-4" /> },
+  { id: "movements", label: "Movements", icon: <ReceiptText aria-hidden="true" className="h-4 w-4" /> }
 ];
 
 function getStoredRole(): StaffRole {
@@ -70,46 +71,62 @@ export default function InventoryPage({ readOnly = false }: { readOnly?: boolean
   }
 
   return (
-    <main className="min-h-screen bg-slate-100 px-4 py-6 lg:pl-4 lg:pr-8">
-      <div className="grid w-full gap-5">
-        <div className="flex flex-col gap-2 md:flex-row md:items-end md:justify-between">
+    <main className="inventory-page min-h-screen px-4 py-5 pb-24 md:px-6 md:py-6 md:pb-6">
+      <div className="inventory-page-content grid w-full gap-5">
+        <header className="inventory-page-header flex flex-wrap items-start justify-between gap-3">
           <div>
-            <p className="text-sm font-medium uppercase text-red-700">Inventory</p>
-            <h1 className="text-3xl font-semibold text-slate-950">Inventory Management</h1>
+            <h1 className="text-2xl font-semibold">Inventory</h1>
+            <p className="mt-1 text-sm">Track what’s in stock, what’s running low, and what needs reordering.</p>
           </div>
-          <p className="text-sm text-slate-500">Signed in as {role.replace("_", " ")}</p>
-        </div>
+          <span className="inventory-role-pill">Signed in as {role.replace("_", " ")}</span>
+        </header>
 
-        <section className="grid min-w-0 gap-4">
-          <SectionNav activeTab={activeTab} tabs={visibleTabs} onTabChange={setActiveTab} />
+        <nav className="inventory-primary-nav" aria-label="Section navigation">
+          {visibleTabs.map((tab) => (
+            <button
+              key={tab.id}
+              type="button"
+              aria-pressed={activeTab === tab.id}
+              className={`inventory-primary-tab ${activeTab === tab.id ? "is-active bg-red-700" : ""}`}
+              onClick={() => setActiveTab(tab.id)}
+            >
+              {tab.icon}
+              <span>{tab.label}</span>
+            </button>
+          ))}
+        </nav>
+
+        {activeTab === "stock" && !readOnly && (
+          <nav className="inventory-stock-nav" aria-label="Stock tools">
+            {([
+              ["materials", "Materials"],
+              ["batches", "Stock In"],
+              ["waste", "Waste disposal"],
+              ["menu-products", "Menu products"],
+              ["yield", "Yield estimator"]
+            ] as const).map(([view, label]) => (
+              <button
+                key={view}
+                type="button"
+                aria-current={stockView === view ? "page" : undefined}
+                className={`inventory-stock-tab ${stockView === view ? "is-active" : ""}`}
+                onClick={() => {
+                  setStockView(view);
+                  if (view !== "waste") {
+                    setWastePreload(null);
+                  }
+                }}
+              >
+                {label}
+              </button>
+            ))}
+          </nav>
+        )}
+
+        <section className="grid min-w-0">
           <div className="min-w-0">
             {activeTab === "stock" && (
               <div className="grid gap-4">
-                {!readOnly && (
-                  <div className="flex flex-wrap gap-2">
-                    {([
-                      ["materials", "Materials"],
-                      ["batches", "Stock In"],
-                      ["waste", "Waste Disposal"],
-                      ["menu-products", "Menu Products"],
-                      ["yield", "Yield Estimator"]
-                    ] as const).map(([view, label]) => (
-                      <button
-                        key={view}
-                        type="button"
-                        onClick={() => {
-                          setStockView(view);
-                          if (view !== "waste") {
-                            setWastePreload(null);
-                          }
-                        }}
-                        className={`rounded-md px-3 py-2 text-sm font-semibold ${stockView === view ? "bg-red-700 text-white" : "border border-slate-300 bg-white text-slate-700"}`}
-                      >
-                        {label}
-                      </button>
-                    ))}
-                  </div>
-                )}
                 {stockView === "materials" && (
                   <MaterialsList
                     role={role}

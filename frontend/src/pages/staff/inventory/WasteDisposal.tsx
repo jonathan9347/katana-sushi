@@ -1,12 +1,12 @@
 import { ChangeEvent, FormEvent, useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Trash2 } from "lucide-react";
+import axios from "axios";
+import { AlertCircle, CheckCircle2, LoaderCircle, Trash2, TriangleAlert } from "lucide-react";
 import { api } from "../../../lib/api";
 import { Button } from "../../../components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "../../../components/ui/card";
 import { Select } from "../../../components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../../../components/ui/table";
-import { useToast } from "../../../hooks/useToast";
 import { InventoryTransaction, MaterialBatch, RawMaterial } from "./types";
 
 type WasteForm = {
@@ -48,7 +48,10 @@ export default function WasteDisposal({
     quantity: initialForm?.quantity ? String(initialForm.quantity) : emptyWasteForm.quantity
   });
   const queryClient = useQueryClient();
-  const { toast } = useToast();
+  const [submissionNotice, setSubmissionNotice] = useState<{
+    type: "success" | "warning" | "error";
+    message: string;
+  } | null>(null);
 
   useEffect(() => {
     if (!initialForm) {
@@ -103,26 +106,33 @@ export default function WasteDisposal({
 
   const disposeMutation = useMutation({
     mutationFn: async () =>
-      api.post("/api/inventory/waste", {
+      api.post<{ warning?: string }>("/api/inventory/waste", {
         raw_material_id: wasteForm.raw_material_id,
         quantity: Number(wasteForm.quantity),
         reason: wasteForm.reason,
         notes: wasteForm.notes,
         batch_id: wasteForm.batch_id || undefined
-      }),
-    onSuccess: () => {
+      }, { timeout: 60000 }),
+    onSuccess: (response) => {
       setWasteForm(emptyWasteForm);
       onPreloadConsumed?.();
       queryClient.invalidateQueries({ queryKey: ["inventory"] });
       queryClient.invalidateQueries({ queryKey: ["analytics"] });
-      toast("Product disposed and inventory updated.");
+      setSubmissionNotice(response.data.warning
+        ? { type: "warning", message: `Waste recorded and stock updated. ${response.data.warning}` }
+        : { type: "success", message: "Waste recorded and stock updated." });
     },
     onError: (error: unknown) => {
-      const message =
-        error && typeof error === "object" && "response" in error
-          ? (error as { response?: { data?: { message?: string } } }).response?.data?.message
-          : undefined;
-      toast(message ?? "Unable to record disposal.");
+      const serverMessage = axios.isAxiosError<{ message?: string }>(error)
+        ? error.response?.data?.message
+        : undefined;
+      const timedOut = axios.isAxiosError(error) && (error.code === "ECONNABORTED" || error.code === "ETIMEDOUT");
+      setSubmissionNotice({
+        type: "error",
+        message: serverMessage ?? (timedOut
+          ? "The request timed out before the result was confirmed. Check Recent Waste & Disposal History before trying again."
+          : "We couldn't confirm the result. Check Recent Waste & Disposal History before trying again.")
+      });
     }
   });
 
@@ -136,10 +146,14 @@ export default function WasteDisposal({
         ...current,
         quantity: String(maxDisposalQuantity)
       }));
-      toast(`The selected batch only has ${maxDisposalQuantity} ${selectedMaterial?.unit ?? "units"} left.`);
+      setSubmissionNotice({
+        type: "error",
+        message: `The selected batch only has ${maxDisposalQuantity} ${selectedMaterial?.unit ?? "units"} left.`
+      });
       return;
     }
 
+    setSubmissionNotice(null);
     disposeMutation.mutate();
   }
 
@@ -250,9 +264,29 @@ export default function WasteDisposal({
               />
             </label>
 
-            <Button disabled={disposeMutation.isPending} type="submit" variant="danger">
-              {disposeMutation.isPending ? "Processing..." : "Record Disposal"}
+            <Button className="waste-submit-button" disabled={disposeMutation.isPending} type="submit" variant="danger">
+              {disposeMutation.isPending
+                ? <><LoaderCircle aria-hidden="true" className="waste-submit-spinner" /> Recording disposal…</>
+                : <><Trash2 aria-hidden="true" /> Record disposal</>}
             </Button>
+            {disposeMutation.isPending && (
+              <div className="waste-submission-feedback is-pending" role="status" aria-live="polite">
+                <LoaderCircle aria-hidden="true" className="waste-feedback-spinner" />
+                <span>Saving the disposal and updating inventory. This may take a little while.</span>
+              </div>
+            )}
+            {submissionNotice && (
+              <div
+                className={`waste-submission-feedback is-${submissionNotice.type}`}
+                role={submissionNotice.type === "error" ? "alert" : "status"}
+                aria-live={submissionNotice.type === "error" ? "assertive" : "polite"}
+              >
+                {submissionNotice.type === "success" && <CheckCircle2 aria-hidden="true" />}
+                {submissionNotice.type === "warning" && <TriangleAlert aria-hidden="true" />}
+                {submissionNotice.type === "error" && <AlertCircle aria-hidden="true" />}
+                <span>{submissionNotice.message}</span>
+              </div>
+            )}
           </form>
         </CardContent>
       </Card>

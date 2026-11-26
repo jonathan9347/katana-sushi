@@ -143,7 +143,6 @@ export default function PosOrderBuilder({
 }: Props) {
   const [menuSearch, setMenuSearch] = useState("");
   const [selectedCategory, setSelectedCategory] = useState("All");
-  const [menuDensity, setMenuDensity] = useState<"compact" | "photos">("compact");
   const [showAllUnlimitedMenuItems, setShowAllUnlimitedMenuItems] = useState(false);
   const [showActionSuccess, setShowActionSuccess] = useState(false);
   const normalizedSearch = menuSearch.trim().toLocaleLowerCase();
@@ -274,10 +273,6 @@ export default function PosOrderBuilder({
                     className="h-11 w-full rounded-md border border-slate-300 bg-white pl-9 pr-3 text-sm text-slate-900 outline-none placeholder:text-slate-400 focus:border-red-700 focus:ring-2 focus:ring-red-100"
                   />
                 </label>
-                <div className="pos-density-toggle" role="group" aria-label="Menu layout">
-                  <button type="button" aria-pressed={menuDensity === "compact"} onClick={() => setMenuDensity("compact")}>Compact</button>
-                  <button type="button" aria-pressed={menuDensity === "photos"} onClick={() => setMenuDensity("photos")}>Photos</button>
-                </div>
               </div>
             </div>
             {unlimitedMenuActive && (
@@ -322,7 +317,7 @@ export default function PosOrderBuilder({
                     : "No products are currently available."}
               </p>
             )}
-            <div className={`pos-menu-grid${menuDensity === "compact" ? " is-compact" : ""} grid gap-3`}>
+            <div className="pos-menu-grid grid gap-3">
               {visibleProducts.map((product) => {
                 const cartQuantity = items.filter((item) => item.product.id === product.id).reduce((sum, item) => sum + item.quantity, 0);
                 const availableStock = product.available_stock == null ? null : Math.floor(product.available_stock);

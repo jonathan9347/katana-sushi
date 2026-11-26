@@ -44,19 +44,19 @@ test("inventory has three primary tabs and keeps stock tools under Stock", async
 
   const navigation = page.getByRole("navigation", { name: "Section navigation" });
   await expect(navigation.getByRole("button")).toHaveCount(3);
-  await expect(navigation.getByRole("button", { name: "Stock" })).toHaveClass(/bg-red-700/);
+  await expect(navigation.getByRole("button", { name: "Stock" })).toHaveAttribute("aria-pressed", "true");
   await expect(navigation.getByRole("button", { name: "Reservations" })).toBeVisible();
   await expect(navigation.getByRole("button", { name: "Movements" })).toBeVisible();
   await expect(page.getByText("Overview", { exact: true })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Materials" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Stock In" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Waste Disposal" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Menu Products" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Yield Estimator" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Waste disposal" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Menu products" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Yield estimator" })).toBeVisible();
 
-  await page.getByRole("button", { name: "Menu Products" }).click();
+  await page.getByRole("button", { name: "Menu products" }).click();
   await expect(page.getByRole("heading", { name: "Menu Products" })).toBeVisible();
-  await page.getByRole("button", { name: "Yield Estimator" }).click();
+  await page.getByRole("button", { name: "Yield estimator" }).click();
   await expect(page.getByRole("heading", { name: "Yield Estimator" })).toBeVisible();
 });
 
@@ -108,13 +108,13 @@ test("Menu Products and Yield Estimator hide recipe confirmation labels", async 
   });
 
   await page.goto("/staff/inventory");
-  await page.getByRole("button", { name: "Menu Products" }).click();
+  await page.getByRole("button", { name: "Menu products" }).click();
   await page.getByRole("button", { name: "Edit Salmon Roll" }).click();
   await expect(page.getByRole("heading", { name: "Edit Salmon Roll" })).toBeVisible();
   await expect(page.getByText("recipe not confirmed", { exact: true })).toHaveCount(0);
 
   await page.getByRole("button", { name: "Close dialog" }).click();
-  await page.getByRole("button", { name: "Yield Estimator" }).click();
+  await page.getByRole("button", { name: "Yield estimator" }).click();
   await page.getByRole("button", { name: "Salmon Roll" }).click();
   await expect(page.getByRole("heading", { name: "Salmon Roll Recipe" })).toBeVisible();
   await expect(page.getByText("recipe not confirmed", { exact: true })).toHaveCount(0);
@@ -146,7 +146,8 @@ test("chef read-only inventory remains limited to Stock", async ({ page }) => {
   await expect(navigation.getByRole("button", { name: "Reservations" })).toHaveCount(0);
   await expect(navigation.getByRole("button", { name: "Movements" })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Materials" })).toHaveCount(0);
-  await expect(page.getByRole("heading", { name: "Raw Materials", exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Inventory", exact: true })).toBeVisible();
+  await expect(page.getByRole("searchbox", { name: "Search materials" })).toBeVisible();
 });
 
 test("inventory Reservations shows only Pickup and Catering entries", async ({ page }) => {
@@ -287,7 +288,7 @@ test("Stock Reserved column uses the Pickup and Catering quantity", async ({ pag
   await expect(page.getByText("Reserved shows Pickup and Catering holds only; Available continues to account for all active stock commitments.")).toHaveCount(0);
   const row = page.getByRole("row").filter({ hasText: "Inventory Fixture Rice" });
   await expect(row.getByRole("cell").nth(3)).toHaveText("5");
-  await expect(row.getByRole("cell").nth(4)).toHaveText("10");
+  await expect(row.getByRole("cell").nth(4)).toHaveText("10 g");
 });
 
 test("Waste Disposal records stock without asking for or sending a booking link", async ({ page }) => {
@@ -312,17 +313,21 @@ test("Waste Disposal records stock without asking for or sending a booking link"
   let submittedBody: Record<string, unknown> | undefined;
   await page.route("**/api/inventory/waste", async (route) => {
     submittedBody = route.request().postDataJSON() as Record<string, unknown>;
+    await new Promise((resolve) => setTimeout(resolve, 10_500));
     await route.fulfill({ json: { success: true } });
   });
 
   await page.goto("/staff/inventory");
-  await page.getByRole("button", { name: "Waste Disposal" }).click();
+  await page.getByRole("button", { name: "Waste disposal" }).click();
   await expect(page.getByText("Link to booking (optional)")).toHaveCount(0);
   await page.getByLabel("Material").selectOption("material-waste");
   await page.getByLabel("Quantity to dispose").fill("3");
   await page.getByLabel("Notes").fill("Expired stock");
-  await page.getByRole("button", { name: "Record Disposal" }).click();
+  await page.getByRole("button", { name: "Record disposal" }).click();
+  await expect(page.getByText("Saving the disposal and updating inventory. This may take a little while.")).toBeVisible();
+  await expect(page.getByRole("button", { name: /Recording disposal/ })).toBeDisabled();
 
+  await expect(page.getByRole("status").filter({ hasText: "Waste recorded and stock updated." })).toBeVisible({ timeout: 20_000 });
   await expect.poll(() => submittedBody).toMatchObject({
     raw_material_id: "material-waste",
     quantity: 3,
@@ -331,6 +336,140 @@ test("Waste Disposal records stock without asking for or sending a booking link"
   });
   expect(submittedBody).not.toHaveProperty("booking_type");
   expect(submittedBody).not.toHaveProperty("booking_reference");
+});
+
+test("Waste Disposal shows server errors without clearing the form", async ({ page }) => {
+  await setStaffRole(page, "admin");
+  await page.route("**/api/inventory/materials", async (route) => {
+    await route.fulfill({
+      json: {
+        materials: [{
+          id: "material-waste",
+          name: "Waste Fixture Rice",
+          category: "Raw Material",
+          unit: "g",
+          current_stock: 100,
+          available_quantity: 100,
+          reorder_level: 5,
+          cost_per_unit: 1
+        }]
+      }
+    });
+  });
+  await page.route("**/api/inventory/waste", async (route) => {
+    await route.fulfill({
+      status: 409,
+      json: { message: "The selected batch has insufficient remaining stock." }
+    });
+  });
+
+  await page.goto("/staff/inventory");
+  await page.getByRole("button", { name: "Waste disposal" }).click();
+  await page.getByLabel("Material").selectOption("material-waste");
+  await page.getByLabel("Quantity to dispose").fill("3");
+  await page.getByLabel("Notes").fill("Expired stock");
+  await page.getByRole("button", { name: "Record disposal" }).click();
+
+  await expect(page.getByRole("alert")).toHaveText(/The selected batch has insufficient remaining stock/);
+  await expect(page.getByLabel("Quantity to dispose")).toHaveValue("3");
+  await expect(page.getByLabel("Notes")).toHaveValue("Expired stock");
+});
+
+test("Batch receiving succeeds when the server responds after the old timeout", async ({ page }) => {
+  await setStaffRole(page, "admin");
+  await page.route("**/api/inventory/materials", async (route) => {
+    await route.fulfill({
+      json: {
+        materials: [{
+          id: "material-batch",
+          name: "Batch Fixture Rice",
+          category: "Raw Material",
+          unit: "g",
+          current_stock: 100,
+          available_quantity: 100,
+          reorder_level: 5,
+          cost_per_unit: 0.5
+        }]
+      }
+    });
+  });
+
+  let submittedBody: Record<string, unknown> | undefined;
+  await page.route("**/api/inventory/batches", async (route) => {
+    if (route.request().method() !== "POST") {
+      await route.fulfill({ json: { batches: [] } });
+      return;
+    }
+    submittedBody = route.request().postDataJSON() as Record<string, unknown>;
+    await new Promise((resolve) => setTimeout(resolve, 10_500));
+    await route.fulfill({ json: { batch: { id: "batch-1" }, material: {} } });
+  });
+  await page.route("**/api/inventory/batches/expiring*", async (route) => {
+    await route.fulfill({ json: { batches: [] } });
+  });
+
+  await page.goto("/staff/inventory");
+  await page.getByRole("button", { name: "Stock In" }).click();
+  await page.getByRole("button", { name: "Receive Batch" }).click();
+  await page.getByLabel("Material").selectOption("material-batch");
+  await page.getByLabel("Batch number").fill("BATCH-TEST-1");
+  await page.getByLabel("Quantity").fill("250");
+  await page.getByLabel("Expiration date").fill("2026-12-01");
+  await page.getByLabel("Cost per 100 g").fill("50");
+  await page.getByRole("button", { name: "Receive Batch" }).last().click();
+
+  await expect(page.getByText("Saving the batch and updating inventory. This may take a little while.")).toBeVisible();
+  await expect(page.getByRole("button", { name: /Receiving batch/ })).toBeDisabled();
+  await expect(page.getByRole("status").filter({ hasText: "Batch received and stock updated." })).toBeVisible({ timeout: 20_000 });
+  expect(submittedBody).toMatchObject({
+    raw_material_id: "material-batch",
+    batch_number: "BATCH-TEST-1",
+    quantity: 250
+  });
+});
+
+test("Batch receiving shows server errors and keeps the entered details", async ({ page }) => {
+  await setStaffRole(page, "admin");
+  await page.route("**/api/inventory/materials", async (route) => {
+    await route.fulfill({
+      json: {
+        materials: [{
+          id: "material-batch",
+          name: "Batch Fixture Rice",
+          category: "Raw Material",
+          unit: "g",
+          current_stock: 100,
+          available_quantity: 100,
+          reorder_level: 5,
+          cost_per_unit: 0.5
+        }]
+      }
+    });
+  });
+  await page.route("**/api/inventory/batches", async (route) => {
+    if (route.request().method() === "POST") {
+      await route.fulfill({ status: 409, json: { message: "That batch number already exists." } });
+      return;
+    }
+    await route.fulfill({ json: { batches: [] } });
+  });
+  await page.route("**/api/inventory/batches/expiring*", async (route) => {
+    await route.fulfill({ json: { batches: [] } });
+  });
+
+  await page.goto("/staff/inventory");
+  await page.getByRole("button", { name: "Stock In" }).click();
+  await page.getByRole("button", { name: "Receive Batch" }).click();
+  await page.getByLabel("Material").selectOption("material-batch");
+  await page.getByLabel("Batch number").fill("BATCH-TEST-1");
+  await page.getByLabel("Quantity").fill("250");
+  await page.getByLabel("Expiration date").fill("2026-12-01");
+  await page.getByLabel("Cost per 100 g").fill("50");
+  await page.getByRole("button", { name: "Receive Batch" }).last().click();
+
+  await expect(page.getByRole("alert")).toContainText("That batch number already exists.");
+  await expect(page.getByLabel("Batch number")).toHaveValue("BATCH-TEST-1");
+  await expect(page.getByLabel("Quantity")).toHaveValue("250");
 });
 
 test("Stock uses PAR level wording while retaining the reorder API field", async ({ page }) => {
@@ -355,15 +494,152 @@ test("Stock uses PAR level wording while retaining the reorder API field", async
   });
 
   await page.goto("/staff/inventory");
-  const stockFilter = page.getByRole("combobox", { name: "Filter materials by stock status" });
-  await expect(stockFilter.locator("option")).toContainText(["At or below PAR level"]);
-  await stockFilter.selectOption("low");
+  const stockFilters = page.getByRole("group", { name: "Filter materials by stock status" });
+  const lowFilter = stockFilters.getByRole("button", { name: /^Low/ });
+  await expect(page.getByText("Below par level", { exact: true })).toHaveCount(0);
+  await lowFilter.click();
+  await expect(page).toHaveURL(/filter=low/);
 
   const row = page.getByRole("row").filter({ hasText: "Inventory Fixture Rice" });
-  await expect(page.getByRole("columnheader", { name: "PAR Level" })).toBeVisible();
-  await expect(row.getByText("Below PAR level.")).toBeVisible();
+  await expect(page.getByRole("columnheader", { name: "Stock vs par" })).toBeVisible();
+  await expect(row.getByText("Below par")).toBeVisible();
 
-  await page.getByRole("button", { name: "Add New Material" }).click();
+  await page.getByRole("button", { name: "Add material" }).click();
   await expect(page.getByText("PAR Level (whole units)")).toBeVisible();
   await expect(page.getByText(/Reorder Level/i)).toHaveCount(0);
+});
+
+test("expired batches can be disposed from both expiry alerts and the batch list", async ({ page }) => {
+  await setStaffRole(page, "admin");
+  const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+  const expiredBatch = {
+    id: "batch-expired",
+    batch_number: "EXPIRED-001",
+    quantity: 50,
+    remaining_quantity: 12,
+    expiration_date: yesterday,
+    received_at: yesterday,
+    is_disposed: false,
+    daysUntilExpiry: -1,
+    expiryStatus: "expired",
+    raw_material: { id: "material-expired", name: "Expired Tuna", unit: "g", current_stock: 12 }
+  };
+  let expiringEndpointRequested = false;
+  await page.route("**/api/inventory/materials", async (route) => {
+    await route.fulfill({
+      json: {
+        materials: [{
+          id: "material-expired",
+          name: "Expired Tuna",
+          category: "Raw Material",
+          unit: "g",
+          current_stock: 12,
+          available_quantity: 12,
+          reorder_level: 5,
+          cost_per_unit: 1
+        }]
+      }
+    });
+  });
+  await page.route("**/api/inventory/batches*", async (route) => {
+    await route.fulfill({ json: { batches: [expiredBatch] } });
+  });
+  await page.route("**/api/inventory/batches/expiring*", async (route) => {
+    expiringEndpointRequested = true;
+    await route.fulfill({ json: { batches: [expiredBatch] } });
+  });
+
+  await page.goto("/staff/inventory");
+  await page.getByRole("button", { name: "Stock In" }).click();
+  await expect.poll(() => expiringEndpointRequested).toBe(true);
+  await expect(page.getByRole("heading", { name: "Expiration Alerts" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Dispose Now" })).toHaveCount(2);
+  await expect(page.getByText(/Expired —/)).toBeVisible();
+  await page.getByRole("button", { name: "Dispose Now" }).last().click();
+
+  await expect(page.getByRole("heading", { name: "Dispose / Waste Product" })).toBeVisible();
+  await expect(page.getByLabel("Material")).toHaveValue("material-expired");
+  await expect(page.getByLabel("Batch (optional — auto FEFO if not selected)")).toHaveValue("batch-expired");
+  await expect(page.getByLabel("Quantity to dispose")).toHaveValue("12");
+});
+
+test("materials search and status filters persist in the URL and clear together", async ({ page }) => {
+  await setStaffRole(page, "admin");
+  await page.route("**/api/inventory/materials", async (route) => {
+    await route.fulfill({
+      json: {
+        materials: [
+          {
+            id: "material-rice",
+            name: "Rice",
+            category: "Raw Material",
+            unit: "g",
+            current_stock: 900,
+            reserved_quantity: 0,
+            available_quantity: 300,
+            reorder_level: 500,
+            cost_per_unit: 0.65
+          },
+          {
+            id: "material-water",
+            name: "Bottled Water",
+            category: "Beverage",
+            unit: "bottle",
+            current_stock: 18,
+            reserved_quantity: 0,
+            available_quantity: 18,
+            reorder_level: 20,
+            cost_per_unit: 65
+          },
+          {
+            id: "material-tuna",
+            name: "Tuna",
+            category: "Raw Material",
+            unit: "g",
+            current_stock: 2500,
+            reserved_quantity: 0,
+            available_quantity: 2500,
+            reorder_level: 500,
+            cost_per_unit: 0.82
+          }
+        ]
+      }
+    });
+  });
+
+  await page.goto("/staff/inventory?search=rice&filter=low");
+
+  const search = page.getByRole("searchbox", { name: "Search materials" });
+  await expect(search).toHaveValue("rice");
+  const row = page.getByRole("row").filter({ hasText: "Rice" });
+  await expect(row).toBeVisible();
+  await expect(row).toContainText("₱65.00 / 100 g");
+  await expect(page.getByRole("row").filter({ hasText: "Tuna" })).toHaveCount(0);
+
+  await page.getByRole("button", { name: /^OK/ }).click();
+  await expect(page).toHaveURL(/filter=ok/);
+  await expect(page.getByText("No materials match your filters")).toBeVisible();
+
+  await page.getByRole("button", { name: "Clear filters" }).click();
+  await expect(page).toHaveURL(/filter=all/);
+  await expect(page).not.toHaveURL(/search=/);
+  await expect(page.getByRole("row").filter({ hasText: "Tuna" })).toBeVisible();
+  await expect(page.getByRole("row").filter({ hasText: "Bottled Water" })).toBeVisible();
+
+  const beveragesGroup = page.getByRole("button", { name: /Beverages/ });
+  await expect(beveragesGroup).toHaveAttribute("aria-expanded", "true");
+  await beveragesGroup.click();
+  await expect(page.getByRole("row").filter({ hasText: "Bottled Water" })).toHaveCount(0);
+  await beveragesGroup.click();
+
+  const onHandHeader = page.getByRole("columnheader", { name: "On hand" }).first();
+  await onHandHeader.getByRole("button").click();
+  await expect(onHandHeader).toHaveAttribute("aria-sort", "ascending");
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  const addMaterialButton = page.getByRole("button", { name: "Add material" });
+  const addButtonBox = await addMaterialButton.boundingBox();
+  expect(addButtonBox?.height).toBeGreaterThanOrEqual(44);
+  const tableScroller = page.locator(".materials-table-scroll").first();
+  await expect.poll(() => tableScroller.evaluate((element) => element.scrollWidth > element.clientWidth)).toBe(true);
 });

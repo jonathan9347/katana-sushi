@@ -1,13 +1,26 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ClipboardCheck, Edit, PackagePlus, Search, Trash2 } from "lucide-react";
+import {
+  ArrowDown,
+  ArrowUp,
+  ArrowUpDown,
+  CheckCircle2,
+  ChevronDown,
+  ChevronRight,
+  ClipboardCheck,
+  CircleAlert,
+  PackagePlus,
+  Search,
+  Trash2,
+  X
+} from "lucide-react";
+import { useSearchParams } from "react-router-dom";
 import { api } from "../../../lib/api";
 import { formatManilaDate, todayManilaDateKey } from "../../../lib/dateTime";
 import { Button } from "../../../components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "../../../components/ui/card";
+import { Card, CardContent } from "../../../components/ui/card";
 import { Dialog } from "../../../components/ui/dialog";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../../../components/ui/table";
-import { useToast } from "../../../hooks/useToast";
 import { MaterialBatch, RawMaterial, StaffRole } from "./types";
 
 type MaterialsListProps = {
@@ -35,7 +48,16 @@ type StockCountForm = {
 };
 
 type CategoryFilter = "all" | "Beverage" | "Raw Material";
-type StockFilter = "all" | "issues" | "low" | "negative" | "expiring";
+type StockFilter = "all" | "issues" | "low" | "negative" | "expiring" | "ok";
+type SortKey = "name" | "current_stock" | "stock_vs_par" | "reserved_quantity" | "available_quantity" | "cost_per_unit" | "status";
+type SortDirection = "asc" | "desc";
+type ToastMessage = { message: string; type: "success" | "error" };
+
+const stockFilters: StockFilter[] = ["all", "issues", "low", "negative", "expiring", "ok"];
+
+function isStockFilter(value: string | null): value is StockFilter {
+  return value !== null && stockFilters.includes(value as StockFilter);
+}
 
 const emptyStockCountForm: StockCountForm = {
   raw_material_id: "",
@@ -66,10 +88,10 @@ function costDisplayUnit(unit: string) {
 }
 
 function formatCostPerDisplayUnit(costPerBaseUnit: string | number, unit: string) {
-  return `PHP ${(Number(costPerBaseUnit) * costDisplayFactor(unit)).toLocaleString(undefined, {
+  return `₱${(Number(costPerBaseUnit) * costDisplayFactor(unit)).toLocaleString(undefined, {
     minimumFractionDigits: 2,
-    maximumFractionDigits: costDisplayFactor(unit) === 100 ? 6 : 8
-  })}/${costDisplayUnit(unit)}`;
+    maximumFractionDigits: 2
+  })} / ${costDisplayUnit(unit)}`;
 }
 
 function formFromMaterial(material: RawMaterial): MaterialForm {
@@ -82,10 +104,37 @@ function formFromMaterial(material: RawMaterial): MaterialForm {
   };
 }
 
+function getMaterialStatus(material: RawMaterial) {
+  const available = Number(material.available_quantity);
+  const isLowStock = available <= Number(material.reorder_level);
+  const batchMismatch = Boolean(material.batch_mismatch);
+  const expiring = Boolean(material.expiring_within_7_days);
+  const status = batchMismatch
+    ? "Inconsistent"
+    : available < 0
+      ? "Negative"
+      : expiring
+        ? "Expiring"
+        : isLowStock
+          ? "Low"
+          : "OK";
+
+  return {
+    available,
+    isLowStock,
+    batchMismatch,
+    expiring,
+    status,
+    hasIssue: batchMismatch || available < 0
+  };
+}
+
 export default function MaterialsList({ role, onNavigateStockView, onOpenReservations, initialStockFilter = "all" }: MaterialsListProps) {
-  const [search, setSearch] = useState("");
+  const [searchParams, setSearchParams] = useSearchParams();
+  const search = searchParams.get("search") ?? "";
+  const searchFilter = searchParams.get("filter");
+  const stockFilter = isStockFilter(searchFilter) ? searchFilter : initialStockFilter;
   const [categoryFilter, setCategoryFilter] = useState<CategoryFilter>("all");
-  const [stockFilter, setStockFilter] = useState<StockFilter>(initialStockFilter);
   const [addOpen, setAddOpen] = useState(false);
   const [editDialogOpen, setEditDialogOpen] = useState(false);
   const [editMaterial, setEditMaterial] = useState<RawMaterial | null>(null);
@@ -94,14 +143,39 @@ export default function MaterialsList({ role, onNavigateStockView, onOpenReserva
   const [materialForm, setMaterialForm] = useState<MaterialForm>(emptyMaterialForm);
   const [stockCountOpen, setStockCountOpen] = useState(false);
   const [stockCountForm, setStockCountForm] = useState<StockCountForm>(emptyStockCountForm);
+  const [sortState, setSortState] = useState<{ key: SortKey; direction: SortDirection }>({ key: "name", direction: "asc" });
+  const [collapsedGroups, setCollapsedGroups] = useState<Record<"Beverage" | "Raw Material", boolean>>({
+    Beverage: false,
+    "Raw Material": false
+  });
+  const [toastMessage, setToastMessage] = useState<ToastMessage | null>(null);
   const queryClient = useQueryClient();
-  const { toast } = useToast();
   const isAdmin = role === "admin";
   const canManageStock = role === "admin" || role === "inventory_manager";
 
+  function showToast(message: string, type: ToastMessage["type"]) {
+    setToastMessage({ message, type });
+  }
+
+  function updateListParams(values: { search?: string; stockFilter?: StockFilter }) {
+    setSearchParams((current) => {
+      const next = new URLSearchParams(current);
+      if (values.search !== undefined) {
+        if (values.search.trim()) next.set("search", values.search);
+        else next.delete("search");
+      }
+      if (values.stockFilter !== undefined) {
+        next.set("filter", values.stockFilter);
+      }
+      return next;
+    }, { replace: true });
+  }
+
   useEffect(() => {
-    setStockFilter(initialStockFilter);
-  }, [initialStockFilter]);
+    if (!toastMessage) return;
+    const timeout = window.setTimeout(() => setToastMessage(null), 5000);
+    return () => window.clearTimeout(timeout);
+  }, [toastMessage]);
 
   const materialsQuery = useQuery({
     queryKey: ["inventory", "materials"],
@@ -154,9 +228,9 @@ export default function MaterialsList({ role, onNavigateStockView, onOpenReserva
       setAddOpen(false);
       setMaterialForm(emptyMaterialForm);
       refreshInventoryQueries();
-      toast("Material added.");
+      showToast("Material added.", "success");
     },
-    onError: () => toast("Unable to add material.")
+    onError: () => showToast("Unable to add material.", "error")
   });
 
   const updateMaterialMutation = useMutation({
@@ -177,14 +251,14 @@ export default function MaterialsList({ role, onNavigateStockView, onOpenReserva
       setEditMaterial(null);
       setEditDialogOpen(false);
       refreshInventoryQueries();
-      toast("Material updated.");
+      showToast("Material updated.", "success");
     },
     onError: (error: unknown) => {
       const message =
         error && typeof error === "object" && "response" in error
           ? (error as { response?: { data?: { message?: string } } }).response?.data?.message
           : undefined;
-      toast(message ?? "Unable to update material.");
+      showToast(message ?? "Unable to update material.", "error");
     }
   });
 
@@ -199,9 +273,9 @@ export default function MaterialsList({ role, onNavigateStockView, onOpenReserva
     onSuccess: () => {
       setEditMaterial(null);
       refreshInventoryQueries();
-      toast("Material deleted.");
+      showToast("Material deleted.", "success");
     },
-    onError: () => toast("Unable to delete material.")
+    onError: () => showToast("Unable to delete material.", "error")
   });
 
   const stockCountMutation = useMutation({
@@ -222,37 +296,101 @@ export default function MaterialsList({ role, onNavigateStockView, onOpenReserva
       setStockCountOpen(false);
       setStockCountForm(emptyStockCountForm);
       refreshInventoryQueries();
-      toast(data.adjusted ? "Stock count recorded in inventory movements." : "Count matches the current on-hand quantity; no adjustment was needed.");
+      showToast(data.adjusted ? "Stock count recorded in inventory movements." : "Count matches the current on-hand quantity; no adjustment was needed.", "success");
     },
     onError: (error: unknown) => {
       const message =
         error && typeof error === "object" && "response" in error
           ? (error as { response?: { data?: { message?: string } } }).response?.data?.message
           : undefined;
-      toast(message ?? "Unable to record stock count.");
+      showToast(message ?? "Unable to record stock count.", "error");
     }
   });
 
+  const baseMaterials = materialsQuery.data ?? [];
+  const countMaterials = useMemo(() => baseMaterials.filter((material) => {
+    const matchesSearch = material.name.toLowerCase().includes(search.trim().toLowerCase());
+    const matchesCategory = categoryFilter === "all" || material.category === categoryFilter;
+    return matchesSearch && matchesCategory;
+  }), [baseMaterials, search, categoryFilter]);
+
   const filteredMaterials = useMemo(() => {
-    return (materialsQuery.data ?? []).filter((material) => {
-      const matchesSearch = material.name.toLowerCase().includes(search.toLowerCase());
-      const matchesCategory = categoryFilter === "all" || material.category === categoryFilter;
-      const available = Number(material.available_quantity);
-      const hasIssue = Boolean(material.batch_mismatch) || available < 0;
+    const matching = countMaterials.filter((material) => {
+      const { available, hasIssue, isLowStock, expiring, status } = getMaterialStatus(material);
       const matchesStock =
         stockFilter === "all" ||
         (stockFilter === "issues" && hasIssue) ||
-        (stockFilter === "low" && available <= Number(material.reorder_level)) ||
+        (stockFilter === "low" && isLowStock) ||
         (stockFilter === "negative" && available < 0) ||
-        (stockFilter === "expiring" && material.expiring_within_7_days);
-      return matchesSearch && matchesCategory && matchesStock;
+        (stockFilter === "expiring" && expiring) ||
+        (stockFilter === "ok" && status === "OK");
+      return matchesStock;
     });
-  }, [materialsQuery.data, search, categoryFilter, stockFilter]);
+    return matching.sort((left, right) => {
+      const leftStatus = getMaterialStatus(left).status;
+      const rightStatus = getMaterialStatus(right).status;
+      const leftValue = sortState.key === "name"
+        ? left.name.toLocaleLowerCase()
+        : sortState.key === "current_stock"
+          ? Number(left.current_stock)
+          : sortState.key === "stock_vs_par"
+            ? Number(left.reorder_level) > 0 ? Number(left.current_stock) / Number(left.reorder_level) : Number(left.current_stock)
+            : sortState.key === "reserved_quantity"
+              ? Number(left.reserved_quantity ?? 0)
+              : sortState.key === "available_quantity"
+                ? Number(left.available_quantity)
+                : sortState.key === "cost_per_unit"
+                  ? Number(left.cost_per_unit)
+                  : leftStatus.toLocaleLowerCase();
+      const rightValue = sortState.key === "name"
+        ? right.name.toLocaleLowerCase()
+        : sortState.key === "current_stock"
+          ? Number(right.current_stock)
+          : sortState.key === "stock_vs_par"
+            ? Number(right.reorder_level) > 0 ? Number(right.current_stock) / Number(right.reorder_level) : Number(right.current_stock)
+            : sortState.key === "reserved_quantity"
+              ? Number(right.reserved_quantity ?? 0)
+              : sortState.key === "available_quantity"
+                ? Number(right.available_quantity)
+                : sortState.key === "cost_per_unit"
+                  ? Number(right.cost_per_unit)
+                  : rightStatus.toLocaleLowerCase();
+      const comparison = typeof leftValue === "string" && typeof rightValue === "string"
+        ? leftValue.localeCompare(rightValue)
+        : Number(leftValue) - Number(rightValue);
+      return sortState.direction === "asc" ? comparison : -comparison;
+    });
+  }, [countMaterials, stockFilter, sortState]);
 
-  const materialGroups = [
-    { category: "Beverage" as const, materials: filteredMaterials.filter((material) => material.category === "Beverage") },
-    { category: "Raw Material" as const, materials: filteredMaterials.filter((material) => material.category !== "Beverage") }
-  ];
+  const materialGroups = useMemo(() => [
+    { category: "Beverage" as const, label: "Beverages", materials: filteredMaterials.filter((material) => material.category === "Beverage") },
+    { category: "Raw Material" as const, label: "Raw materials", materials: filteredMaterials.filter((material) => material.category !== "Beverage") }
+  ], [filteredMaterials]);
+  const countForFilter = (filter: StockFilter) => countMaterials.filter((material) => {
+    const { available, hasIssue, isLowStock, expiring, status } = getMaterialStatus(material);
+    return filter === "all" ||
+      (filter === "issues" && hasIssue) ||
+      (filter === "low" && isLowStock) ||
+      (filter === "negative" && available < 0) ||
+      (filter === "expiring" && expiring) ||
+      (filter === "ok" && status === "OK");
+  }).length;
+
+  function setStockFilter(filter: StockFilter) {
+    updateListParams({ stockFilter: filter });
+  }
+
+  function handleSort(key: SortKey) {
+    setSortState((current) => ({
+      key,
+      direction: current.key === key && current.direction === "asc" ? "desc" : "asc"
+    }));
+  }
+
+  function clearFilters() {
+    setCategoryFilter("all");
+    updateListParams({ search: "", stockFilter: "all" });
+  }
 
   function openAddModal() {
     setMaterialForm(emptyMaterialForm);
@@ -292,180 +430,280 @@ export default function MaterialsList({ role, onNavigateStockView, onOpenReserva
   const stockCountNeedsBatch =
     stockCountMaterial !== undefined &&
     Number(stockCountForm.physical_count) > Number(stockCountMaterial.current_stock);
+  const filterOptions: Array<{ id: StockFilter; label: string }> = [
+    { id: "all", label: "All" },
+    { id: "low", label: "Low" },
+    { id: "expiring", label: "Expiring" },
+    { id: "ok", label: "OK" },
+    { id: "issues", label: "Issues" },
+    { id: "negative", label: "Negative" }
+  ];
+  const renderSortHeader = (key: SortKey, label: string) => (
+    <TableHead
+      key={key}
+      scope="col"
+      aria-sort={sortState.key === key ? sortState.direction === "asc" ? "ascending" : "descending" : "none"}
+      className={key === "name" || key === "status" ? "" : "materials-numeric-heading"}
+    >
+      <button type="button" className="materials-sort-button" onClick={() => handleSort(key)}>
+        <span>{label}</span>
+        {sortState.key === key
+          ? sortState.direction === "asc" ? <ArrowUp aria-hidden="true" /> : <ArrowDown aria-hidden="true" />
+          : <ArrowUpDown aria-hidden="true" />}
+      </button>
+    </TableHead>
+  );
   return (
-    <Card>
-      <CardHeader className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-        <div>
-          <CardTitle>Raw Materials</CardTitle>
+    <div className="inventory-materials">
+      {toastMessage && (
+        <div className={`inventory-toast is-${toastMessage.type}`} role={toastMessage.type === "error" ? "alert" : "status"} aria-live={toastMessage.type === "error" ? "assertive" : "polite"}>
+          {toastMessage.type === "success" ? <CheckCircle2 aria-hidden="true" /> : <CircleAlert aria-hidden="true" />}
+          <p>{toastMessage.message}</p>
+          <button type="button" aria-label="Dismiss notification" onClick={() => setToastMessage(null)}><X aria-hidden="true" /></button>
         </div>
-        <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
-          <label className="relative block">
-            <Search className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
-            <input
-              className="h-10 w-full rounded-md border border-slate-300 pl-9 pr-3 text-sm outline-none focus:border-red-700 focus:ring-2 focus:ring-red-100 sm:w-72"
-              placeholder="Search materials"
-              value={search}
-              onChange={(event) => setSearch(event.target.value)}
-            />
-          </label>
-          <select
-            className="h-10 rounded-md border border-slate-300 px-3 text-sm"
-            value={categoryFilter}
-            onChange={(event) => setCategoryFilter(event.target.value as CategoryFilter)}
-            aria-label="Filter materials by category"
-          >
-            <option value="all">All categories</option>
-            <option value="Raw Material">Raw materials</option>
-            <option value="Beverage">Beverages</option>
-          </select>
-          <select
-            className="h-10 rounded-md border border-slate-300 px-3 text-sm"
-            value={stockFilter}
-            onChange={(event) => setStockFilter(event.target.value as StockFilter)}
-            aria-label="Filter materials by stock status"
-          >
-            <option value="all">All stock status</option>
-            <option value="issues">Inconsistent or negative</option>
-            <option value="low">At or below PAR level</option>
-            <option value="negative">Negative available</option>
-            <option value="expiring">Expiring within 7 days</option>
-          </select>
-          <div className="flex flex-wrap gap-2">
+      )}
+
+      <Card className="materials-card">
+        <div className="materials-toolbar">
+          <div className="materials-filter-row">
+            <label className="materials-search">
+              <span className="sr-only">Search materials</span>
+              <Search aria-hidden="true" />
+              <input
+                type="search"
+                placeholder="Search materials"
+                value={search}
+                onChange={(event) => updateListParams({ search: event.target.value })}
+              />
+            </label>
+            <label className="sr-only" htmlFor="materials-category">Filter materials by category</label>
+            <select
+              id="materials-category"
+              className="materials-category-select"
+              value={categoryFilter}
+              onChange={(event) => setCategoryFilter(event.target.value as CategoryFilter)}
+            >
+              <option value="all">All categories</option>
+              <option value="Raw Material">Raw materials</option>
+              <option value="Beverage">Beverages</option>
+            </select>
+            <div className="materials-filter-pills" role="group" aria-label="Filter materials by stock status">
+              {filterOptions.map((option) => (
+                <button
+                  key={option.id}
+                  type="button"
+                  aria-pressed={stockFilter === option.id}
+                  className={`materials-filter-pill ${stockFilter === option.id ? "is-active" : ""}`}
+                  onClick={() => setStockFilter(option.id)}
+                >
+                  {option.label}<span>{countForFilter(option.id)}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+          <div className="materials-actions">
+            {isAdmin && (
+              <Button type="button" className="inventory-control materials-add-button" onClick={openAddModal}>
+                Add material
+              </Button>
+            )}
             {canManageStock && (
               <>
-                <Button variant="outline" onClick={() => onNavigateStockView?.("batches")}>
-                  <PackagePlus className="mr-2 h-4 w-4" />
-                  Receive Stock
+                <Button type="button" variant="outline" className="inventory-control" onClick={() => onNavigateStockView?.("batches")}>
+                  <PackagePlus aria-hidden="true" />
+                  Receive stock
                 </Button>
-                <Button variant="outline" onClick={() => onNavigateStockView?.("waste")}>
-                  <Trash2 className="mr-2 h-4 w-4" />
-                  Record Waste
+                <Button type="button" variant="outline" className="inventory-control" onClick={() => onNavigateStockView?.("waste")}>
+                  <Trash2 aria-hidden="true" />
+                  Record waste
                 </Button>
                 <Button
+                  type="button"
                   variant="outline"
+                  className="inventory-control"
                   onClick={() => {
                     setStockCountForm(emptyStockCountForm);
                     setStockCountOpen(true);
                   }}
                 >
-                  <ClipboardCheck className="mr-2 h-4 w-4" />
-                  Stock Count
+                  <ClipboardCheck aria-hidden="true" />
+                  Stock count
                 </Button>
               </>
             )}
-            {isAdmin && <Button onClick={openAddModal}>Add New Material</Button>}
           </div>
         </div>
-      </CardHeader>
-      <CardContent>
-        {materialsQuery.isLoading && <p className="text-sm text-slate-500">Loading materials...</p>}
-        {materialsQuery.isError && <p className="text-sm text-red-700">Unable to load materials.</p>}
-        {!materialsQuery.isLoading && !materialsQuery.isError && (
-          <div className="grid gap-6">
-            {materialGroups.map((group) => (
-              <section key={group.category} className="grid gap-3">
-                <h3 className="text-sm font-semibold uppercase text-slate-600">{group.category}s ({group.materials.length})</h3>
-                {group.materials.length === 0 ? (
-                  <p className="rounded-md border border-dashed border-slate-300 p-4 text-sm text-slate-500">
-                    No {group.category.toLowerCase()} items found.
-                  </p>
-                ) : (
-                  <div className="overflow-x-auto">
-                    <Table>
-                      <TableHeader>
-                        <TableRow>
-                          <TableHead>Name</TableHead>
-                          <TableHead>Unit</TableHead>
-                          <TableHead>On hand</TableHead>
-                          <TableHead>Reserved</TableHead>
-                          <TableHead>Available</TableHead>
-                          <TableHead>PAR Level</TableHead>
-                          <TableHead>Cost per 100 g, 100 ml, or item</TableHead>
-                          <TableHead>Status</TableHead>
-                          <TableHead>Actions</TableHead>
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {group.materials.map((material) => {
-                          const reserved = Number(material.reserved_quantity);
-                          const available = Number(material.available_quantity);
-                          const isLowStock = available <= Number(material.reorder_level);
-                          const batchMismatch = material.batch_mismatch ?? false;
-                          const expiring = material.expiring_within_7_days ?? false;
-                          const rowClass = batchMismatch || available < 0
-                            ? "bg-red-50 text-red-950"
-                            : isLowStock || expiring
-                              ? "bg-amber-50 text-amber-950"
-                              : "";
-                          const status = batchMismatch
-                            ? "Inconsistent"
-                            : available < 0
-                              ? "Negative"
-                              : expiring
-                                ? "Expiring"
-                                : isLowStock
-                                  ? "Low"
-                                  : "OK";
-                          const statusClass = batchMismatch || available < 0
-                            ? "bg-red-100 text-red-800"
-                            : expiring || isLowStock
-                              ? "bg-amber-100 text-amber-800"
-                              : "bg-emerald-100 text-emerald-800";
 
-                          return (
-                            <TableRow key={material.id} className={rowClass}>
-                              <TableCell className="font-medium">
-                                <button type="button" className="text-left underline-offset-2 hover:underline" onClick={() => openDetails(material)}>
-                                  {material.name}
-                                </button>
-                              </TableCell>
-                              <TableCell>{material.unit}</TableCell>
-                              <TableCell>{Number(material.current_stock).toLocaleString()}</TableCell>
-                              <TableCell>
-                                {reserved > 0 ? (
-                                  <button
-                                    type="button"
-                                    className="rounded-full bg-amber-50 px-2 py-1 text-xs font-bold text-amber-700 underline"
-                                    onClick={() => {
-                                      openDetails(material);
-                                      setDetailsTab("reservations");
-                                    }}
-                                    aria-label={`Show bookings reserving ${material.name}`}
-                                  >
-                                    {reserved.toLocaleString()}
+        <CardContent className="materials-content">
+          {materialsQuery.isLoading && (
+            <div className="materials-skeleton" aria-busy="true">
+              <span className="sr-only" role="status">Loading materials...</span>
+              {Array.from({ length: 6 }, (_, index) => (
+                <div key={index} className="materials-skeleton-row" aria-hidden="true">
+                  {Array.from({ length: 8 }, (_, cell) => <span key={cell} />)}
+                </div>
+              ))}
+            </div>
+          )}
+
+          {materialsQuery.isError && (
+            <div className="materials-error-state" role="alert">
+              <CircleAlert aria-hidden="true" />
+              <p>Unable to load materials.</p>
+              <Button type="button" variant="outline" className="inventory-control" onClick={() => void materialsQuery.refetch()}>
+                Try again
+              </Button>
+            </div>
+          )}
+
+          {!materialsQuery.isLoading && !materialsQuery.isError && filteredMaterials.length === 0 && (
+            <div className="materials-empty-state">
+              <div className="materials-empty-icon"><Search aria-hidden="true" /></div>
+              <h3>No materials match your filters</h3>
+              <p>Try a different search or clear the selected filters.</p>
+              <Button type="button" variant="outline" className="inventory-control" onClick={clearFilters}>
+                Clear filters
+              </Button>
+            </div>
+          )}
+
+          {!materialsQuery.isLoading && !materialsQuery.isError && filteredMaterials.length > 0 && (
+            <div className="materials-groups">
+              {materialGroups.filter((group) => group.materials.length > 0).map((group) => (
+                <section key={group.category} className="materials-group">
+                  <button
+                    type="button"
+                    className="materials-group-heading"
+                    aria-expanded={!collapsedGroups[group.category]}
+                    onClick={() => setCollapsedGroups((current) => ({
+                      ...current,
+                      [group.category]: !current[group.category]
+                    }))}
+                  >
+                    {collapsedGroups[group.category]
+                      ? <ChevronRight aria-hidden="true" />
+                      : <ChevronDown aria-hidden="true" />}
+                    <span>{group.label}</span>
+                    <span className="materials-group-count">{group.materials.length} {group.materials.length === 1 ? "item" : "items"}</span>
+                  </button>
+
+                  {!collapsedGroups[group.category] && (
+                    <div className="materials-table-scroll">
+                      <Table className="materials-table">
+                        <caption className="sr-only">{group.label} inventory stock</caption>
+                        <TableHeader className="materials-table-header">
+                          <TableRow>
+                            {renderSortHeader("name", "Item")}
+                            {renderSortHeader("current_stock", "On hand")}
+                            {renderSortHeader("stock_vs_par", "Stock vs par")}
+                            {renderSortHeader("reserved_quantity", "Reserved")}
+                            {renderSortHeader("available_quantity", "Available")}
+                            {renderSortHeader("cost_per_unit", "Cost")}
+                            {renderSortHeader("status", "Status")}
+                            <TableHead scope="col">Actions</TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {group.materials.map((material) => {
+                            const reserved = Number(material.reserved_quantity ?? 0);
+                            const currentStock = Number(material.current_stock);
+                            const par = Number(material.reorder_level);
+                            const { available, isLowStock, batchMismatch, expiring, status } = getMaterialStatus(material);
+                            const statusTone = status === "Expiring"
+                              ? "is-expiring"
+                              : status === "OK"
+                                ? "is-ok"
+                                : "is-low";
+                            const progressMax = Math.max(par * 3, 0);
+                            const progressValue = progressMax > 0
+                              ? Math.max(0, Math.min(100, (currentStock / progressMax) * 100))
+                              : currentStock > 0 ? 100 : 0;
+                            const progressAriaMax = progressMax > 0 ? progressMax : 1;
+                            const progressAriaValue = Math.max(0, Math.min(progressAriaMax, currentStock));
+
+                            return (
+                              <TableRow key={material.id} className="materials-data-row">
+                                <TableCell className="materials-item-cell">
+                                  <button type="button" className="materials-item-link" onClick={() => openDetails(material)}>
+                                    {material.name}
                                   </button>
-                                ) : <span className="text-slate-500">0</span>}
-                              </TableCell>
-                              <TableCell className={available <= Number(material.reorder_level) ? "font-bold text-red-700" : ""}>
-                                {available.toLocaleString()}
-                                {batchMismatch && <p className="mt-1 text-xs font-semibold">Batch total does not match on hand.</p>}
-                                {available < 0 && <p className="mt-1 text-xs font-semibold">Short by {Math.abs(available).toLocaleString()} {material.unit}.</p>}
-                                {!batchMismatch && available >= 0 && isLowStock && <p className="mt-1 text-xs font-semibold">Below PAR level.</p>}
-                              </TableCell>
-                              <TableCell>{Number(material.reorder_level).toLocaleString()}</TableCell>
-                              <TableCell>{formatCostPerDisplayUnit(material.cost_per_unit, material.unit)}</TableCell>
-                              <TableCell><span className={`rounded-full px-2 py-1 text-xs font-semibold ${statusClass}`}>{status}</span></TableCell>
-                              <TableCell>
-                                {isAdmin && (
-                                  <Button size="sm" variant="ghost" onClick={() => openEditModal(material)}>
-                                    <Edit className="h-4 w-4" />
-                                  </Button>
-                                )}
-                              </TableCell>
-                            </TableRow>
-                          );
-                        })}
-                      </TableBody>
-                    </Table>
-                  </div>
-                )}
-              </section>
-            ))}
-          </div>
-        )}
-      </CardContent>
+                                </TableCell>
+                                <TableCell className="materials-numeric-cell">
+                                  <span>{currentStock.toLocaleString()}</span>
+                                  <span className="materials-unit">{material.unit}</span>
+                                </TableCell>
+                                <TableCell>
+                                  <div
+                                    className={`materials-progress ${statusTone}`}
+                                    role="progressbar"
+                                    aria-label={`${material.name} stock against par`}
+                                    aria-valuemin={0}
+                                    aria-valuemax={progressAriaMax}
+                                    aria-valuenow={progressAriaValue}
+                                    aria-valuetext={`${currentStock.toLocaleString()} ${material.unit}; Par ${par.toLocaleString()} ${material.unit}`}
+                                  >
+                                    <span className="materials-progress-fill" style={{ width: `${progressValue}%` }} />
+                                    {par > 0 && <span className="materials-progress-marker" aria-hidden="true" />}
+                                  </div>
+                                  <div className="materials-progress-caption">
+                                    <span>Par {par.toLocaleString()} {material.unit}</span>
+                                    {isLowStock && <span className="materials-below-par">Below par</span>}
+                                    {batchMismatch && <span className="materials-row-note">Batch mismatch</span>}
+                                    {available < 0 && <span className="materials-row-note">Short by {Math.abs(available).toLocaleString()}</span>}
+                                    {expiring && <span className="sr-only">Expiring within 7 days</span>}
+                                  </div>
+                                </TableCell>
+                                <TableCell className="materials-numeric-cell">
+                                  {reserved > 0 ? (
+                                    <button
+                                      type="button"
+                                      className="materials-reserved-link"
+                                      onClick={() => {
+                                        openDetails(material);
+                                        setDetailsTab("reservations");
+                                      }}
+                                      aria-label={`Show bookings reserving ${material.name}`}
+                                    >
+                                      {reserved.toLocaleString()}
+                                    </button>
+                                  ) : <span className="materials-zero">{reserved.toLocaleString()}</span>}
+                                </TableCell>
+                                <TableCell className={`materials-numeric-cell ${available <= par ? "materials-low-value" : ""}`}>
+                                  {available.toLocaleString()} <span className="materials-unit">{material.unit}</span>
+                                </TableCell>
+                                <TableCell className="materials-cost-cell">
+                                  {formatCostPerDisplayUnit(material.cost_per_unit, material.unit)}
+                                </TableCell>
+                                <TableCell>
+                                  <span className={`materials-status ${statusTone}`}>{status}</span>
+                                </TableCell>
+                                <TableCell>
+                                  {isAdmin && (
+                                    <Button
+                                      type="button"
+                                      variant="outline"
+                                      className="inventory-control materials-edit-button"
+                                      onClick={() => openEditModal(material)}
+                                    >
+                                      Edit
+                                    </Button>
+                                  )}
+                                </TableCell>
+                              </TableRow>
+                            );
+                          })}
+                        </TableBody>
+                      </Table>
+                    </div>
+                  )}
+                </section>
+              ))}
+            </div>
+          )}
+        </CardContent>
+      </Card>
 
-      <Dialog open={addOpen} title="Add New Material" onClose={() => setAddOpen(false)}>
+      <Dialog open={addOpen} title="Add material" onClose={() => setAddOpen(false)}>
         <MaterialFields
           form={materialForm}
           pending={createMaterialMutation.isPending}
@@ -670,7 +908,7 @@ export default function MaterialsList({ role, onNavigateStockView, onOpenReserva
           </Button>
         </form>
       </Dialog>
-    </Card>
+    </div>
   );
 }
 
