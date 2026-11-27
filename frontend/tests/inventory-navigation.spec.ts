@@ -509,6 +509,59 @@ test("Stock uses PAR level wording while retaining the reorder API field", async
   await expect(page.getByText(/Reorder Level/i)).toHaveCount(0);
 });
 
+test("typing in material, stock count, and batch dialogs keeps focus in the active field", async ({ page }) => {
+  await setStaffRole(page, "admin");
+  await page.route("**/api/inventory/materials", async (route) => {
+    await route.fulfill({
+      json: {
+        materials: [{
+          id: "material-focus",
+          name: "Focus Fixture Rice",
+          category: "Raw Material",
+          unit: "g",
+          current_stock: 20,
+          available_quantity: 20,
+          reorder_level: 5,
+          cost_per_unit: 0.5
+        }]
+      }
+    });
+  });
+
+  await page.goto("/staff/inventory");
+
+  await page.getByRole("button", { name: "Add material" }).click();
+  const materialName = page.getByLabel("Name");
+  await materialName.click();
+  await materialName.pressSequentially("Focus Rice");
+  await expect(materialName).toBeFocused();
+  await expect(materialName).toHaveValue("Focus Rice");
+  await page.getByRole("button", { name: "Close dialog" }).click();
+
+  await page.getByRole("button", { name: "Stock count" }).click();
+  const physicalCount = page.getByLabel("Physical count");
+  await page.getByRole("dialog").getByLabel("Material").selectOption("material-focus");
+  await physicalCount.click();
+  await physicalCount.pressSequentially("25");
+  await expect(physicalCount).toBeFocused();
+  await expect(physicalCount).toHaveValue("25");
+  const countReason = page.getByLabel("Reason");
+  await countReason.click();
+  await countReason.pressSequentially("weekly count");
+  await expect(countReason).toBeFocused();
+  await expect(countReason).toHaveValue("weekly count");
+  await page.getByRole("button", { name: "Close dialog" }).click();
+
+  await page.getByRole("button", { name: "Stock In" }).click();
+  await page.getByRole("button", { name: "Receive Batch" }).click();
+  await page.getByRole("dialog").getByLabel("Material").selectOption("material-focus");
+  const batchNumber = page.getByLabel("Batch number");
+  await batchNumber.click();
+  await batchNumber.pressSequentially("BATCH-FOCUS-1");
+  await expect(batchNumber).toBeFocused();
+  await expect(batchNumber).toHaveValue("BATCH-FOCUS-1");
+});
+
 test("expired batches can be disposed from both expiry alerts and the batch list", async ({ page }) => {
   await setStaffRole(page, "admin");
   const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();

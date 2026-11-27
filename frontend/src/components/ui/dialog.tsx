@@ -15,6 +15,9 @@ export function Dialog({ open, title, children, onClose, panelClassName = "max-w
   const titleId = useId();
   const panelRef = useRef<HTMLDivElement>(null);
   const returnFocusRef = useRef<HTMLElement | null>(null);
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
+
   useEffect(() => {
     if (!open) return;
     returnFocusRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
@@ -26,12 +29,12 @@ export function Dialog({ open, title, children, onClose, panelClassName = "max-w
     function onKeyDown(event: KeyboardEvent) {
       if (event.key === "Escape") {
         event.preventDefault();
-        onClose();
+        onCloseRef.current();
         return;
       }
       if (event.key !== "Tab" || !panelRef.current) return;
       const focusable = Array.from(panelRef.current.querySelectorAll<HTMLElement>(
-        "button:not([disabled]), input:not([disabled]), [href], [tabindex]:not([tabindex='-1'])"
+        "button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [href], [tabindex]:not([tabindex='-1'])"
       ));
       if (!focusable.length) return;
       const first = focusable[0];
@@ -51,7 +54,7 @@ export function Dialog({ open, title, children, onClose, panelClassName = "max-w
       document.body.style.overflow = previousOverflow;
       returnFocusRef.current?.focus();
     };
-  }, [open, onClose]);
+  }, [open]);
   if (!open) {
     return null;
   }
