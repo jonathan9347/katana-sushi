@@ -2,6 +2,7 @@ import { useEffect, useRef } from "react";
 import type React from "react";
 import { X } from "lucide-react";
 import { Button } from "./button";
+import "../../styles/staff-redesign.css";
 
 export type BookingDetailsDrawerProps = {
   open: boolean;
@@ -59,7 +60,7 @@ export function BookingDetailsDrawer({
   if (!open) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex justify-end bg-slate-950/40" onMouseDown={(event) => {
+    <div className="staff-reservation-drawer-backdrop fixed inset-0 z-50 flex justify-end bg-slate-950/40" onMouseDown={(event) => {
       if (event.target === event.currentTarget) onClose();
     }}>
       <aside
@@ -70,19 +71,19 @@ export function BookingDetailsDrawer({
         tabIndex={-1}
         className="flex h-full w-full max-w-[460px] flex-col bg-white shadow-2xl outline-none motion-safe:animate-[booking-drawer-in_180ms_ease-out]"
       >
-        <header className="relative overflow-hidden bg-[#1c1214] px-5 py-5 text-white">
-          <div className="absolute -right-9 -top-12 h-[180px] w-[180px] rounded-full bg-[#a82e27]" aria-hidden="true" />
-          <div className="relative flex items-start justify-between gap-3">
+        <header className="staff-drawer-header relative overflow-hidden bg-[#1c1214] px-5 py-5 text-white">
+          <div className="staff-drawer-decoration absolute -right-9 -top-12 h-[180px] w-[180px] rounded-full bg-[#a82e27]" aria-hidden="true" />
+          <div className="staff-drawer-content relative flex items-start justify-between gap-3">
             <div>
-              <p className="text-[11px] font-bold uppercase tracking-[0.16em] text-red-300">{typeLabel}</p>
+              <p className="staff-drawer-eyebrow text-[11px] font-bold uppercase tracking-[0.16em] text-red-300">{typeLabel}</p>
               <h2 id="booking-drawer-title" className="mt-1 text-xl font-black">{title}</h2>
-              <p className="mt-1 text-sm text-white/75">{customerName}</p>
+              <p className="staff-drawer-customer mt-1 text-sm text-white/75">{customerName}</p>
             </div>
             <button type="button" aria-label="Close details" className="rounded-full bg-white/10 p-2 transition hover:rotate-90 hover:bg-white/20" onClick={onClose}>
               <X className="h-5 w-5" />
             </button>
           </div>
-          <span className="relative mt-4 inline-flex rounded-full bg-white/10 px-3 py-1 text-xs font-bold uppercase tracking-wide text-white">{status.replace(/_/g, " ")}</span>
+          <span className="staff-drawer-status relative mt-4 inline-flex rounded-full bg-white/10 px-3 py-1 text-xs font-bold uppercase tracking-wide text-white">{status.replace(/_/g, " ")}</span>
         </header>
         <div className="min-h-0 flex-1 overflow-y-auto p-5">
           {body}

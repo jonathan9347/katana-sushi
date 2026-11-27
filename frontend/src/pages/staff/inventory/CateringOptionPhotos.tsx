@@ -1,11 +1,12 @@
 import { ChangeEvent, FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import axios from "axios";
-import { ImagePlus, Link as LinkIcon, Save } from "lucide-react";
+import { ChevronRight, Eye, ImagePlus, Link as LinkIcon, LockKeyhole, Save } from "lucide-react";
+import { Link } from "react-router-dom";
 import { api, resolveImageUrl } from "../../../lib/api";
 import { useToast } from "../../../hooks/useToast";
 import { Button } from "../../../components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "../../../components/ui/card";
+import "../../../styles/staff-redesign.css";
 
 type CateringPackage = {
   id: string;
@@ -94,6 +95,7 @@ export default function CateringOptionPhotos() {
   const formsRef = useRef(forms);
   const queryClient = useQueryClient();
   const { toast } = useToast();
+  const [openOptionId, setOpenOptionId] = useState<string | null>(null);
 
   const packagesQuery = useQuery({
     queryKey: ["catering-packages"],
@@ -103,6 +105,9 @@ export default function CateringOptionPhotos() {
   useEffect(() => {
     if (!packagesQuery.data) {
       return;
+    }
+    if (!openOptionId) {
+      setOpenOptionId(packagesQuery.data[0]?.id ?? null);
     }
 
     setForms((current) => {
@@ -248,103 +253,91 @@ export default function CateringOptionPhotos() {
     savePhotoMutation.mutate(item);
   }
 
+  const maxPhotos = 3;
   return (
-    <Card>
-      <CardHeader className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
-        <div>
-          <p className="text-xs font-semibold uppercase tracking-[0.24em] text-red-700">Admin only</p>
-          <CardTitle className="mt-1">Catering Option Photos</CardTitle>
+    <main className="staff-catering-photos">
+      <article>
+        <Link to="/staff/reservations" className="mb-5 inline-flex items-center gap-1 text-sm font-semibold text-[#6a7185] hover:text-[#9b1d20]"><ChevronRight className="h-4 w-4 rotate-180" />Back to reservations</Link>
+        <div className="mb-7 flex flex-wrap items-start justify-between gap-5">
+          <div>
+            <span className="mb-3 inline-flex items-center gap-1.5 rounded-full bg-[#fbeaea] px-3 py-1.5 text-[12px] font-bold uppercase tracking-[.14em] text-[#9b1d20]"><LockKeyhole className="h-3.5 w-3.5" />Admin only</span>
+            <h1>Catering option photos</h1>
+            <p className="mt-2 text-sm text-[#6a7185]">Add up to three photos for each catering option.</p>
+          </div>
+          <span className="inline-flex h-11 items-center gap-2 rounded-full bg-white px-4 text-xs font-bold text-[#1c2030] shadow-[0_1px_2px_rgba(60,20,25,.04)]"><ImagePlus className="h-4 w-4 text-[#9b1d20]" />{maxPhotos} photos per option</span>
         </div>
-        <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-slate-600">
-          3 photos per option
-        </span>
-      </CardHeader>
-      <CardContent>
         {packagesQuery.isLoading && <p className="text-sm text-slate-500">Loading catering options...</p>}
         {packagesQuery.isError && <p className="text-sm text-red-700">Unable to load catering options.</p>}
-
-        <div className="grid gap-6">
-          {stations.map((station) => {
-            const stationPackages = packagesByStation.get(station.id) ?? [];
-
-            if (stationPackages.length === 0) {
-              return null;
-            }
-
-            return (
-              <section key={station.id} className="grid gap-3">
-                <div className="flex items-center justify-between border-b border-slate-200 pb-2">
-                  <h3 className="text-sm font-bold uppercase tracking-wide text-slate-900">{station.name}</h3>
-                  <span className="text-xs font-semibold text-slate-500">{stationPackages.length} option{stationPackages.length === 1 ? "" : "s"}</span>
-                </div>
-
-                <div className="grid gap-4">
-                  {stationPackages.map((item) => {
-                    const form = forms[item.id] ?? initialForm(item);
-                    const pending = savePhotoMutation.isPending && savePhotoMutation.variables?.id === item.id;
-
-                    return (
-                      <form
-                        key={item.id}
-                        className="grid gap-4 rounded-lg border border-slate-200 bg-slate-50 p-4 shadow-sm"
-                        onSubmit={(event) => submit(event, item)}
-                      >
-                        <div>
-                          <p className="break-words text-base font-black text-slate-950">{item.description ?? item.name}</p>
-                          <p className="mt-1 text-sm text-slate-600">{item.minPax}-{item.maxPax} pax - {priceLabel(item)}</p>
-                        </div>
-
-                        <div className="grid gap-3 xl:grid-cols-3">
-                          {[0, 1, 2].map((index) => (
-                            <div key={index} className="grid gap-3 rounded-lg border border-slate-200 bg-white p-3">
-                              <div className="aspect-[4/3] overflow-hidden rounded-md border border-slate-200 bg-slate-50">
-                                {form.previewUrls[index] ? (
-                                  <img src={form.previewUrls[index]} alt={`${item.description ?? item.name} photo ${index + 1}`} className="h-full w-full object-cover" />
-                                ) : (
-                                  <div className="flex h-full w-full flex-col items-center justify-center gap-2 text-slate-400">
-                                    <ImagePlus className="h-7 w-7" />
-                                    <span className="text-xs font-semibold uppercase tracking-wide">Photo {index + 1}</span>
+        {stations.map((station) => {
+          const stationPackages = packagesByStation.get(station.id) ?? [];
+          if (stationPackages.length === 0) return null;
+          return (
+            <section key={station.id} className="mb-7">
+              <div className="package-heading mb-3">
+                <h3 className="text-[13px] font-bold uppercase tracking-[.14em]">{station.name}</h3>
+                <span className="package-count px-3 py-1 text-xs font-bold">{stationPackages.length} option{stationPackages.length === 1 ? "" : "s"}</span>
+              </div>
+              {stationPackages.map((item) => {
+                const form = forms[item.id] ?? initialForm(item);
+                const pending = savePhotoMutation.isPending && savePhotoMutation.variables?.id === item.id;
+                const photoCount = form.imageUrls.filter(Boolean).length;
+                const isOpen = openOptionId === item.id;
+                return (
+                  <form key={item.id} className="staff-option-card" onSubmit={(event) => submit(event, item)}>
+                    <button type="button" className="staff-option-header" aria-expanded={isOpen} aria-controls={`photos-${item.id}`} onClick={() => setOpenOptionId(isOpen ? null : item.id)}>
+                      <div>
+                        <p className="text-[18px] font-black text-[#1c2030]">{item.description ?? item.name}</p>
+                        <p className="mt-1 text-sm text-[#6a7185]">{item.minPax}-{item.maxPax} pax · {priceLabel(item)}</p>
+                      </div>
+                      <div className="staff-option-thumbs flex -space-x-2">
+                        {form.previewUrls.filter(Boolean).slice(0,maxPhotos).map((url,index) => <img key={index} src={url} alt="" className="h-9 w-9 rounded-full border-2 border-white object-cover" />)}
+                      </div>
+                      <span className={`staff-option-complete inline-flex h-8 items-center rounded-full px-3 text-xs font-bold ${photoCount === maxPhotos ? "bg-[#e1f4ea] text-[#14633a]" : "bg-[#fdf1d9] text-[#6e4500]"}`}>{photoCount === maxPhotos ? "✓ " : ""}{photoCount} of {maxPhotos} photos</span>
+                      <ChevronRight className="staff-option-chevron h-5 w-5 justify-self-end" />
+                    </button>
+                    {isOpen && (
+                      <div id={`photos-${item.id}`} className="staff-photo-grid">
+                        {[0,1,2].map((index) => (
+                          <div key={index} className="staff-photo-card">
+                            <div className="staff-photo-preview">
+                              {form.previewUrls[index] ? (
+                                <>
+                                  <img src={form.previewUrls[index]} alt={`${item.description ?? item.name} photo ${index+1}`} />
+                                  <span className="staff-photo-tag">Photo {index+1}</span>
+                                  <div className="staff-photo-overlay">
+                                    <label className="cursor-pointer rounded-full bg-white px-3 py-2 text-xs font-bold text-[#1c2030]">Replace<input className="sr-only" type="file" accept="image/*" onChange={(event) => updateFile(item,index,event)} /></label>
+                                    <a href={form.previewUrls[index]} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 rounded-full bg-white/20 px-3 py-2 text-xs font-bold text-white"><Eye className="h-3.5 w-3.5" />Preview</a>
                                   </div>
-                                )}
-                              </div>
-
-                              <label className="grid gap-1 text-sm font-medium text-slate-700">
-                                <span className="inline-flex items-center gap-2">
-                                  <LinkIcon className="h-4 w-4 text-slate-400" />
-                                  Photo {index + 1} URL
-                                </span>
-                                <input
-                                  className="h-10 rounded-md border border-slate-300 bg-white px-3 text-sm outline-none focus:border-red-700 focus:ring-2 focus:ring-red-100"
-                                  placeholder="/images/catering/example.jpg"
-                                  value={form.imageUrls[index]}
-                                  onChange={(event) => updateUrl(item, index, event.target.value)}
-                                />
-                              </label>
-
-                              <label className="inline-flex h-10 cursor-pointer items-center justify-center gap-2 rounded-md border border-slate-300 bg-white px-3 text-sm font-semibold text-slate-800 transition hover:bg-slate-100">
-                                <ImagePlus className="h-4 w-4" />
-                                Upload
-                                <input className="sr-only" type="file" accept="image/*" onChange={(event) => updateFile(item, index, event)} />
-                              </label>
+                                </>
+                              ) : (
+                                <label className="flex h-full w-full cursor-pointer flex-col items-center justify-center gap-2 text-[#9b1d20]">
+                                  <span className="grid h-11 w-11 place-items-center rounded-full bg-[#fbeaea]"><ImagePlus className="h-6 w-6" /></span>
+                                  <strong>Add photo {index+1}</strong><span className="text-xs text-[#6a7185]">Click to upload</span>
+                                  <input className="sr-only" type="file" accept="image/*" onChange={(event) => updateFile(item,index,event)} />
+                                </label>
+                              )}
                             </div>
-                          ))}
-                        </div>
-
-                        <div className="flex justify-end">
-                          <Button className="gap-2" disabled={pending} type="submit">
-                            <Save className="h-4 w-4" />
-                            {pending ? "Saving..." : "Save photos"}
-                          </Button>
-                        </div>
-                      </form>
-                    );
-                  })}
-                </div>
-              </section>
-            );
-          })}
+                            <div className="staff-photo-url-row">
+                              <label><LinkIcon className="h-4 w-4" /><span className="sr-only">Photo {index+1} URL</span><input placeholder="/images/catering/example.jpg" value={form.imageUrls[index]} onChange={(event) => updateUrl(item,index,event.target.value)} /></label>
+                              <label className="flex h-[42px] cursor-pointer items-center justify-center rounded-[10px] border border-[#e6b9bb] bg-white text-xs font-bold text-[#9b1d20]">Upload<input className="sr-only" type="file" accept="image/*" onChange={(event) => updateFile(item,index,event)} /></label>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </form>
+                );
+              })}
+            </section>
+          );
+        })}
+        <div className="staff-save-bar">
+          <p className="text-sm text-[#6a7185]">Review your photo links, then save.</p>
+          <Button type="button" className="h-12 gap-2 bg-gradient-to-r from-[#b3202a] to-[#7f1219] px-6 text-white shadow-[0_8px_18px_rgba(155,29,32,.2)]" disabled={savePhotoMutation.isPending} onClick={() => { const item=(packagesQuery.data??[]).find((entry)=>entry.id===openOptionId); if(item) savePhotoMutation.mutate(item); }}>
+            <Save className="h-4 w-4" />{savePhotoMutation.isPending ? "Saving..." : "Save photos"}
+          </Button>
         </div>
-      </CardContent>
-    </Card>
+      </article>
+    </main>
   );
 }

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type React from "react";
 import { api } from "../../lib/api";
 import { getApiErrorMessage } from "../../lib/errors";
@@ -6,7 +6,8 @@ import { ReservationReceipt, type ReservationReceiptData } from "./ReservationRe
 import { Button } from "./button";
 import { Dialog } from "./dialog";
 import { Select } from "./select";
-import { manilaDateKey, todayManilaDateKey } from "../../lib/dateTime";
+import { formatManilaDate, manilaDateKey, todayManilaDateKey } from "../../lib/dateTime";
+import "../../styles/staff-redesign.css";
 
 type ModalAction = {
   label: string;
@@ -45,7 +46,18 @@ function methodLabel(method: string) {
   return "Cash";
 }
 
+const detailTabs = [
+  { id: "overview", label: "Overview" },
+  { id: "event", label: "Event & package" },
+  { id: "payment", label: "Payment" },
+  { id: "timeline", label: "Timeline" }
+] as const;
+type DetailTab = typeof detailTabs[number]["id"];
+
 export function ReservationDetailsModal({ open, title, reservation, actions, onPaymentRecorded, readOnly = false, onClose }: ReservationDetailsModalProps) {
+  const [activeTab, setActiveTab] = useState<DetailTab>("overview");
+  const bodyRef = useRef<HTMLDivElement>(null);
+  const tabButtonRefs = useRef<Array<HTMLButtonElement | null>>([]);
   const [activity, setActivity] = useState<NonNullable<ReservationReceiptData["activity"]>>([]);
   const [activityError, setActivityError] = useState<string | null>(null);
   const [paymentMethod, setPaymentMethod] = useState("cash");
@@ -75,6 +87,7 @@ export function ReservationDetailsModal({ open, title, reservation, actions, onP
 
   useEffect(() => {
     if (!open || !reservation) return;
+    setActiveTab("overview");
     setPaymentMethod("cash");
     setAmount(String(Number(reservation.remaining_balance ?? 0).toFixed(2)));
     setReferenceNumber("");
@@ -82,6 +95,10 @@ export function ReservationDetailsModal({ open, title, reservation, actions, onP
     setOverrideReason("");
     setError(null);
   }, [open, reservation]);
+
+  useEffect(() => {
+    bodyRef.current?.scrollTo({ top: 0 });
+  }, [activeTab]);
 
   useEffect(() => {
     if (!open || !reservation?.id) {
@@ -231,8 +248,12 @@ export function ReservationDetailsModal({ open, title, reservation, actions, onP
     { label: "Email", value: reservation.email ?? reservation.customer_email ?? "N/A" }
   ] : [];
 
+  const eventDate = reservation?.event_date || reservation?.date;
+  const eventDateLabel = eventDate
+    ? formatManilaDate(eventDate, { weekday: "short", month: "short", day: "numeric", year: "numeric" })
+    : "N/A";
   const eventRows = reservation ? [
-    { label: "Event date", value: reservation.event_date ?? reservation.date ?? "N/A" },
+    { label: "Event date", value: eventDate ? formatManilaDate(eventDate, { weekday: "long", month: "long", day: "numeric", year: "numeric" }) : "N/A" },
     { label: "Headcount", value: reservation.guests ?? reservation.party_size ?? reservation.headcount ?? 0 },
     { label: "Package", value: reservation.package_name ?? "N/A" },
     { label: "Event type", value: reservation.event_type ? (reservation.event_type_other ? `${reservation.event_type} · ${reservation.event_type_other}` : reservation.event_type) : "N/A" },
@@ -257,44 +278,85 @@ export function ReservationDetailsModal({ open, title, reservation, actions, onP
   const totalValue = Number(reservation?.total_price ?? reservation?.package_total ?? ((remainingBalance + totalPaid) || 0));
   const progressPercent = Math.min(100, Math.max(0, (totalPaid / Math.max(totalValue, 1)) * 100));
 
+  function handleTabKeyDown(event: React.KeyboardEvent<HTMLButtonElement>, currentIndex: number) {
+    let nextIndex: number;
+    if (event.key === "ArrowRight") {
+      nextIndex = (currentIndex + 1) % detailTabs.length;
+    } else if (event.key === "ArrowLeft") {
+      nextIndex = (currentIndex - 1 + detailTabs.length) % detailTabs.length;
+    } else if (event.key === "Home") {
+      nextIndex = 0;
+    } else if (event.key === "End") {
+      nextIndex = detailTabs.length - 1;
+    } else {
+      return;
+    }
+
+    event.preventDefault();
+    setActiveTab(detailTabs[nextIndex].id);
+    tabButtonRefs.current[nextIndex]?.focus();
+  }
+
   return (
-    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-[#1c121466] p-4 backdrop-blur-[2px]" onMouseDown={(event) => {
+    <div className="staff-details-backdrop fixed inset-0 z-[60] flex items-center justify-center bg-[#1c203073] p-4 backdrop-blur-[3px]" onMouseDown={(event) => {
       if (event.target === event.currentTarget) onClose();
     }}>
-      <div className="relative flex max-h-[94vh] w-full max-w-[1000px] flex-col overflow-hidden rounded-[12px] bg-white shadow-[0_30px_80px_rgba(0,0,0,0.6)] animate-[modal-pop_300ms_cubic-bezier(0.2,1,0.36,1)]">
-        <header className="relative overflow-visible bg-[#1c1214] px-[26px] pb-[22px] pt-[22px] text-white">
-          <div className="absolute -right-10 -top-12 z-0 h-[180px] w-[180px] rounded-full bg-[#a82e27]" aria-hidden="true" />
-          <button type="button" aria-label="Close reservation details" className="absolute right-4 top-4 z-20 rounded-full bg-white/10 p-2 text-xl font-bold transition hover:rotate-90 hover:bg-white/20" onClick={onClose}>×</button>
-          <div className="relative z-10">
-            <small className="text-[11px] font-black uppercase tracking-[0.14em] text-[#ff9b93]">RESERVATION DETAILS</small>
-            <div className="mt-4 flex flex-wrap items-end justify-between gap-[16px]">
-              <div className="min-w-0">
-                <h2 className="text-[24px] font-black leading-none text-white">{title}</h2>
-                <div className="mt-2 flex flex-wrap items-center gap-2">
-                  <p className="break-words text-[15px] text-white/80">{reservation?.customer_name ?? "Customer"}</p>
-                  <span className={`inline-flex rounded-full px-[12px] py-[5px] text-[12px] font-extrabold uppercase tracking-[0.03em] ${reservation ? (reservation.status?.toLowerCase() === "pending" || reservation.status?.toLowerCase() === "pending_approval" ? "bg-[#fff0d9] text-[#8a5200]" : reservation.status?.toLowerCase() === "confirmed" || reservation.status?.toLowerCase() === "approved" || reservation.status?.toLowerCase() === "seated" ? "bg-[#e3f1ea] text-[#1f6b49]" : reservation.status?.toLowerCase() === "declined" || reservation.status?.toLowerCase() === "cancelled" || reservation.status?.toLowerCase() === "rejected" ? "bg-[#fbe3e1] text-[#a82e27]" : "bg-[#ecebf1] text-[#7b6f72]") : "bg-[#ecebf1] text-[#7b6f72]"}`}>
-                    {(reservation?.status ?? reservation?.reservation_status ?? "N/A").replace(/_/g, " ")}
-                  </span>
-                </div>
+      <div role="dialog" aria-modal="true" aria-labelledby="reservation-details-title" className="staff-details-dialog relative flex w-full flex-col overflow-hidden bg-white shadow-[0_30px_80px_rgba(0,0,0,0.6)] animate-[modal-pop_300ms_cubic-bezier(0.2,1,0.36,1)]">
+        <header className="staff-details-header" style={{ backgroundColor: "#1C1416", color: "#FFFFFF" }}>
+          <div className="staff-details-decoration" aria-hidden="true" />
+          <button type="button" aria-label="Close reservation details" className="staff-details-close" onClick={onClose}>×</button>
+          <div className="staff-details-heading">
+            <div className="staff-details-title-block">
+              <small>RESERVATION DETAILS</small>
+              <h2 id="reservation-details-title">{title}</h2>
+              <div className="staff-details-customer-line">
+                <p>{reservation?.customer_name ?? "Customer"}</p>
+                <span className={`staff-details-status ${reservation ? (reservation.status?.toLowerCase() === "pending" || reservation.status?.toLowerCase() === "pending_approval" ? "is-pending" : reservation.status?.toLowerCase() === "confirmed" || reservation.status?.toLowerCase() === "approved" || reservation.status?.toLowerCase() === "seated" ? "is-approved" : reservation.status?.toLowerCase() === "declined" || reservation.status?.toLowerCase() === "cancelled" || reservation.status?.toLowerCase() === "rejected" ? "is-declined" : "is-other") : "is-other"}`}>
+                  {(reservation?.status ?? reservation?.reservation_status ?? "N/A").replace(/_/g, " ")}
+                </span>
               </div>
-              <div className={`ml-auto rounded-[10px] border border-white/20 px-[16px] py-[8px] text-right ${isFullyPaid ? "bg-emerald-500/15" : "bg-white/10"}`}>
-                <small className={`block text-[10.5px] font-bold uppercase tracking-[0.1em] ${isFullyPaid ? "text-emerald-100" : "text-[#d4c6c9]"}`}>{isFullyPaid ? "Paid in full" : "Remaining balance"}</small>
-                <span className="mt-1 block text-[22px] font-black text-white">{isFullyPaid ? "PAID IN FULL" : new Intl.NumberFormat("en-PH", { style: "currency", currency: "PHP" }).format(remainingBalance)}</span>
-              </div>
+            </div>
+            <div className="staff-balance-chip">
+              <small>{isFullyPaid ? "PAID IN FULL" : "REMAINING BALANCE"}</small>
+              <span>{isFullyPaid ? "PAID IN FULL" : new Intl.NumberFormat("en-PH", { style: "currency", currency: "PHP" }).format(remainingBalance)}</span>
             </div>
           </div>
         </header>
 
-        <div className="max-h-[calc(94vh-180px)] overflow-y-auto bg-[#f4f4f8] p-5 pb-8">
-          {activityError ? (
-            <p className="mb-4 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700" role="alert">
-              Booking details loaded, but activity history could not be loaded: {activityError}
-            </p>
-          ) : null}
-
-          <div className="grid gap-4 md:grid-cols-[1.1fr_1fr]">
-            <div className="space-y-4">
-              <section className="rounded-[10px] border border-[#eeecf2] bg-white p-[16px_20px]">
+        <div role="tablist" aria-label="Reservation details" className="staff-details-tabs">
+          {detailTabs.map((tab, index) => (
+            <button
+              key={tab.id}
+              ref={(element) => { tabButtonRefs.current[index] = element; }}
+              id={`reservation-tab-${tab.id}`}
+              type="button"
+              role="tab"
+              aria-selected={activeTab === tab.id}
+              aria-controls={`reservation-panel-${tab.id}`}
+              tabIndex={activeTab === tab.id ? 0 : -1}
+              onClick={() => setActiveTab(tab.id)}
+              onKeyDown={(event) => handleTabKeyDown(event, index)}
+            >
+              {tab.label}
+              {activeTab === tab.id && <span className="staff-details-tab-underline" />}
+            </button>
+          ))}
+        </div>
+        <div ref={bodyRef} className="staff-details-body">
+          {activeTab === "overview" && (
+            <div id="reservation-panel-overview" role="tabpanel" aria-labelledby="reservation-tab-overview" className="staff-details-tabpanel-grid staff-overview-grid">
+              <div className="staff-details-kpis">
+                <section className="staff-details-card">
+                  <span>Event date</span><strong>{eventDateLabel}</strong>
+                </section>
+                <section className="staff-details-card">
+                  <span>Guests</span><strong>{reservation?.guests ?? reservation?.party_size ?? reservation?.headcount ?? 0}</strong>
+                </section>
+                <section className="staff-details-card">
+                  <span>Total</span><strong>{new Intl.NumberFormat("en-PH", { style: "currency", currency: "PHP" }).format(totalValue)}</strong>
+                </section>
+              </div>
+              <section className="staff-details-card">
                 <h3 className="mb-3 text-[11.5px] font-black uppercase tracking-[0.14em] text-[#a82e27]">Booking Information</h3>
                 <dl className="space-y-2">
                   {detailRows.map((row) => (
@@ -305,34 +367,34 @@ export function ReservationDetailsModal({ open, title, reservation, actions, onP
                   ))}
                 </dl>
               </section>
-
-              <section className="rounded-[10px] border border-[#eeecf2] bg-white p-[16px_20px]">
+              <section className="staff-details-card">
                 <h3 className="mb-3 text-[11.5px] font-black uppercase tracking-[0.14em] text-[#a82e27]">Customer Details</h3>
                 <dl className="space-y-2">
                   {customerRows.map((row) => (
                     <div key={row.label} className="grid grid-cols-[120px_minmax(0,1fr)] gap-3 border-b border-[#f0eef3] py-2 last:border-b-0">
                       <dt className="text-[11px] font-bold uppercase tracking-[0.08em] text-[#7b6f72]">{row.label}</dt>
-                      <dd className="min-w-0 text-right text-sm font-bold text-[#1c1214] break-words">{row.value ?? "N/A"}</dd>
-                    </div>
-                  ))}
-                </dl>
-              </section>
-
-              <section className="rounded-[10px] border border-[#eeecf2] bg-white p-[16px_20px]">
-                <h3 className="mb-3 text-[11.5px] font-black uppercase tracking-[0.14em] text-[#a82e27]">Event Details</h3>
-                <dl className="space-y-2">
-                  {eventRows.map((row) => (
-                    <div key={row.label} className="grid grid-cols-[120px_minmax(0,1fr)] gap-3 border-b border-[#f0eef3] py-2 last:border-b-0">
-                      <dt className="text-[11px] font-bold uppercase tracking-[0.08em] text-[#7b6f72]">{row.label}</dt>
-                      <dd className="min-w-0 text-right text-sm font-bold text-[#1c1214] break-words">{row.value ?? "N/A"}</dd>
+                      <dd className="min-w-0 break-words text-right text-sm font-bold text-[#1c1214]">{row.value ?? "N/A"}</dd>
                     </div>
                   ))}
                 </dl>
               </section>
             </div>
+          )}
 
-            <div className="space-y-4">
-              <section className="rounded-[10px] border border-[#eeecf2] bg-white p-[16px_20px]">
+          {activeTab === "event" && (
+            <div id="reservation-panel-event" role="tabpanel" aria-labelledby="reservation-tab-event" className="staff-details-tabpanel-grid">
+              <section className="staff-details-card">
+                <h3 className="mb-3 text-[11.5px] font-black uppercase tracking-[0.14em] text-[#a82e27]">Event Details</h3>
+                <dl className="space-y-2">
+                  {eventRows.map((row) => (
+                    <div key={row.label} className="grid grid-cols-[120px_minmax(0,1fr)] gap-3 border-b border-[#f0eef3] py-2 last:border-b-0">
+                      <dt className="text-[11px] font-bold uppercase tracking-[0.08em] text-[#7b6f72]">{row.label}</dt>
+                      <dd className="min-w-0 break-words text-right text-sm font-bold text-[#1c1214]">{row.value ?? "N/A"}</dd>
+                    </div>
+                  ))}
+                </dl>
+              </section>
+              <section className="staff-details-card">
                 <h3 className="mb-3 text-[11.5px] font-black uppercase tracking-[0.14em] text-[#a82e27]">Package Details</h3>
                 <div className="space-y-3">
                   <div className="grid grid-cols-[120px_minmax(0,1fr)] gap-3 border-b border-[#f0eef3] py-1">
@@ -343,40 +405,40 @@ export function ReservationDetailsModal({ open, title, reservation, actions, onP
                     <p className="mb-2 text-[11px] font-bold uppercase tracking-[0.08em] text-[#7b6f72]">Included items</p>
                     {packageItems.length > 0 ? (
                       <div className="flex flex-wrap gap-2">
-                        {packageItems.map((item) => (
-                          <span key={item} className="rounded-[6px] bg-[#f4f4f8] px-[10px] py-[4px] text-[12.5px] font-semibold text-[#4a4350]">{item}</span>
-                        ))}
+                        {packageItems.map((item) => <span key={item} className="rounded-[6px] bg-[#f4f4f8] px-[10px] py-[4px] text-[12.5px] font-semibold text-[#4a4350]">{item}</span>)}
                       </div>
-                    ) : (
-                      <p className="text-sm text-[#7b6f72]">No package inclusions recorded.</p>
-                    )}
+                    ) : <p className="text-sm text-[#7b6f72]">No package inclusions recorded.</p>}
                   </div>
                   <div className="space-y-2 border-t border-dashed border-[#d8d3dc] pt-3">
-                    <div className="flex items-center justify-between gap-3 text-sm text-[#7b6f72]">
-                      <span>Subtotal</span>
-                      <strong className="text-[#1c1214]">{new Intl.NumberFormat("en-PH", { style: "currency", currency: "PHP" }).format(Number(reservation?.subtotal ?? reservation?.total_price ?? 0))}</strong>
-                    </div>
-                    <div className="flex items-center justify-between gap-3 text-sm text-[#7b6f72]">
-                      <span>Tax</span>
-                      <strong className="text-[#1c1214]">{new Intl.NumberFormat("en-PH", { style: "currency", currency: "PHP" }).format(Number(reservation?.tax ?? 0))}</strong>
-                    </div>
-                    <div className="mt-3 flex items-center justify-between gap-3 border-t border-[#1c1214] pt-2 text-[18px] font-black text-[#1c1214]">
-                      <span>Total</span>
-                      <span>{new Intl.NumberFormat("en-PH", { style: "currency", currency: "PHP" }).format(Number(reservation?.total_price ?? reservation?.subtotal ?? 0))}</span>
-                    </div>
+                    <div className="flex items-center justify-between gap-3 text-sm text-[#7b6f72]"><span>Subtotal</span><strong className="text-[#1c1214]">{new Intl.NumberFormat("en-PH", { style: "currency", currency: "PHP" }).format(Number(reservation?.subtotal ?? reservation?.total_price ?? 0))}</strong></div>
+                    <div className="flex items-center justify-between gap-3 text-sm text-[#7b6f72]"><span>Tax</span><strong className="text-[#1c1214]">{new Intl.NumberFormat("en-PH", { style: "currency", currency: "PHP" }).format(Number(reservation?.tax ?? 0))}</strong></div>
+                    <div className="mt-3 flex items-center justify-between gap-3 border-t border-[#1c1214] pt-2 text-[18px] font-black text-[#1c1214]"><span>Total</span><span>{new Intl.NumberFormat("en-PH", { style: "currency", currency: "PHP" }).format(Number(reservation?.total_price ?? reservation?.subtotal ?? 0))}</span></div>
                   </div>
                 </div>
               </section>
+              <section className="staff-details-card staff-details-full-width">
+                <h3 className="mb-3 text-[11.5px] font-black uppercase tracking-[0.14em] text-[#a82e27]">Ingredient locks</h3>
+                {reservation?.ingredient_locks && reservation.ingredient_locks.length > 0 ? (
+                  <div className="space-y-2">
+                    <span className={`inline-flex rounded-full px-[10px] py-[5px] text-[11px] font-black uppercase tracking-[0.03em] ${reservation.ingredient_locks.some((lock) => !lock.is_released) ? "bg-[#fff0d9] text-[#8a5200]" : "bg-[#e3f1ea] text-[#1f6b49]"}`}>{reservation.ingredient_locks.some((lock) => !lock.is_released) ? "Locked" : "Released"}</span>
+                    <ul className="grid gap-2 text-sm text-[#4a4350]">
+                      {reservation.ingredient_locks.map((lock, index) => <li key={lock.id ?? `${lock.raw_material?.name ?? "ingredient"}-${index}`} className="rounded-[6px] bg-[#f4f4f8] px-2 py-1">{lock.raw_material?.name ?? "Ingredient"}: {lock.reserved_quantity} {lock.unit}{lock.is_released ? " (released)" : ""}</li>)}
+                    </ul>
+                  </div>
+                ) : <p className="text-sm text-[#7b6f72]">No ingredient locks recorded.</p>}
+              </section>
+            </div>
+          )}
 
-              <section className="rounded-[10px] border border-[#eeecf2] bg-white p-[16px_20px]">
+          {activeTab === "payment" && (
+            <div id="reservation-panel-payment" role="tabpanel" aria-labelledby="reservation-tab-payment" className="staff-details-tabpanel-grid">
+              <section className="staff-details-card">
                 <h3 className="mb-3 text-[11.5px] font-black uppercase tracking-[0.14em] text-[#a82e27]">Payment Summary</h3>
                 <div className="flex items-center justify-between gap-2">
                   <span className={`inline-flex rounded-full px-[10px] py-[5px] text-[11px] font-black uppercase tracking-[0.03em] ${isFullyPaid ? "bg-[#e3f1ea] text-[#1f6b49]" : "bg-[#fff0d9] text-[#8a5200]"}`}>{paymentStatus}</span>
                   <span className="text-[11px] font-bold uppercase tracking-[0.08em] text-[#7b6f72]">Paid {Math.round(progressPercent)}%</span>
                 </div>
-                <div className="mt-3 h-[8px] overflow-hidden rounded-full bg-[#eadfe1]">
-                  <div className="h-full rounded-full bg-[#2f8a62] transition-all" style={{ width: `${progressPercent}%` }} />
-                </div>
+                <div className="mt-3 h-[8px] overflow-hidden rounded-full bg-[#eadfe1]"><div className="h-full rounded-full bg-[#2f8a62] transition-all" style={{ width: `${progressPercent}%` }} /></div>
                 <div className="mt-4 space-y-2 text-sm text-[#7b6f72]">
                   <div className="flex items-center justify-between gap-2"><span>Plan</span><strong className="text-[#1c1214]">{reservation?.payment_plan ?? "N/A"}</strong></div>
                   <div className="flex items-center justify-between gap-2"><span>Amount paid</span><strong className="text-[#1c1214]">{new Intl.NumberFormat("en-PH", { style: "currency", currency: "PHP" }).format(totalPaid)}</strong></div>
@@ -384,110 +446,74 @@ export function ReservationDetailsModal({ open, title, reservation, actions, onP
                 </div>
                 {paymentControls}
               </section>
-            </div>
-          </div>
-
-          <div className="mt-4 grid gap-4 md:grid-cols-2">
-            <section className="rounded-[10px] border border-[#eeecf2] bg-white p-[16px_20px]">
-              <h3 className="mb-3 text-[11.5px] font-black uppercase tracking-[0.14em] text-[#a82e27]">Payment history</h3>
-              {paymentHistory.length > 0 ? (
-                <div className="overflow-x-auto">
-                  <table className="w-full min-w-[420px] border-collapse text-left text-sm">
-                    <thead>
-                      <tr className="border-b border-[#f0eef3] text-[11px] font-black uppercase tracking-[0.08em] text-[#7b6f72]">
-                        <th className="pb-2 pr-3">Stage</th>
-                        <th className="pb-2 pr-3">Method</th>
-                        <th className="pb-2 pr-3">Reference</th>
-                        <th className="pb-2 text-right">Amount</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {paymentHistory.map((payment) => (
-                        <tr key={payment.id} className="border-b border-[#f0eef3] last:border-b-0">
-                          <td className="py-2 pr-3 font-semibold text-[#1c1214]">{payment.payment_stage}</td>
-                          <td className="py-2 pr-3 text-[#4a4350]">{payment.method}</td>
-                          <td className="py-2 pr-3 text-[#7b6f72]">{payment.reference_number ?? "-"}</td>
-                          <td className="py-2 text-right font-extrabold text-[#1c1214]">{new Intl.NumberFormat("en-PH", { style: "currency", currency: "PHP" }).format(Number(payment.amount ?? 0))}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              ) : (
-                <p className="text-sm text-[#7b6f72]">No payments recorded.</p>
-              )}
-            </section>
-
-            <section className="rounded-[10px] border border-[#eeecf2] bg-white p-[16px_20px]">
-              <h3 className="mb-3 text-[11.5px] font-black uppercase tracking-[0.14em] text-[#a82e27]">Ingredient locks</h3>
-              {reservation?.ingredient_locks && reservation.ingredient_locks.length > 0 ? (
-                <div className="space-y-2">
-                  <span className={`inline-flex rounded-full px-[10px] py-[5px] text-[11px] font-black uppercase tracking-[0.03em] ${reservation.ingredient_locks.some((lock) => !lock.is_released) ? "bg-[#fff0d9] text-[#8a5200]" : "bg-[#e3f1ea] text-[#1f6b49]"}`}>
-                    {reservation.ingredient_locks.some((lock) => !lock.is_released) ? "Locked" : "Released"}
-                  </span>
-                  <ul className="grid gap-2 text-sm text-[#4a4350]">
-                    {reservation.ingredient_locks.map((lock, index) => (
-                      <li key={lock.id ?? `${lock.raw_material?.name ?? "ingredient"}-${index}`} className="rounded-[6px] bg-[#f4f4f8] px-2 py-1">{lock.raw_material?.name ?? "Ingredient"}: {lock.reserved_quantity} {lock.unit}{lock.is_released ? " (released)" : ""}</li>
-                    ))}
-                  </ul>
-                </div>
-              ) : (
-                <p className="text-sm text-[#7b6f72]">No ingredient locks recorded.</p>
-              )}
-            </section>
-          </div>
-
-          <section className="mt-4 rounded-[10px] border border-[#eeecf2] bg-white p-[16px_20px]">
-            <h3 className="mb-3 text-[11.5px] font-black uppercase tracking-[0.14em] text-[#a82e27]">Reservation timeline</h3>
-            <ul className="space-y-3">
-              {[
-                { label: "Created", time: reservation?.created_at },
-                { label: "Payment", time: reservation?.created_at },
-                { label: "Current status", time: reservation?.created_at }
-              ].map((step, index) => (
-                <li key={step.label} className="flex items-start gap-3 text-sm text-[#4a4350]">
-                  <span className={`mt-1 inline-flex h-5 w-5 items-center justify-center rounded-full border-2 ${index === 2 ? "border-[#a82e27] bg-white shadow-[0_0_0_4px_rgba(168,46,39,0.15)]" : "border-[#2f8a62] bg-[#2f8a62] text-white"}`}>
-                    {index === 2 ? "•" : "✓"}
-                  </span>
-                  <div className="flex-1 border-b border-[#f0eef3] pb-2 last:border-b-0">
-                    <p className="font-bold text-[#1c1214]">{step.label}</p>
-                    <p className="text-[#7b6f72]">{step.time ? new Date(step.time).toLocaleString("en-PH", { year: "numeric", month: "long", day: "numeric", hour: "numeric", minute: "2-digit" }) : "N/A"}</p>
+              <section className="staff-details-card">
+                <h3 className="mb-3 text-[11.5px] font-black uppercase tracking-[0.14em] text-[#a82e27]">Payment History</h3>
+                {paymentHistory.length > 0 ? (
+                  <div className="overflow-x-auto">
+                    <table className="staff-payment-table w-full min-w-[420px] border-collapse text-left text-sm">
+                      <thead><tr className="border-b border-[#f0eef3] text-[11px] font-black uppercase tracking-[0.08em] text-[#7b6f72]"><th className="pb-2 pr-3">Stage</th><th className="pb-2 pr-3">Method</th><th className="pb-2 pr-3">Reference</th><th className="pb-2 text-right">Amount</th></tr></thead>
+                      <tbody>
+                        {paymentHistory.map((payment) => (
+                          <tr key={payment.id} className="border-b border-[#f0eef3] last:border-b-0">
+                            <td className="py-2 pr-3 font-semibold text-[#1c1214]">{payment.payment_stage}</td>
+                            <td className="py-2 pr-3 text-[#4a4350]">{payment.method}</td>
+                            <td className="py-2 pr-3 text-[#7b6f72]"><span className="staff-payment-reference" title={payment.reference_number ?? "-"}>{payment.reference_number ?? "-"}</span></td>
+                            <td className="py-2 text-right font-extrabold text-[#1c1214]">{new Intl.NumberFormat("en-PH", { style: "currency", currency: "PHP" }).format(Number(payment.amount ?? 0))}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
                   </div>
-                </li>
-              ))}
-            </ul>
-            {activity && activity.length > 0 ? (
-              <div className="mt-3 space-y-2">
-                {activity.map((item) => {
-                  const isStatusChange = /status/i.test(item.event_type ?? "");
-                  const isPositive = !isStatusChange;
-                  return (
-                    <div key={item.id} className="flex items-start gap-3 text-sm text-[#4a4350]">
-                      <span className={`mt-1 inline-flex h-5 w-5 items-center justify-center rounded-full border-2 ${isPositive ? "border-[#2f8a62] bg-[#2f8a62] text-white" : "border-[#a82e27] bg-white shadow-[0_0_0_4px_rgba(168,46,39,0.15)]"}`}>
-                        {isPositive ? "✓" : "•"}
-                      </span>
-                      <div className="flex-1 min-w-0 border-b border-[#f0eef3] pb-2 last:border-b-0">
-                        <p className="font-bold text-[#1c1214]">{item.event_type.replace(/_/g, " ")}</p>
-                        <p className="text-[#7b6f72]">{new Date(item.created_at).toLocaleString("en-PH", { year: "numeric", month: "long", day: "numeric", hour: "numeric", minute: "2-digit" })}</p>
-                        {item.reason ? <p className="mt-1 text-[#4a4350]">{item.reason}</p> : null}
+                ) : <p className="text-sm text-[#7b6f72]">No payments recorded.</p>}
+              </section>
+            </div>
+          )}
+
+          {activeTab === "timeline" && (
+            <div id="reservation-panel-timeline" role="tabpanel" aria-labelledby="reservation-tab-timeline" className="staff-details-tabpanel-grid">
+              <section className="staff-details-card staff-details-full-width">
+                <h3 className="mb-3 text-[11.5px] font-black uppercase tracking-[0.14em] text-[#a82e27]">Reservation Timeline</h3>
+                {activityError ? <p className="mb-4 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700" role="alert">Booking details loaded, but activity history could not be loaded: {activityError}</p> : null}
+                <ul className="staff-timeline-list">
+                  {[
+                    { label: "Created", time: reservation?.created_at },
+                    { label: "Payment", time: reservation?.created_at },
+                    { label: "Current status", time: reservation?.created_at },
+                    { label: "Booking created", time: reservation?.created_at }
+                  ].map((step, index) => (
+                    <li key={step.label} className="staff-timeline-step">
+                      <span className={`staff-timeline-marker ${index === 2 ? "is-current" : "is-complete"}`}>{index === 2 ? "•" : "✓"}</span>
+                      <div className="min-w-0 flex-1">
+                        <p className="font-bold text-[#1c1214]">{step.label}</p>
+                        <p className="text-[#7b6f72]">{step.time ? new Date(step.time).toLocaleString("en-PH", { year: "numeric", month: "long", day: "numeric", hour: "numeric", minute: "2-digit" }) : "N/A"}</p>
                       </div>
-                    </div>
-                  );
-                })}
-              </div>
-            ) : (
-              <p className="mt-2 text-sm text-[#7b6f72]">No activity history recorded yet.</p>
-            )}
-          </section>
+                    </li>
+                  ))}
+                </ul>
+                {activity && activity.length > 0 ? (
+                  <div className="mt-3 space-y-2">
+                    {activity.map((item) => {
+                      const isPositive = !/status/i.test(item.event_type ?? "");
+                      return <div key={item.id} className="flex items-start gap-3 text-sm text-[#4a4350]">
+                        <span className={`mt-1 inline-flex h-5 w-5 items-center justify-center rounded-full border-2 ${isPositive ? "border-[#2f8a62] bg-[#2f8a62] text-white" : "border-[#a82e27] bg-white shadow-[0_0_0_4px_rgba(168,46,39,0.15)]"}`}>{isPositive ? "✓" : "•"}</span>
+                        <div className="min-w-0 flex-1 border-b border-[#f0eef3] pb-2">
+                          <p className="font-bold text-[#1c1214]">{item.event_type.replace(/_/g, " ")}</p>
+                          <p className="text-[#7b6f72]">{new Date(item.created_at).toLocaleString("en-PH", { year: "numeric", month: "long", day: "numeric", hour: "numeric", minute: "2-digit" })}</p>
+                          {item.reason ? <p className="mt-1 text-[#4a4350]">{item.reason}</p> : null}
+                        </div>
+                      </div>;
+                    })}
+                  </div>
+                ) : <p className="mt-2 text-sm text-[#7b6f72]">No activity history recorded yet.</p>}
+              </section>
+            </div>
+          )}
         </div>
 
-        <div className="border-t border-[#e6e4ea] bg-white p-4">
-          <div className="flex flex-wrap items-center justify-end gap-2">
-            <Button type="button" variant="outline" onClick={() => window.print()}>
-              Print Receipt
-            </Button>
-            {renderActions(actions)}
-            <Button type="button" variant="outline" onClick={onClose}>Close</Button>
+        <div className="staff-details-footer">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <Button type="button" variant="outline" onClick={() => window.print()}>Print receipt</Button>
+            <div className="flex flex-wrap justify-end gap-2">{renderActions(actions)}<Button type="button" variant="outline" onClick={onClose}>Close</Button></div>
           </div>
         </div>
       </div>

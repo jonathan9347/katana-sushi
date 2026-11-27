@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Fragment } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useSearchParams } from "react-router-dom";
-import { CalendarDays, List, RefreshCw, Search, X } from "lucide-react";
+import { CalendarDays, Clock3, ImageIcon, List, RefreshCw, Search, WalletCards, X } from "lucide-react";
 import { Dialog } from "../../../components/ui/dialog";
 import { BookingDetailsDrawer } from "../../../components/ui/BookingDetailsDrawer";
 import { ReservationDetailsModal } from "../../../components/ui/ReservationDetailsModal";
@@ -12,6 +12,7 @@ import { Button } from "../../../components/ui/button";
 import { api } from "../../../lib/api";
 import { getApiErrorMessage } from "../../../lib/errors";
 import { formatManilaDate, formatManilaDateTime, formatTime12, manilaDateKey, todayManilaDateKey } from "../../../lib/dateTime";
+import "../../../styles/staff-redesign.css";
 
 type ReservationView = "tables" | "catering" | "pickup";
 
@@ -668,7 +669,7 @@ export default function DineInReservations() {
   ] : [];
 
   return (
-    <main className="min-h-screen bg-slate-100 p-4 sm:p-6 lg:p-8">
+    <main className="staff-reservations-page min-h-screen p-4 sm:p-6 lg:p-8">
       <section className="w-full px-0">
         <header className="mb-4 flex flex-wrap items-center justify-between gap-4 rounded-xl border border-slate-200 bg-white px-5 py-4 shadow-sm">
           <div>
@@ -684,8 +685,8 @@ export default function DineInReservations() {
               <button type="button" className={`rounded-[7px] px-3 py-1.5 text-sm font-semibold transition ${calendarMode === "list" ? "bg-white text-[#1c1214] shadow-[0_1px_3px_rgba(0,0,0,0.13)]" : "text-slate-500"}`} aria-pressed={calendarMode === "list"} onClick={() => setCalendarMode("list")}><List className="mr-1 inline h-4 w-4" />List</button>
               <button type="button" className={`rounded-[7px] px-3 py-1.5 text-sm font-semibold transition ${calendarMode === "calendar" ? "bg-white text-[#1c1214] shadow-[0_1px_3px_rgba(0,0,0,0.13)]" : "text-slate-500"}`} aria-pressed={calendarMode === "calendar"} onClick={() => { setCalendarMode("calendar"); setCalendarOpen(true); }}><CalendarDays className="mr-1 inline h-4 w-4" />Calendar</button>
             </div>
-            <Button type="button" variant="outline" onClick={() => void (currentView === "pickup" ? pickupQuery.refetch() : reservationsQuery.refetch())}><RefreshCw className="mr-2 h-4 w-4" />Refresh</Button>
-            {role === "admin" && <Link to="/staff/catering/photos"><Button type="button" variant="outline">Catering menu photos</Button></Link>}
+            <Button type="button" variant="outline" aria-label="Refresh" className="w-11 !px-0" onClick={() => void (currentView === "pickup" ? pickupQuery.refetch() : reservationsQuery.refetch())}><RefreshCw className="h-4 w-4" /></Button>
+            {role === "admin" && <Link to="/staff/catering/photos"><Button type="button" variant="outline"><ImageIcon className="mr-2 h-4 w-4 text-[#9b1d20]" />Catering menu photos</Button></Link>}
           </div>
         </header>
 
@@ -694,10 +695,15 @@ export default function DineInReservations() {
             ["Waiting for approval", [...tableReservations, ...cateringReservations, ...pickupOrders].filter((item) => item.status === "pending" || item.status === "pending_approval").length, "needs_approval" as const],
             ["Bookings today", [...tableReservations, ...cateringReservations].filter((item) => manilaDateKey(item.date) === todayKey).length, "today" as const],
             ["Catering balance due", cateringReservations.length, "all" as const]
-          ].map(([label, count, filter]) => (
-            <div key={label} role="link" tabIndex={0} className="rounded-lg border border-slate-200 bg-white p-4 text-left shadow-sm transition hover:-translate-y-0.5 hover:shadow-md" onClick={() => filter === "today" ? setDateFilter("today") : filter === "needs_approval" ? setStatusFilter("needs_approval") : selectView("catering")} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); event.currentTarget.click(); } }}>
-              <p className="text-xs font-bold uppercase tracking-wide text-slate-500">{label}</p>
-              <p className="mt-1 text-2xl font-black text-slate-950">{count}</p>
+          ].map(([label, count, filter], index) => (
+            <div key={label as string} role="link" tabIndex={0} className="rounded-lg border border-slate-200 bg-white p-4 text-left shadow-sm transition hover:-translate-y-0.5 hover:shadow-md" onClick={() => filter === "today" ? setDateFilter("today") : filter === "needs_approval" ? setStatusFilter("needs_approval") : selectView("catering")} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); event.currentTarget.click(); } }}>
+              <div className={`grid h-12 w-12 shrink-0 place-items-center rounded-[14px] ${index === 0 ? "bg-[#fdf1d9] text-[#9b6500]" : index === 1 ? "bg-[#edf3ff] text-[#4f72b8]" : "bg-[#fbeaea] text-[#9b1d20]"}`}>
+                {index === 0 ? <Clock3 className="h-5 w-5" /> : index === 1 ? <CalendarDays className="h-5 w-5" /> : <WalletCards className="h-5 w-5" />}
+              </div>
+              <div>
+                <p className={`text-[28px] font-black leading-none ${index === 0 ? "text-[#9b1d20]" : "text-[#1c2030]"}`}>{count as number}</p>
+                <p className="mt-2 text-xs font-semibold text-[#6a7185]">{label as string}</p>
+              </div>
             </div>
           ))}
         </section>
@@ -710,12 +716,12 @@ export default function DineInReservations() {
           ))}
         </nav>
 
-        <div className="mb-4 flex flex-wrap items-center gap-2 rounded-xl border border-slate-200 bg-white p-3">
+        <div className="staff-reservation-filters mb-4">
           {([["all", "All"], ["needs_approval", "Needs approval"], ["confirmed", "Confirmed / Approved"], ["completed", "Completed"]] as const).map(([value, label]) => (
-            <button key={value} type="button" aria-label={`Filter status: ${label === "Needs approval" ? "pending" : label === "Confirmed / Approved" ? "confirmed" : label}`} className={`rounded-full border px-3 py-1.5 text-xs font-bold ${statusFilter === value ? "border-[#1c1214] bg-[#1c1214] text-white" : "border-[#e6e4ea] bg-white text-[#4a4350] hover:border-[#d8d5dd]"}`} onClick={() => setStatusFilter(value)}><span aria-hidden="true">{label}</span></button>
+            <button key={value} type="button" aria-label={`Filter status: ${label === "Needs approval" ? "pending" : label === "Confirmed / Approved" ? "confirmed" : label}`} className={`staff-status-chip ${statusFilter === value ? "staff-status-selected" : ""}`} onClick={() => setStatusFilter(value)}><span aria-hidden="true">{label}</span></button>
           ))}
           {(["any", "today", "tomorrow", "next7"] as const).map((value) => (
-            <button key={value} type="button" className={`rounded-full border px-3 py-1.5 text-xs font-bold ${dateFilter === value ? "border-[#f0bbb7] bg-[#fbeceb] text-[#a82e27]" : "border-[#e6e4ea] bg-white text-[#4a4350]"}`} onClick={() => setDateFilter(value)}>{value === "any" ? "Any date" : value === "next7" ? "Next 7 days" : value[0].toUpperCase() + value.slice(1)}</button>
+            <button key={value} type="button" className={`staff-date-chip ${dateFilter === value ? "staff-date-selected" : ""}`} onClick={() => setDateFilter(value)}>{value === "any" ? "Any date" : value === "next7" ? "Next 7 days" : value[0].toUpperCase() + value.slice(1)}</button>
           ))}
           {(search || statusFilter !== "all" || dateFilter !== "any" || selectedDate) && <button type="button" className="ml-auto text-sm font-bold text-red-700" onClick={clearFilters}><X className="mr-1 inline h-4 w-4" />Clear filters</button>}
         </div>
@@ -736,21 +742,13 @@ export default function DineInReservations() {
           </div>
         ) : null}
 
-        <section className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm" aria-label={`${allViews.find((view) => view.id === currentView)?.label} upcoming list`}>
+        <section className="staff-main-card" aria-label={`${allViews.find((view) => view.id === currentView)?.label} upcoming list`}>
           {currentView === "pickup" && readyNotice ? (
             <div role="status" className="flex items-center justify-between gap-3 border-b border-emerald-200 bg-emerald-50 px-5 py-3 text-sm font-bold text-emerald-900">
               <p>{readyNotice}</p>
               <button type="button" aria-label="Dismiss ready notification" onClick={() => setReadyNotice("")} className="rounded px-2 py-1 hover:bg-emerald-100">
                 Dismiss
               </button>
-            </div>
-          ) : null}
-          {currentView === "pickup" ? (
-            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[#e6e4ea] bg-white px-5 py-3">
-              <p className="text-sm font-semibold text-slate-600">Pickup order fulfillment</p>
-              <Button type="button" variant="outline" size="sm" onClick={() => void pickupQuery.refetch()}>
-                Refresh
-              </Button>
             </div>
           ) : null}
           {currentView !== "pickup" && reservationsQuery.isLoading ? (
@@ -763,7 +761,7 @@ export default function DineInReservations() {
             <p className="p-5 text-sm text-red-700" role="alert">Unable to load pickup orders. Please refresh and try again.</p>
           ) : currentView === "tables" ? (
             filteredTableReservations.length === 0 ? (
-              <p className="p-5 text-sm text-slate-500">{selectedDate ? "No table reservations for this date." : "No upcoming table reservations."}</p>
+              <div className="staff-empty-state"><div className="staff-empty-icon"><CalendarDays className="h-7 w-7" /></div><strong>{selectedDate ? "No table reservations for this date." : "No upcoming table reservations."}</strong><span>No matching bookings are scheduled right now.</span></div>
             ) : (
               <ul className="grid gap-[10px]">
                 {filteredTableReservations.map((reservation, index) => (
@@ -775,7 +773,7 @@ export default function DineInReservations() {
                         <span className="h-px flex-1 bg-[#e6e4ea]" />
                       </li>
                     )}
-                    <li key={`${reservation.id}-card`} tabIndex={0} role="button" onClick={() => setDrawer({ type: "table", item: reservation })} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") setDrawer({ type: "table", item: reservation }); }} className={`grid cursor-pointer gap-[18px] rounded-[10px] border border-[#eeecf2] bg-white p-[16px_20px] shadow-[0_1px_3px_rgba(0,0,0,0.05)] outline-none transition-all duration-200 hover:-translate-y-0.5 hover:shadow-[0_6px_16px_rgba(0,0,0,0.08)] focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-red-600 ${reservation.status === "pending" ? "border-l-[4px] border-l-[#a82e27]" : ""}`} style={{ gridTemplateColumns: "112px minmax(0,1fr) auto", alignItems: "center" }}>
+                    <li key={`${reservation.id}-card`} tabIndex={0} role="button" onClick={() => setDrawer({ type: "table", item: reservation })} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") setDrawer({ type: "table", item: reservation }); }} className={`staff-reservation-row grid cursor-pointer gap-[18px] bg-white outline-none transition-all duration-200 ${reservation.status === "pending" ? "border-l-[4px] border-l-[#a82e27]" : ""}`} style={{ gridTemplateColumns: "112px minmax(0,1fr) auto", alignItems: "center" }}>
                       <div className="flex h-full items-center gap-4 border-r border-[#e6e4ea] pr-4">
                         <div className="min-w-0 text-left">
                           <p className="whitespace-nowrap text-[19px] font-extrabold leading-none text-[#1c1214]">{formatTime12(reservation.time)}</p>
@@ -804,7 +802,7 @@ export default function DineInReservations() {
           ) : currentView === "catering" ? (
             <div>
               {filteredCateringReservations.length === 0 ? (
-                <p className="p-5 text-sm text-slate-500">{selectedDate ? "No catering reservations for this date." : "No upcoming catering reservations."}</p>
+                <div className="staff-empty-state"><div className="staff-empty-icon"><CalendarDays className="h-7 w-7" /></div><strong>{selectedDate ? "No catering reservations for this date." : "No upcoming catering reservations."}</strong><span>No matching catering bookings are scheduled right now.</span></div>
               ) : (
                 <ul className="grid gap-[10px]">
                   {filteredCateringReservations.map((reservation, index) => (
@@ -816,7 +814,7 @@ export default function DineInReservations() {
                           <span className="h-px flex-1 bg-[#e6e4ea]" />
                         </li>
                       )}
-                      <li key={`${reservation.id}-card`} tabIndex={0} role="button" onClick={() => setDrawer({ type: "catering", item: reservation })} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") setDrawer({ type: "catering", item: reservation }); }} className={`grid cursor-pointer gap-[18px] rounded-[10px] border border-[#eeecf2] bg-white p-[16px_20px] shadow-[0_1px_3px_rgba(0,0,0,0.05)] outline-none transition-all duration-200 hover:-translate-y-0.5 hover:shadow-[0_6px_16px_rgba(0,0,0,0.08)] focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-red-600 ${reservation.status === "pending" || reservation.status === "pending_approval" ? "border-l-[4px] border-l-[#a82e27]" : ""}`} style={{ gridTemplateColumns: "112px minmax(0,1fr) auto", alignItems: "center" }}>
+                      <li key={`${reservation.id}-card`} tabIndex={0} role="button" onClick={() => setDrawer({ type: "catering", item: reservation })} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") setDrawer({ type: "catering", item: reservation }); }} className={`staff-reservation-row grid cursor-pointer gap-[18px] bg-white outline-none transition-all duration-200 ${reservation.status === "pending" || reservation.status === "pending_approval" ? "border-l-[4px] border-l-[#a82e27]" : ""}`} style={{ gridTemplateColumns: "112px minmax(0,1fr) auto", alignItems: "center" }}>
                         <div className="flex h-full items-center gap-4 border-r border-[#e6e4ea] pr-4">
                           <div className="min-w-0 text-left">
                             <p className="whitespace-nowrap text-[19px] font-extrabold leading-none text-[#1c1214]">{reservation.time ? formatTime12(reservation.time) : "Time TBD"}</p>
@@ -843,7 +841,7 @@ export default function DineInReservations() {
               )}
             </div>
           ) : filteredPickupOrders.length === 0 ? (
-            <p className="p-5 text-sm text-slate-500">{selectedDate ? "No pickup orders for this date." : "No active pickup orders."}</p>
+            <div className="staff-empty-state"><div className="staff-empty-icon"><WalletCards className="h-7 w-7" /></div><strong>{selectedDate ? "No pickup orders for this date." : "No active pickup orders."}</strong><span>No matching pickup orders need attention.</span></div>
           ) : (
             <ul className="grid gap-[10px] p-0">
               {filteredPickupOrders.map((order, index) => (
@@ -855,7 +853,7 @@ export default function DineInReservations() {
                       <span className="h-px flex-1 bg-[#e6e4ea]" />
                     </li>
                   )}
-                  <li key={`${order.order_number}-card`} tabIndex={0} role="button" onClick={() => setDrawer({ type: "pickup", item: order })} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") setDrawer({ type: "pickup", item: order }); }} className={`grid cursor-pointer gap-[18px] rounded-[10px] border border-[#eeecf2] bg-white p-[16px_20px] shadow-[0_1px_3px_rgba(0,0,0,0.05)] outline-none transition-all duration-200 hover:-translate-y-0.5 hover:shadow-[0_6px_16px_rgba(0,0,0,0.08)] focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-red-600 ${order.status === "pending_payment" || order.status === "pending_approval" ? "border-l-[4px] border-l-[#a82e27]" : ""}`} style={{ gridTemplateColumns: "112px minmax(0,1fr) auto", alignItems: "center" }}>
+                  <li key={`${order.order_number}-card`} tabIndex={0} role="button" onClick={() => setDrawer({ type: "pickup", item: order })} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") setDrawer({ type: "pickup", item: order }); }} className={`staff-reservation-row grid cursor-pointer gap-[18px] bg-white outline-none transition-all duration-200 ${order.status === "pending_payment" || order.status === "pending_approval" ? "border-l-[4px] border-l-[#a82e27]" : ""}`} style={{ gridTemplateColumns: "112px minmax(0,1fr) auto", alignItems: "center" }}>
                     <div className="flex h-full items-center gap-4 border-r border-[#e6e4ea] pr-4">
                       <div className="min-w-0 text-left">
                         <p className="whitespace-nowrap text-[19px] font-extrabold leading-none text-[#1c1214]">{parseReservationDateTime(order.created_at).timeLabel}</p>
@@ -867,7 +865,7 @@ export default function DineInReservations() {
                       <p className="mt-1 mb-2 text-[12.5px] tracking-[0.02em] text-[#7b6f72]">{order.order_number}</p>
                       <div className="flex flex-wrap gap-[6px]">
                         {order.items.map((item, itemIndex) => (
-                          <span key={`${order.order_number}-${itemIndex}`} className="rounded-[6px] bg-[#f4f4f8] px-[9px] py-[3px] text-[12.5px] font-semibold text-[#4a4350]">{item.quantity} × {item.name}</span>
+                          <span key={`${order.order_number}-${itemIndex}`} className="rounded-[6px] bg-[#f4f4f8] px-[9px] py-[3px] text-[12.5px] font-semibold text-[#4a4350]">{item.name} ×{item.quantity}</span>
                         ))}
                         <span className="rounded-[6px] bg-[#f4f4f8] px-[9px] py-[3px] text-[12.5px] font-semibold text-[#4a4350]">Pay at counter</span>
                       </div>
@@ -909,7 +907,7 @@ export default function DineInReservations() {
         </section>
       </section>
 
-      <Dialog open={calendarOpen} title="Reservation calendar" onClose={() => setCalendarOpen(false)} panelClassName="max-w-4xl">
+      <Dialog open={calendarOpen} title="Reservation calendar" onClose={() => setCalendarOpen(false)} panelClassName="reservation-calendar-dialog max-w-5xl" overlayClassName="!bg-[#1c203073] !backdrop-blur-[3px]">
         <MiniCalendar
           month={calendarMonth}
           selectedDate={selectedDate ?? todayManilaDateKey()}
@@ -917,6 +915,7 @@ export default function DineInReservations() {
           onPreviousMonth={() => setCalendarMonth((current) => new Date(current.getFullYear(), current.getMonth() - 1, 1))}
           onNextMonth={() => setCalendarMonth((current) => new Date(current.getFullYear(), current.getMonth() + 1, 1))}
           onSelectDate={selectCalendarDate}
+          onClose={() => setCalendarOpen(false)}
         />
       </Dialog>
       <BookingDetailsDrawer
@@ -939,7 +938,7 @@ export default function DineInReservations() {
             <p><strong>Reference:</strong> {drawer.item.order_number}</p>
             <p><strong>Created:</strong> {formatManilaDateTime(drawer.item.created_at)}</p>
             <p><strong>Payment:</strong> Pay at counter</p>
-            <ul className="grid gap-2 border-y border-slate-200 py-3">{drawer.item.items.map((item, index) => <li key={`${item.name}-${index}`} className="flex justify-between gap-3"><span>{item.quantity} × {item.name}</span><strong>{formatMoney(item.total_price)}</strong></li>)}</ul>
+            <ul className="grid gap-2 border-y border-slate-200 py-3">{drawer.item.items.map((item, index) => <li key={`${item.name}-${index}`} className="flex justify-between gap-3"><span>{item.name} ×{item.quantity}</span><strong>{formatMoney(item.total_price)}</strong></li>)}</ul>
             <p className="flex justify-between font-bold"><span>Total</span><span>{formatMoney(drawer.item.total)}</span></p>
           </div>
         ) : drawer?.type === "catering" ? (
