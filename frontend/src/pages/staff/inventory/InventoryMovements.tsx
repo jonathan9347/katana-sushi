@@ -3,6 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Download, RefreshCw } from "lucide-react";
 import { api } from "../../../lib/api";
 import { todayManilaDateKey } from "../../../lib/dateTime";
+import { formatDateTime, humanizeEnum, shortRef } from "../../../lib/display";
 import { Button } from "../../../components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "../../../components/ui/card";
 import { Select } from "../../../components/ui/select";
@@ -92,11 +93,11 @@ export default function InventoryMovements() {
     const rows = [
       ["Date", "Material", "Batch", "Booking/reference", "Source", "Action", "Quantity", "On hand before", "On hand after", "Handled by", "Note"],
       ...visibleMovements.map(({ movement, category }) => [
-        new Date(movement.created_at).toLocaleString(),
+        formatDateTime(movement.created_at),
         movement.raw_material.name,
         movement.batch?.batch_number ?? "",
-        movement.source_reference ?? "",
-        movement.source_type ?? "",
+        shortRef(movement.source_reference),
+        movement.source_type ? humanizeEnum(movement.source_type) : "",
         category,
         `${movement.quantity} ${movement.unit}`,
         movement.quantity_before ?? "",
@@ -204,14 +205,14 @@ export default function InventoryMovements() {
                 <TableBody>
                   {visibleMovements.map(({ movement, category }) => (
                     <TableRow key={movement.id}>
-                      <TableCell>{new Date(movement.created_at).toLocaleString()}</TableCell>
+                      <TableCell>{formatDateTime(movement.created_at)}</TableCell>
                       <TableCell>
                         <span className="font-medium">{movement.raw_material.name}</span>
                         <span className="block text-xs text-slate-500">
-                          {movement.batch?.batch_number ?? "No batch"} · {movement.source_type ?? "Legacy"}
+                          {movement.batch?.batch_number ?? "No batch"} · {movement.source_type ? humanizeEnum(movement.source_type) : "Legacy"}
                         </span>
                       </TableCell>
-                      <TableCell>{movement.source_reference ?? "—"}</TableCell>
+                      <TableCell>{shortRef(movement.source_reference)}</TableCell>
                       <TableCell>{category}</TableCell>
                       <TableCell>{Number(movement.quantity).toLocaleString()} {movement.unit}</TableCell>
                       <TableCell>

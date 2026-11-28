@@ -12,6 +12,7 @@ import { Button } from "../../../components/ui/button";
 import { api } from "../../../lib/api";
 import { getApiErrorMessage } from "../../../lib/errors";
 import { formatManilaDate, formatManilaDateTime, formatTime12, manilaDateKey, todayManilaDateKey } from "../../../lib/dateTime";
+import { humanizeEnum, shortRef } from "../../../lib/display";
 import "../../../styles/staff-redesign.css";
 
 type ReservationView = "tables" | "catering" | "pickup";
@@ -107,7 +108,7 @@ function getPermittedViews(role: string) {
 }
 
 function formatStatus(status: string) {
-  return status.replace(/_/g, " ");
+  return humanizeEnum(status);
 }
 
 function formatMoney(value: number) {
@@ -782,7 +783,7 @@ export default function DineInReservations() {
                       </div>
                       <div className="min-w-0">
                         <p className="text-[16px] font-extrabold text-[#1c1214]">{reservation.customer_name}</p>
-                        <p className="mt-1 mb-2 text-[12.5px] tracking-[0.02em] text-[#7b6f72]">{reservation.reference}</p>
+                        <p className="mt-1 mb-2 text-[12.5px] tracking-[0.02em] text-[#7b6f72]" title={reservation.reference}>{shortRef(reservation.reference)}</p>
                         <div className="flex flex-wrap gap-[6px]">
                           <span className="rounded-[6px] bg-[#f4f4f8] px-[9px] py-[3px] text-[12.5px] font-semibold text-[#4a4350]">{reservation.guests} guest{reservation.guests === 1 ? "" : "s"}</span>
                           <span className="rounded-[6px] bg-[#f4f4f8] px-[9px] py-[3px] text-[12.5px] font-semibold text-[#4a4350]">Tables: {reservation.table_numbers.length > 0 ? reservation.table_numbers.join(", ") : "Not assigned"}</span>
@@ -823,7 +824,7 @@ export default function DineInReservations() {
                         </div>
                         <div className="min-w-0">
                           <p className="text-[16px] font-extrabold text-[#1c1214]">{reservation.customer_name}</p>
-                          <p className="mt-1 mb-2 text-[12.5px] tracking-[0.02em] text-[#7b6f72]">{reservation.reference}</p>
+                          <p className="mt-1 mb-2 text-[12.5px] tracking-[0.02em] text-[#7b6f72]" title={reservation.reference}>{shortRef(reservation.reference)}</p>
                           <div className="flex flex-wrap gap-[6px]">
                             <span className="rounded-[6px] bg-[#f4f4f8] px-[9px] py-[3px] text-[12.5px] font-semibold text-[#4a4350]">{reservation.guests} guest{reservation.guests === 1 ? "" : "s"}</span>
                             {reservation.package_name ? <span className="rounded-[6px] bg-[#f4f4f8] px-[9px] py-[3px] text-[12.5px] font-semibold text-[#4a4350]">{reservation.package_name}</span> : null}
@@ -862,7 +863,7 @@ export default function DineInReservations() {
                     </div>
                     <div className="min-w-0">
                       <p className="text-[16px] font-extrabold text-[#1c1214]">{order.customer_name}</p>
-                      <p className="mt-1 mb-2 text-[12.5px] tracking-[0.02em] text-[#7b6f72]">{order.order_number}</p>
+                      <p className="mt-1 mb-2 text-[12.5px] tracking-[0.02em] text-[#7b6f72]" title={order.order_number}>{shortRef(order.order_number)}</p>
                       <div className="flex flex-wrap gap-[6px]">
                         {order.items.map((item, itemIndex) => (
                           <span key={`${order.order_number}-${itemIndex}`} className="rounded-[6px] bg-[#f4f4f8] px-[9px] py-[3px] text-[12.5px] font-semibold text-[#4a4350]">{item.name} ×{item.quantity}</span>
@@ -929,13 +930,13 @@ export default function DineInReservations() {
           <div className="grid gap-3 text-sm text-slate-700">
             <p><strong>Date:</strong> {formatManilaDate(drawer.item.date)}</p>
             <p><strong>Time:</strong> {formatTime12(drawer.item.time)}</p>
-            <p><strong>Reference:</strong> {drawer.item.reference}</p>
+            <p><strong>Reference:</strong> {shortRef(drawer.item.reference)}</p>
             <p><strong>Guests:</strong> {drawer.item.guests}</p>
             <p><strong>Tables:</strong> {drawer.item.table_numbers.length ? drawer.item.table_numbers.join(", ") : "Not assigned"}</p>
           </div>
         ) : drawer?.type === "pickup" ? (
           <div className="grid gap-4 text-sm text-slate-700">
-            <p><strong>Reference:</strong> {drawer.item.order_number}</p>
+            <p><strong>Reference:</strong> {shortRef(drawer.item.order_number)}</p>
             <p><strong>Created:</strong> {formatManilaDateTime(drawer.item.created_at)}</p>
             <p><strong>Payment:</strong> Pay at counter</p>
             <ul className="grid gap-2 border-y border-slate-200 py-3">{drawer.item.items.map((item, index) => <li key={`${item.name}-${index}`} className="flex justify-between gap-3"><span>{item.name} ×{item.quantity}</span><strong>{formatMoney(item.total_price)}</strong></li>)}</ul>
@@ -945,10 +946,10 @@ export default function DineInReservations() {
           <div className="grid gap-3 text-sm text-slate-700">
             <p><strong>Date:</strong> {formatManilaDate(drawer.item.date)}</p>
             <p><strong>Time:</strong> {drawer.item.time ? formatTime12(drawer.item.time) : "Not provided"}</p>
-            <p><strong>Reference:</strong> {drawer.item.reference}</p>
+            <p><strong>Reference:</strong> {shortRef(drawer.item.reference)}</p>
             <p><strong>Guests:</strong> {drawer.item.guests}</p>
             <p><strong>Package:</strong> {drawer.item.package_name ?? "Catering"}</p>
-            <p><strong>Event type:</strong> {drawer.item.reservation_type ?? "Not specified"}</p>
+            <p><strong>Event type:</strong> {drawer.item.reservation_type ? humanizeEnum(drawer.item.reservation_type) : "Not specified"}</p>
             <p><strong>Location:</strong> {drawer.item.table_numbers.length ? drawer.item.table_numbers.join(", ") : "Venue details available in Catering Operations"}</p>
           </div>
         ) : null}
@@ -961,7 +962,7 @@ export default function DineInReservations() {
       />
       <ReservationDetailsModal
         open={Boolean(paymentReservation)}
-        title={paymentReservation ? paymentReservation.reference : "Event details"}
+        title={paymentReservation ? shortRef(paymentReservation.reference) : "Event details"}
         reservation={paymentReservationData}
         actions={cateringModalActions}
         onClose={() => {

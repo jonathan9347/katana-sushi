@@ -10,6 +10,7 @@ import SellingProductsList from "./SellingProductsList";
 import WasteDisposal from "./WasteDisposal";
 import YieldEstimator from "./YieldEstimator";
 import { MaterialBatch, StaffRole } from "./types";
+import { humanizeEnum } from "../../../lib/display";
 import "./InventoryMaterials.css";
 
 type InventoryTab = "stock" | "reservations" | "movements";
@@ -78,7 +79,7 @@ export default function InventoryPage({ readOnly = false }: { readOnly?: boolean
             <h1 className="text-2xl font-semibold">Inventory</h1>
             <p className="mt-1 text-sm">Track what’s in stock, what’s running low, and what needs reordering.</p>
           </div>
-          <span className="inventory-role-pill">Signed in as {role.replace("_", " ")}</span>
+          <span className="inventory-role-pill">Signed in as {humanizeEnum(role)}</span>
         </header>
 
         <nav className="inventory-primary-nav" aria-label="Section navigation">

@@ -6,6 +6,7 @@ import { api } from "../../lib/api";
 import { formatManilaDate, formatManilaDateTime, formatTime12, manilaDateKey, todayManilaDateKey } from "../../lib/dateTime";
 import { formatCateringEventType } from "../../lib/reservationDetails";
 import { formatCateringPackageSnapshots } from "../../lib/cateringPackageSnapshot";
+import { humanizeEnum } from "../../lib/display";
 import { getApiErrorMessage } from "../../lib/errors";
 import {
   createPaymentIntent,
@@ -328,7 +329,7 @@ export default function ReservationStatus() {
       ? [
           { label: "Ordered items", value: result.order_items?.length ? `${result.order_items.length} item${result.order_items.length === 1 ? "" : "s"}` : "—" },
           { label: "Total to pay", value: result.total_price != null ? `₱${result.total_price.toFixed(2)}` : "—" },
-          { label: "Payment", value: result.payment_status ?? result.payment_plan ?? "Pay at pickup", isTag: Boolean(result.payment_status) || Boolean(result.payment_plan) }
+          { label: "Payment", value: result.payment_status ? humanizeEnum(result.payment_status) : result.payment_plan ? humanizeEnum(result.payment_plan) : "Pay at pickup", isTag: Boolean(result.payment_status) || Boolean(result.payment_plan) }
         ]
       : result.is_catering
         ? [
@@ -340,7 +341,7 @@ export default function ReservationStatus() {
             { label: "Date", value: result.date ? formatManilaDate(result.date) : "—" },
             { label: "Time", value: result.time ? formatTime12(result.time) : "—" },
             { label: "Party size", value: result.party_size != null ? `${result.party_size} guest${result.party_size === 1 ? "" : "s"}` : "—" },
-            { label: "Payment", value: result.payment_status ?? result.payment_plan ?? "Pay at restaurant" }
+            { label: "Payment", value: result.payment_status ? humanizeEnum(result.payment_status) : result.payment_plan ? humanizeEnum(result.payment_plan) : "Pay at restaurant" }
           ]
     : [];
 

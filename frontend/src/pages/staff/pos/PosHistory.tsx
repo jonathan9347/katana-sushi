@@ -10,6 +10,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from ".
 import { api } from "../../../lib/api";
 import { useToast } from "../../../hooks/useToast";
 import { formatManilaDateTime, todayManilaDateKey } from "../../../lib/dateTime";
+import { humanizeEnum, shortRef } from "../../../lib/display";
 import PosHeader from "./PosHeader";
 
 type PosSummary = {
@@ -56,7 +57,7 @@ function transactionTypeLabel(type: string) {
     catering_prepaid: "Catering Prepaid"
   };
 
-  return labels[type] ?? type.replace(/_/g, " ");
+  return labels[type] ?? humanizeEnum(type);
 }
 
 
@@ -341,14 +342,14 @@ export default function PosHistory() {
                       <TableBody>
                         {filteredTransactions.map((transaction) => (
                           <TableRow key={transaction.id}>
-                        <TableCell className="font-medium">{transaction.transaction_number}</TableCell>
+                        <TableCell className="font-medium" title={transaction.transaction_number}>{shortRef(transaction.transaction_number)}</TableCell>
                         <TableCell>{formatManilaDateTime(transaction.created_at)}</TableCell>
                         <TableCell>{transaction.customer_name || "Walk-in"}</TableCell>
                         <TableCell>{transaction.label ?? transactionTypeLabel(transaction.transaction_type)}</TableCell>
                         <TableCell>
                           {transaction.reference_booking_id ? (
                             <Link className="text-blue-600 underline" to={`/reservation/status?bookingId=${transaction.reference_booking_id}`}>
-                              {transaction.reference_booking_id}
+                              {shortRef(transaction.reference_booking_id)}
                             </Link>
                           ) : (
                             "—"
@@ -356,7 +357,7 @@ export default function PosHistory() {
                         </TableCell>
                         <TableCell>{money(transaction.total)}</TableCell>
 
-                        <TableCell>{transaction.payment_method}</TableCell>
+                        <TableCell>{humanizeEnum(transaction.payment_method)}</TableCell>
                         <TableCell>{transaction.cashier?.name ?? "Unknown"}</TableCell>
                         <TableCell>
                           <div className="flex gap-2">

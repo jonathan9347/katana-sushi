@@ -1,55 +1,69 @@
 import { useState } from "react";
+import { Activity, ShieldCheck, UsersRound } from "lucide-react";
 import { useAuth } from "../../hooks/useAuth";
+import { humanizeEnum } from "../../lib/display";
+import { Tabs } from "../../components/ui/tabs";
 import AdminSettings from "../../components/settings/AdminSettings";
+import "./Settings.css";
 
 type SettingsTab = "users" | "activity";
 
+const settingsTabs = [
+  { id: "users", label: "Users", icon: <UsersRound aria-hidden="true" size={17} /> },
+  { id: "activity", label: "Activity log", icon: <Activity aria-hidden="true" size={17} /> }
+];
+
 export default function Settings() {
   const { user } = useAuth();
-  const role = user?.role ?? "staff";
-  const displayRole = role === "staff" ? "TEAM MEMBER" : role.replace("_", " ").toUpperCase();
   const [activeTab, setActiveTab] = useState<SettingsTab>("users");
+  const displayRole = humanizeEnum(user?.role ?? "staff").toUpperCase();
 
   return (
-    <main className="min-h-screen bg-slate-100 p-6 pb-24 md:pl-24 lg:p-8">
-      <section className="mx-auto max-w-6xl space-y-6">
-        <header className="flex items-center justify-between gap-4 border-b border-slate-200 pb-5">
-          <h1 className="text-2xl font-bold text-slate-950">Settings</h1>
-          <span className="inline-flex rounded-full bg-red-50 px-3 py-1.5 text-sm font-semibold text-red-700 ring-1 ring-red-100">
-            {displayRole}
-          </span>
+    <main className="settings-page">
+      <section className="settings-content">
+        <header className="settings-banner">
+          <svg className="settings-banner-wave" width="100%" height="100%" aria-hidden="true">
+            <defs>
+              <pattern id="settings-seigaiha" width="48" height="24" patternUnits="userSpaceOnUse">
+                <path
+                  d="M-24 24a24 24 0 0 1 48 0M0 24a24 24 0 0 1 48 0M24 24a24 24 0 0 1 48 0M-12 24a12 12 0 0 1 24 0M12 24a12 12 0 0 1 24 0M36 24a12 12 0 0 1 24 0"
+                  fill="none"
+                  stroke="white"
+                  strokeOpacity=".14"
+                  strokeWidth="1"
+                />
+              </pattern>
+            </defs>
+            <rect width="100%" height="100%" fill="url(#settings-seigaiha)" />
+          </svg>
+          <span className="settings-banner-circle" aria-hidden="true" />
+          <div className="settings-banner-copy">
+            <p>ADMINISTRATION</p>
+            <h1>Settings</h1>
+            <span>Manage accounts, roles, and review what happened in the system.</span>
+          </div>
+          <div className="settings-banner-role">
+            <ShieldCheck aria-hidden="true" size={17} />
+            <span>{displayRole}</span>
+          </div>
         </header>
 
-        <div role="tablist" aria-label="Settings sections" className="flex gap-6 border-b border-slate-200">
-          <button
-            id="settings-tab-users"
-            type="button"
-            role="tab"
-            aria-selected={activeTab === "users"}
-            aria-controls="settings-tab-panel"
-            onClick={() => setActiveTab("users")}
-            className={`border-b-2 px-1 pb-3 text-sm font-semibold ${
-              activeTab === "users" ? "border-red-700 text-red-700" : "border-transparent text-slate-600 hover:text-slate-950"
-            }`}
-          >
-            Users
-          </button>
-          <button
-            id="settings-tab-activity"
-            type="button"
-            role="tab"
-            aria-selected={activeTab === "activity"}
-            aria-controls="settings-tab-panel"
-            onClick={() => setActiveTab("activity")}
-            className={`border-b-2 px-1 pb-3 text-sm font-semibold ${
-              activeTab === "activity" ? "border-red-700 text-red-700" : "border-transparent text-slate-600 hover:text-slate-950"
-            }`}
-          >
-            Activity log
-          </button>
-        </div>
+        <Tabs
+          tabs={settingsTabs}
+          value={activeTab}
+          onChange={(value) => setActiveTab(value as SettingsTab)}
+          label="Settings sections"
+          idPrefix="settings-tab"
+          panelId="settings-tab-panel"
+          className="settings-tabs"
+        />
 
-        <div id="settings-tab-panel" role="tabpanel" aria-labelledby={`settings-tab-${activeTab}`}>
+        <div
+          id="settings-tab-panel"
+          role="tabpanel"
+          aria-labelledby={`settings-tab-${activeTab}`}
+          className="settings-tabpanel"
+        >
           <AdminSettings activeTab={activeTab} />
         </div>
       </section>

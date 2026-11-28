@@ -3,6 +3,7 @@ import { Dialog } from "../ui/dialog";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../ui/table";
 import { Link } from "react-router-dom";
 import { formatManilaDateTime } from "../../lib/dateTime";
+import { humanizeEnum, shortRef } from "../../lib/display";
 
 export type PosHistoryTransaction = {
   id: string;
@@ -64,7 +65,7 @@ export default function TransactionDetailsModal({
   return (
     <Dialog
       open={Boolean(transaction)}
-      title={transaction ? `Transaction ${transaction.transaction_number}` : "Transaction Details"}
+      title={transaction ? `Transaction ${shortRef(transaction.transaction_number)}` : "Transaction Details"}
       panelClassName="max-w-4xl"
       onClose={onClose}
     >
@@ -74,8 +75,8 @@ export default function TransactionDetailsModal({
             <p>Customer: <span className="font-semibold">{transaction.customer_name || "Walk-in"}</span></p>
             <p>Cashier: <span className="font-semibold">{transaction.cashier?.name ?? "Unknown"}</span></p>
             <p>Type: <span className="font-semibold">{transaction.label}</span></p>
-            <p>Payment: <span className="font-semibold">{transaction.payment_method}</span></p>
-            <p>Status: <span className="font-semibold">{transaction.status}</span></p>
+            <p>Payment: <span className="font-semibold">{humanizeEnum(transaction.payment_method)}</span></p>
+            <p>Status: <span className="font-semibold">{humanizeEnum(transaction.status)}</span></p>
             <p>Date: <span className="font-semibold">{formatManilaDateTime(transaction.created_at)}</span></p>
             {transaction.transaction_type === "dine_in" && transaction.table_number !== null && transaction.table_number !== undefined && (
               <p>Table: <span className="font-semibold">{transaction.table_number}</span></p>
@@ -84,7 +85,7 @@ export default function TransactionDetailsModal({
               <p>
                 Booking ID:{" "}
                 <Link className="font-semibold text-blue-600 underline" to={`/reservation/status?bookingId=${transaction.reference_booking_id}`}>
-                  {transaction.reference_booking_id}
+                  {shortRef(transaction.reference_booking_id)}
                 </Link>
               </p>
             )}

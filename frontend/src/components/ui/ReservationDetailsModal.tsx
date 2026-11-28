@@ -7,6 +7,7 @@ import { Button } from "./button";
 import { Dialog } from "./dialog";
 import { Select } from "./select";
 import { formatManilaDate, manilaDateKey, todayManilaDateKey } from "../../lib/dateTime";
+import { formatDateTime, humanizeEnum, shortRef } from "../../lib/display";
 import "../../styles/staff-redesign.css";
 
 type ModalAction = {
@@ -43,7 +44,7 @@ function methodLabel(method: string) {
   if (method === "bank_transfer") return "BPI";
   if (method === "gcash") return "GCash";
   if (method === "paymongo") return "PayMongo (online)";
-  return "Cash";
+  return humanizeEnum(method);
 }
 
 const detailTabs = [
@@ -70,6 +71,7 @@ export function ReservationDetailsModal({ open, title, reservation, actions, onP
 
   const remainingBalance = Number(reservation?.remaining_balance ?? 0);
   const paymentStatus = reservation?.payment_status ?? reservation?.final_payment_status ?? "Payment status unavailable";
+  const paymentStatusLabel = humanizeEnum(paymentStatus);
   const isFullyPaid = remainingBalance <= 0 || paymentStatus.toLowerCase() === "fully paid";
   const offBookingDate = Boolean(reservation?.date && manilaDateKey(reservation.date) !== todayManilaDateKey());
   const isAdmin = localStorage.getItem("katana_role")?.toLowerCase() === "admin";
@@ -169,7 +171,7 @@ export function ReservationDetailsModal({ open, title, reservation, actions, onP
         <div>
           <p className="text-[11px] font-black uppercase tracking-[0.18em] text-[#7b6f72]">Payment status</p>
           <p className={`mt-1 text-sm font-black uppercase ${isFullyPaid ? "text-emerald-700" : "text-amber-700"}`}>
-            {paymentStatus}
+            {paymentStatusLabel}
           </p>
         </div>
         <div className="text-left sm:text-right">
@@ -236,10 +238,10 @@ export function ReservationDetailsModal({ open, title, reservation, actions, onP
   if (!open) return null;
 
   const detailRows = reservation ? [
-    { label: "Booking ID", value: reservation.reference ?? reservation.booking_id ?? reservation.reservation_id ?? "N/A" },
+    { label: "Booking ID", value: shortRef(reservation.reference ?? reservation.booking_id ?? reservation.reservation_id) },
     { label: "Type", value: reservation.type === "catering" ? "Catering" : reservation.reservation_type === "unlimited" ? "Unlimited" : "Dine-in Ala Carte" },
-    { label: "Status", value: (reservation.status ?? reservation.reservation_status ?? "N/A").replace(/_/g, " ") },
-    { label: "Created", value: reservation.created_at ? new Date(reservation.created_at).toLocaleString("en-PH", { year: "numeric", month: "long", day: "numeric", hour: "numeric", minute: "2-digit" }) : "N/A" }
+    { label: "Status", value: humanizeEnum(reservation.status ?? reservation.reservation_status) },
+    { label: "Created", value: reservation.created_at ? formatDateTime(reservation.created_at) : "N/A" }
   ] : [];
 
   const customerRows = reservation ? [
@@ -256,9 +258,9 @@ export function ReservationDetailsModal({ open, title, reservation, actions, onP
     { label: "Event date", value: eventDate ? formatManilaDate(eventDate, { weekday: "long", month: "long", day: "numeric", year: "numeric" }) : "N/A" },
     { label: "Headcount", value: reservation.guests ?? reservation.party_size ?? reservation.headcount ?? 0 },
     { label: "Package", value: reservation.package_name ?? "N/A" },
-    { label: "Event type", value: reservation.event_type ? (reservation.event_type_other ? `${reservation.event_type} · ${reservation.event_type_other}` : reservation.event_type) : "N/A" },
-    { label: "Venue", value: reservation.venue_address ?? reservation.venue_type ?? "N/A" },
-    { label: "Payment plan", value: reservation.payment_plan ?? "N/A" }
+    { label: "Event type", value: reservation.event_type ? (reservation.event_type_other ? `${humanizeEnum(reservation.event_type)} · ${reservation.event_type_other}` : humanizeEnum(reservation.event_type)) : "N/A" },
+    { label: "Venue", value: reservation.venue_address ?? (reservation.venue_type ? humanizeEnum(reservation.venue_type) : "N/A") },
+    { label: "Payment plan", value: reservation.payment_plan ? humanizeEnum(reservation.payment_plan) : "N/A" }
   ] : [];
 
   const packageItems = (() => {
@@ -312,7 +314,7 @@ export function ReservationDetailsModal({ open, title, reservation, actions, onP
               <div className="staff-details-customer-line">
                 <p>{reservation?.customer_name ?? "Customer"}</p>
                 <span className={`staff-details-status ${reservation ? (reservation.status?.toLowerCase() === "pending" || reservation.status?.toLowerCase() === "pending_approval" ? "is-pending" : reservation.status?.toLowerCase() === "confirmed" || reservation.status?.toLowerCase() === "approved" || reservation.status?.toLowerCase() === "seated" ? "is-approved" : reservation.status?.toLowerCase() === "declined" || reservation.status?.toLowerCase() === "cancelled" || reservation.status?.toLowerCase() === "rejected" ? "is-declined" : "is-other") : "is-other"}`}>
-                  {(reservation?.status ?? reservation?.reservation_status ?? "N/A").replace(/_/g, " ")}
+                  {humanizeEnum(reservation?.status ?? reservation?.reservation_status)}
                 </span>
               </div>
             </div>
@@ -435,12 +437,12 @@ export function ReservationDetailsModal({ open, title, reservation, actions, onP
               <section className="staff-details-card">
                 <h3 className="mb-3 text-[11.5px] font-black uppercase tracking-[0.14em] text-[#a82e27]">Payment Summary</h3>
                 <div className="flex items-center justify-between gap-2">
-                  <span className={`inline-flex rounded-full px-[10px] py-[5px] text-[11px] font-black uppercase tracking-[0.03em] ${isFullyPaid ? "bg-[#e3f1ea] text-[#1f6b49]" : "bg-[#fff0d9] text-[#8a5200]"}`}>{paymentStatus}</span>
+                  <span className={`inline-flex rounded-full px-[10px] py-[5px] text-[11px] font-black uppercase tracking-[0.03em] ${isFullyPaid ? "bg-[#e3f1ea] text-[#1f6b49]" : "bg-[#fff0d9] text-[#8a5200]"}`}>{paymentStatusLabel}</span>
                   <span className="text-[11px] font-bold uppercase tracking-[0.08em] text-[#7b6f72]">Paid {Math.round(progressPercent)}%</span>
                 </div>
                 <div className="mt-3 h-[8px] overflow-hidden rounded-full bg-[#eadfe1]"><div className="h-full rounded-full bg-[#2f8a62] transition-all" style={{ width: `${progressPercent}%` }} /></div>
                 <div className="mt-4 space-y-2 text-sm text-[#7b6f72]">
-                  <div className="flex items-center justify-between gap-2"><span>Plan</span><strong className="text-[#1c1214]">{reservation?.payment_plan ?? "N/A"}</strong></div>
+                  <div className="flex items-center justify-between gap-2"><span>Plan</span><strong className="text-[#1c1214]">{reservation?.payment_plan ? humanizeEnum(reservation.payment_plan) : "N/A"}</strong></div>
                   <div className="flex items-center justify-between gap-2"><span>Amount paid</span><strong className="text-[#1c1214]">{new Intl.NumberFormat("en-PH", { style: "currency", currency: "PHP" }).format(totalPaid)}</strong></div>
                   <div className="flex items-center justify-between gap-2"><span>Remaining</span><strong className="text-[#1c1214]">{new Intl.NumberFormat("en-PH", { style: "currency", currency: "PHP" }).format(remainingBalance)}</strong></div>
                 </div>
@@ -455,9 +457,9 @@ export function ReservationDetailsModal({ open, title, reservation, actions, onP
                       <tbody>
                         {paymentHistory.map((payment) => (
                           <tr key={payment.id} className="border-b border-[#f0eef3] last:border-b-0">
-                            <td className="py-2 pr-3 font-semibold text-[#1c1214]">{payment.payment_stage}</td>
-                            <td className="py-2 pr-3 text-[#4a4350]">{payment.method}</td>
-                            <td className="py-2 pr-3 text-[#7b6f72]"><span className="staff-payment-reference" title={payment.reference_number ?? "-"}>{payment.reference_number ?? "-"}</span></td>
+                            <td className="py-2 pr-3 font-semibold text-[#1c1214]">{humanizeEnum(payment.payment_stage)}</td>
+                            <td className="py-2 pr-3 text-[#4a4350]">{methodLabel(payment.method)}</td>
+                            <td className="py-2 pr-3 text-[#7b6f72]"><span className="staff-payment-reference" title={payment.reference_number ?? "-"}>{shortRef(payment.reference_number)}</span></td>
                             <td className="py-2 text-right font-extrabold text-[#1c1214]">{new Intl.NumberFormat("en-PH", { style: "currency", currency: "PHP" }).format(Number(payment.amount ?? 0))}</td>
                           </tr>
                         ))}
@@ -485,7 +487,7 @@ export function ReservationDetailsModal({ open, title, reservation, actions, onP
                       <span className={`staff-timeline-marker ${index === 2 ? "is-current" : "is-complete"}`}>{index === 2 ? "•" : "✓"}</span>
                       <div className="min-w-0 flex-1">
                         <p className="font-bold text-[#1c1214]">{step.label}</p>
-                        <p className="text-[#7b6f72]">{step.time ? new Date(step.time).toLocaleString("en-PH", { year: "numeric", month: "long", day: "numeric", hour: "numeric", minute: "2-digit" }) : "N/A"}</p>
+                        <p className="text-[#7b6f72]">{step.time ? formatDateTime(step.time) : "N/A"}</p>
                       </div>
                     </li>
                   ))}
@@ -497,8 +499,8 @@ export function ReservationDetailsModal({ open, title, reservation, actions, onP
                       return <div key={item.id} className="flex items-start gap-3 text-sm text-[#4a4350]">
                         <span className={`mt-1 inline-flex h-5 w-5 items-center justify-center rounded-full border-2 ${isPositive ? "border-[#2f8a62] bg-[#2f8a62] text-white" : "border-[#a82e27] bg-white shadow-[0_0_0_4px_rgba(168,46,39,0.15)]"}`}>{isPositive ? "✓" : "•"}</span>
                         <div className="min-w-0 flex-1 border-b border-[#f0eef3] pb-2">
-                          <p className="font-bold text-[#1c1214]">{item.event_type.replace(/_/g, " ")}</p>
-                          <p className="text-[#7b6f72]">{new Date(item.created_at).toLocaleString("en-PH", { year: "numeric", month: "long", day: "numeric", hour: "numeric", minute: "2-digit" })}</p>
+                          <p className="font-bold text-[#1c1214]">{humanizeEnum(item.event_type)}</p>
+                          <p className="text-[#7b6f72]">{formatDateTime(item.created_at)}</p>
                           {item.reason ? <p className="mt-1 text-[#4a4350]">{item.reason}</p> : null}
                         </div>
                       </div>;

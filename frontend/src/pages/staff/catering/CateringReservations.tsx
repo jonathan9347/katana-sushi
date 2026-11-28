@@ -14,6 +14,7 @@ import { useToast } from "../../../hooks/useToast";
 import { getApiErrorMessage } from "../../../lib/errors";
 import { formatCateringEventType } from "../../../lib/reservationDetails";
 import { formatCateringPackageSnapshots } from "../../../lib/cateringPackageSnapshot";
+import { humanizeEnum, shortRef } from "../../../lib/display";
 
 type PaymentHistoryItem = {
   id: string;
@@ -107,7 +108,7 @@ function badgeClass(status: string) {
 }
 
 function statusLabel(status: string) {
-  return status.replace(/_/g, " ");
+  return humanizeEnum(status);
 }
 
 function today() {
@@ -540,12 +541,12 @@ export default function CateringReservations() {
                         <span className="h-px flex-1 bg-slate-200" />
                       </div>
                     )}
-                    <article key={reservation.id} role="button" aria-label={`${reservation.reference} ${reservation.customer_name}`} tabIndex={0} onClick={() => { setActiveReservation(reservation); setDrawerOpen(true); }} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); setActiveReservation(reservation); setDrawerOpen(true); } }} className="relative overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm transition hover:-translate-y-0.5 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-600">
+                    <article key={reservation.id} role="button" aria-label={`${shortRef(reservation.reference)} ${reservation.customer_name}`} tabIndex={0} onClick={() => { setActiveReservation(reservation); setDrawerOpen(true); }} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); setActiveReservation(reservation); setDrawerOpen(true); } }} className="relative overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm transition hover:-translate-y-0.5 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-600">
                       <div className="absolute inset-y-0 left-0 w-2 bg-red-600" />
                       <div className="grid gap-4 p-5 sm:grid-cols-[minmax(0,1fr)_auto]">
                         <div className="space-y-2 pl-3">
                           <div className="flex flex-wrap items-center gap-2">
-                            <span className="text-sm font-semibold uppercase tracking-wide text-slate-500">{reservation.reference}</span>
+                            <span className="text-sm font-semibold uppercase tracking-wide text-slate-500" title={reservation.reference}>{shortRef(reservation.reference)}</span>
                             <span className={`rounded-full px-2 py-1 text-xs font-black uppercase ${badgeClass(reservation.status)}`}>
                               {statusLabel(reservation.status)}
                             </span>
@@ -636,9 +637,9 @@ export default function CateringReservations() {
                           className="flex w-full items-center justify-between gap-3 rounded-lg border border-slate-200 px-3 py-2 text-left text-sm hover:bg-slate-50"
                           onClick={() => setActiveReservation(reservation)}
                         >
-                          <span className="min-w-0 truncate font-semibold text-slate-800">{reservation.reference} · {reservation.customer_name}</span>
+                          <span className="min-w-0 truncate font-semibold text-slate-800" title={reservation.reference}>{shortRef(reservation.reference)} · {reservation.customer_name}</span>
                           <span className={`shrink-0 font-bold ${reservation.payment_status === "Balance overdue" ? "text-red-700" : "text-amber-700"}`}>
-                            {reservation.payment_status}
+                            {humanizeEnum(reservation.payment_status)}
                           </span>
                         </button>
                       </li>
@@ -672,7 +673,7 @@ export default function CateringReservations() {
 
       <ReservationDetailsModal
         open={paymentModalOpen && Boolean(activeReservation)}
-        title={activeReservation ? `${activeReservation.reference} details` : "Event details"}
+        title={activeReservation ? `${shortRef(activeReservation.reference)} details` : "Event details"}
         reservation={activeReservation}
         onClose={() => {
           setPaymentModalOpen(false);
@@ -722,7 +723,7 @@ export default function CateringReservations() {
       />
       <BookingDetailsDrawer
         open={drawerOpen && Boolean(activeReservation)}
-        title={activeReservation?.reference ?? "Catering booking"}
+        title={activeReservation ? shortRef(activeReservation.reference) : "Catering booking"}
         typeLabel="CATERING BOOKING"
         customerName={activeReservation?.customer_name ?? ""}
         status={activeReservation?.status ?? ""}
@@ -778,11 +779,11 @@ export default function CateringReservations() {
             </div>
             <div className="rounded-md border border-slate-200 bg-white p-4">
               <p className="text-sm font-semibold uppercase tracking-wide text-slate-500">Event summary</p>
-              <p className="mt-3 text-sm text-slate-800">Reference: {completionTarget.reference}</p>
+              <p className="mt-3 text-sm text-slate-800">Reference: {shortRef(completionTarget.reference)}</p>
               <p className="text-sm text-slate-800">Customer: {completionTarget.customer_name}</p>
               <p className="text-sm text-slate-800">Date: {formatManilaDate(completionTarget.date)}</p>
               <p className="text-sm text-slate-800">Amount due: ₱{completionTarget.remaining_balance?.toFixed(2) ?? "0.00"}</p>
-              <p className="text-sm text-slate-800">Payment status: {completionTarget.payment_status ?? "pending"}</p>
+              <p className="text-sm text-slate-800">Payment status: {humanizeEnum(completionTarget.payment_status ?? "pending")}</p>
             </div>
             <div className="flex justify-end gap-2">
               <Button variant="outline" onClick={() => setCompletionTarget(null)}>
@@ -798,7 +799,7 @@ export default function CateringReservations() {
 
       <Dialog
         open={Boolean(approvalTarget)}
-        title={`Approve catering request${approvalTarget ? `: ${approvalTarget.reference}` : ""}`}
+        title={`Approve catering request${approvalTarget ? `: ${shortRef(approvalTarget.reference)}` : ""}`}
         onClose={() => {
           if (!approvalTarget || !actionLoading[approvalTarget.id]) setApprovalTarget(null);
         }}

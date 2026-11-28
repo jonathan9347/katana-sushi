@@ -5,6 +5,7 @@ import { formatManilaDate, manilaDateKey, todayManilaDateKey } from "../../../li
 import { Button } from "../../../components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "../../../components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../../../components/ui/table";
+import { humanizeEnum, shortRef } from "../../../lib/display";
 
 type Reservation = {
   id: string;
@@ -113,19 +114,19 @@ export default function InventoryReservations() {
                         {reservation.time ? ` · ${reservation.time}` : ""}
                       </TableCell>
                       <TableCell>
-                        <span className="font-semibold">{reservation.reference}</span>
+                        <span className="font-semibold">{shortRef(reservation.reference)}</span>
                         <span className="block text-xs text-slate-500">
-                          {reservation.customer_name} · {reservation.type === "takeout" ? "pickup" : reservation.type}
+                          {reservation.customer_name} · {reservation.type === "takeout" ? "Pickup" : humanizeEnum(reservation.type)}
                         </span>
                       </TableCell>
                       <TableCell>{reservation.guests ?? "—"}</TableCell>
-                      <TableCell><span className={`rounded-full px-2 py-1 text-xs font-semibold ${["cancelled", "canceled", "rejected", "declined"].includes(reservation.status.toLowerCase()) ? "bg-slate-100 text-slate-600" : "bg-emerald-50 text-emerald-800"}`}>{reservation.status.replace(/_/g, " ")}</span></TableCell>
+                      <TableCell><span className={`rounded-full px-2 py-1 text-xs font-semibold ${["cancelled", "canceled", "rejected", "declined"].includes(reservation.status.toLowerCase()) ? "bg-slate-100 text-slate-600" : "bg-emerald-50 text-emerald-800"}`}>{humanizeEnum(reservation.status)}</span></TableCell>
                       <TableCell className="max-w-xs whitespace-normal">{displayMenu(reservation.menu)}</TableCell>
                       <TableCell className="min-w-52">
                         {reservation.ingredients.length ? (
                           reservation.ingredients.map((ingredient, index) => (
                             <span key={`${ingredient.material_id}-${index}`} className="mb-1 block text-xs">
-                            {ingredient.material}: {Number(ingredient.quantity).toLocaleString()} {ingredient.unit} · <strong>{ingredient.status}</strong>
+                            {ingredient.material}: {Number(ingredient.quantity).toLocaleString()} {ingredient.unit} · <strong>{humanizeEnum(ingredient.status)}</strong>
                             </span>
                           ))
                         ) : (

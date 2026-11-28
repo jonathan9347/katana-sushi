@@ -21,6 +21,7 @@ import {
 import { Link } from "react-router-dom";
 import { useAuth } from "../../hooks/useAuth";
 import { formatManilaDate, formatTime12, todayManilaDateKey } from "../../lib/dateTime";
+import { humanizeEnum, shortRef } from "../../lib/display";
 import {
   dashboardKeys,
   fetchDashboardCalendar,
@@ -284,7 +285,7 @@ export default function AdminDashboard() {
   }, [pendingNotifications, resolvedItems]);
   const calendarBookings = new Set(calendarQuery.data ?? []);
   const displayName = user?.name ?? "Administrator";
-  const displayRole = (user?.role ?? "admin").replace(/_/g, " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
+  const displayRole = humanizeEnum(user?.role ?? "admin");
   const todayDate = new Date(`${today}T12:00:00+08:00`);
   const updatedLabel = updatedAt
     ? new Intl.DateTimeFormat("en-PH", { hour: "numeric", minute: "2-digit", timeZone: "Asia/Manila" }).format(updatedAt)
@@ -408,7 +409,7 @@ export default function AdminDashboard() {
                 <div className="min-w-0">
                   <button type="button" className="admin-notification-preview-text" onClick={() => setNotificationsOpen(true)}>
                     <span className="admin-notification-preview-name block">{firstNotification.customerName}</span>
-                    <span className="admin-notification-preview-type block">{firstNotification.type} · {firstNotification.reference}</span>
+                    <span className="admin-notification-preview-type block">{humanizeEnum(firstNotification.type)} · {shortRef(firstNotification.reference)}</span>
                     <span className="admin-notification-preview-meta block">
                       {formatManilaDate(firstNotification.date, { month: "short", day: "numeric" })}
                       {firstNotification.time ? ` · ${formatTime12(firstNotification.time)}` : ""}
@@ -577,8 +578,8 @@ export default function AdminDashboard() {
                 <li key={`${reminder.type}-${reminder.id}`}>
                   <div className="admin-reminder-row">
                     <div className="min-w-0">
-                      <p className="admin-reminder-name">{reminder.customerName} · {reminder.details || reminder.reference}</p>
-                      <p className="admin-reminder-meta">{reminder.type === "table" ? "Table booking" : "Catering event"} · {reminder.reference}</p>
+                      <p className="admin-reminder-name">{reminder.customerName} · {reminder.details || shortRef(reminder.reference)}</p>
+                      <p className="admin-reminder-meta">{reminder.type === "table" ? "Table booking" : "Catering event"} · {shortRef(reminder.reference)}</p>
                     </div>
                     <p className="admin-reminder-meta shrink-0">
                       <Clock3 aria-hidden="true" className="mr-1 inline" size={12} />
@@ -608,7 +609,7 @@ export default function AdminDashboard() {
                 <li key={entry.id}>
                   <div className="admin-feedback-row">
                     <div className="min-w-0">
-                      <p className="admin-feedback-name">{entry.customer_name} · {entry.visit_type.replace(/_/g, " ")}</p>
+                      <p className="admin-feedback-name">{entry.customer_name} · {humanizeEnum(entry.visit_type)}</p>
                       <p className="admin-feedback-message">{entry.message}</p>
                     </div>
                     <span className="admin-rating" aria-label={`${entry.rating} out of 5 stars`}>

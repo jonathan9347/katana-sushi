@@ -80,15 +80,15 @@ test("admin Settings has Users and Activity log tabs with one view at a time", a
 
   await expect(page.getByRole("heading", { name: "Settings", exact: true })).toBeVisible();
   await expect(page.getByText("ADMIN", { exact: true })).toBeVisible();
-  await expect(page.getByRole("tab", { name: "Users" })).toHaveAttribute("aria-selected", "true");
+  await expect(page.getByRole("tab", { name: "Users", exact: true })).toHaveAttribute("aria-selected", "true");
   await expect(page.locator("body")).not.toContainText(/\bstaff\b/i);
-  await expect(page.getByRole("heading", { name: "User Management" })).toBeVisible();
-  await expect(page.getByRole("heading", { name: "User Activity Log" })).toHaveCount(0);
+  await expect(page.getByRole("heading", { name: "User management", exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "User activity log", exact: true })).toHaveCount(0);
 
-  await page.getByRole("tab", { name: "Activity log" }).click();
-  await expect(page.getByRole("tab", { name: "Activity log" })).toHaveAttribute("aria-selected", "true");
-  await expect(page.getByRole("heading", { name: "User Activity Log" })).toBeVisible();
-  await expect(page.getByRole("heading", { name: "User Management" })).toHaveCount(0);
+  await page.getByRole("tab", { name: "Activity log", exact: true }).click();
+  await expect(page.getByRole("tab", { name: "Activity log", exact: true })).toHaveAttribute("aria-selected", "true");
+  await expect(page.getByRole("heading", { name: "User activity log", exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "User management", exact: true })).toHaveCount(0);
 });
 
 test("non-admin roles do not see or access Settings", async ({ page }) => {
@@ -104,11 +104,11 @@ test("account menu no longer offers profile or password actions", async ({ page 
   await setUser(page, "admin");
   await mockSettingsApi(page);
   await page.goto("/staff/settings");
-  await page.locator("aside button").click();
+  await page.getByRole("button", { name: "Profile" }).click();
 
   await expect(page.getByRole("button", { name: "My Profile" })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Change Password" })).toHaveCount(0);
-  await expect(page.getByRole("button", { name: "Logout" })).toBeVisible();
+  await expect(page.getByRole("menuitem", { name: "Log out" })).toBeVisible();
 });
 
 test("Users filters by role and has no status or deactivation controls", async ({ page }) => {
@@ -116,7 +116,7 @@ test("Users filters by role and has no status or deactivation controls", async (
   await mockSettingsApi(page);
   await page.goto("/staff/settings");
 
-  await page.getByLabel("Filter by role").selectOption("inventory_manager");
+  await page.getByRole("group", { name: "Filter users by role" }).getByRole("button", { name: "Inventory manager" }).click();
   await expect(page.getByText("Jordan Manager")).toBeVisible();
   await expect(page.getByText("Alex Rivera")).toHaveCount(0);
   await expect(page.getByRole("columnheader", { name: "Status" })).toHaveCount(0);
@@ -129,7 +129,7 @@ test("the legacy staff role is displayed as Team member", async ({ page }) => {
   await page.goto("/staff/settings");
   await page.getByRole("button", { name: "Add user" }).click();
 
-  await expect(page.getByRole("option", { name: "Team member" })).toHaveCount(2);
+  await expect(page.getByRole("radio", { name: "Team member" })).toBeVisible();
   await expect(page.locator("body")).not.toContainText(/\bstaff\b/i);
 });
 
@@ -146,7 +146,8 @@ test("admin reset-password action submits the new password but never displays it
     response.url().includes("/api/admin/users/staff-1/reset-password")
   );
 
-  await page.getByLabel("New password").fill("NewStaffPassword123!");
+  const newPassword = page.getByRole("textbox", { name: "New password", exact: true });
+  await newPassword.fill("NewStaffPassword123!");
   await page.getByRole("button", { name: "Reset password" }).click();
 
   expect((await resetRequest).postDataJSON()).toEqual({ password: "NewStaffPassword123!" });
@@ -156,5 +157,5 @@ test("admin reset-password action submits the new password but never displays it
     user: { id: "staff-1", name: "Alex Rivera", email: "alex@example.test", role: "cashier" }
   });
   expect(JSON.stringify(responseBody)).not.toContain("NewStaffPassword123!");
-  await expect(page.getByLabel("New password")).toHaveValue("");
+  await expect(newPassword).toHaveValue("");
 });

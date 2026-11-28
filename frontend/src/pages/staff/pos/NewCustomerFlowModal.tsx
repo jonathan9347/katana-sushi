@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../../../lib/api";
+import { shortRef } from "../../../lib/display";
 import "./NewCustomerFlowModal.css";
 
 type Service = "dine_in" | "takeout";
@@ -567,7 +568,7 @@ export default function NewCustomerFlowModal({ open, onClose, onStartOrdering, i
                     <span className="pos-new-customer-avatar">{order.customer_name.charAt(0).toUpperCase()}</span>
                     <span className="pos-new-customer-list-copy">
                       <strong>{order.customer_name}</strong>
-                      <small>{order.items.length} item{order.items.length === 1 ? "" : "s"} · {order.order_number}</small>
+                      <small title={order.order_number}>{order.items.length} item{order.items.length === 1 ? "" : "s"} · {shortRef(order.order_number)}</small>
                     </span>
                     <span className="pos-new-customer-list-time"><Clock3 aria-hidden="true" />{formatPickupTime(order.pickup_time ?? order.created_at)}</span>
                     <Check className="pos-new-customer-row-check" aria-hidden="true" />

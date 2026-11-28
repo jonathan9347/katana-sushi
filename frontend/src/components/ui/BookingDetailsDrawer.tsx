@@ -2,6 +2,7 @@ import { useEffect, useRef } from "react";
 import type React from "react";
 import { X } from "lucide-react";
 import { Button } from "./button";
+import { humanizeEnum } from "../../lib/display";
 import "../../styles/staff-redesign.css";
 
 export type BookingDetailsDrawerProps = {
@@ -83,7 +84,7 @@ export function BookingDetailsDrawer({
               <X className="h-5 w-5" />
             </button>
           </div>
-          <span className="staff-drawer-status relative mt-4 inline-flex rounded-full bg-white/10 px-3 py-1 text-xs font-bold uppercase tracking-wide text-white">{status.replace(/_/g, " ")}</span>
+          <span className="staff-drawer-status relative mt-4 inline-flex rounded-full bg-white/10 px-3 py-1 text-xs font-bold uppercase tracking-wide text-white">{humanizeEnum(status)}</span>
         </header>
         <div className="min-h-0 flex-1 overflow-y-auto p-5">
           {body}

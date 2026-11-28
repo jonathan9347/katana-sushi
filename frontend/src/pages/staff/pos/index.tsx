@@ -7,6 +7,7 @@ import { PosCartKey, PosProduct, usePosCart } from "./store";
 import { api } from "../../../lib/api";
 import { defaultSystemSettings, fetchSystemSettings, type SystemSettings } from "../../../lib/systemSettings";
 import { useToast } from "../../../hooks/useToast";
+import { formatDateTime, shortRef } from "../../../lib/display";
 import { Button } from "../../../components/ui/button";
 import { Dialog } from "../../../components/ui/dialog";
 import DiningService, {
@@ -482,7 +483,7 @@ export default function PosPage() {
       toast("Table bill completed and table released.");
       if (Math.round(Number(transaction.total) * 100) !== Math.round(billSlipTotal * 100)) {
         setBillOutMismatchWarning(
-          `Bill slip total ${money(billSlipTotal)} differs from charged total ${money(Number(transaction.total))} on ${transaction.transaction_number}.`
+          `Bill slip total ${money(billSlipTotal)} differs from charged total ${money(Number(transaction.total))} on ${shortRef(transaction.transaction_number)}.`
         );
       } else {
         setBillOutMismatchWarning("");
@@ -611,7 +612,7 @@ export default function PosPage() {
       } catch (error) {
         printWindow.close();
         console.error("Dine-in order printing failed", error);
-        toast(`Order ${order.order_number} was saved, but printing failed. Please retry the print.`);
+        toast(`Order ${shortRef(order.order_number)} was saved, but printing failed. Please retry the print.`);
       }
     },
     onError: (error, input) => {
@@ -1087,7 +1088,7 @@ export default function PosPage() {
         {lastPickupReceipt && (
           <div className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-emerald-200 bg-emerald-50 px-4 py-3">
             <p className="text-sm font-medium text-emerald-900">
-              Pickup order {lastPickupReceipt.transaction_number} completed.
+              Pickup order {shortRef(lastPickupReceipt.transaction_number)} completed.
             </p>
             <Button
               type="button"
@@ -1602,8 +1603,8 @@ function printReceipt(transaction: PosTransaction, settings: SystemSettings, rec
   }
 
   const lines = [settings.restaurant_name, "RECEIPT", "PAID"];
-  addPrintPair(lines, "Receipt no", transaction.transaction_number);
-  addPrintPair(lines, "Date", new Date(transaction.created_at).toLocaleString());
+  addPrintPair(lines, "Receipt no", shortRef(transaction.transaction_number));
+  addPrintPair(lines, "Date", formatDateTime(transaction.created_at));
   if (transaction.customer_name) addPrintPair(lines, "Customer", transaction.customer_name);
   lines.push("-".repeat(32));
   for (const item of transaction.items) {
@@ -1633,6 +1634,6 @@ function printReceipt(transaction: PosTransaction, settings: SystemSettings, rec
     lines.push("-".repeat(32));
     lines.push(...wrapPrintText(settings.receipt_footer));
   }
-  printPlainLines(receipt, transaction.transaction_number, lines, settings.receipt_paper_size, () => receipt.close(), true);
+  printPlainLines(receipt, shortRef(transaction.transaction_number), lines, settings.receipt_paper_size, () => receipt.close(), true);
   return true;
 }

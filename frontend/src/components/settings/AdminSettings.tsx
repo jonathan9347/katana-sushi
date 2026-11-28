@@ -1,6 +1,29 @@
-import { useMemo, useState } from "react";
+import { useId, useMemo, useState, type FormEvent, type KeyboardEvent } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { KeyRound, PencilLine, Plus, Search, X } from "lucide-react";
+import {
+  Activity,
+  AlertCircle,
+  BookOpen,
+  Box,
+  CalendarDays,
+  Check,
+  ChevronLeft,
+  ChevronRight,
+  ClipboardList,
+  Eye,
+  EyeOff,
+  KeyRound,
+  LockKeyhole,
+  Mail,
+  PencilLine,
+  Plus,
+  Search,
+  Settings,
+  ShieldCheck,
+  UserRound,
+  X,
+  type LucideIcon
+} from "lucide-react";
 import { useToast } from "../../hooks/useToast";
 import { fetchActivityLogs, type ActivityLogItem } from "../../lib/activityLogs";
 import {
@@ -10,39 +33,36 @@ import {
   updateStaffUser,
   type StaffUser
 } from "../../lib/adminUsers";
-import { Button } from "../ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "../ui/card";
+import { describeActivity, formatDate, formatDateTime, formatTime, humanizeEnum, type ActivityDescription } from "../../lib/display";
+import { getApiErrorMessage } from "../../lib/errors";
+import { Chip } from "../ui/Chip";
+import { Drawer } from "../ui/Drawer";
+import "./AdminSettings.css";
 
-const staffRoles = ["admin", "inventory_manager", "cashier", "receptionist", "event_coordinator", "chef", "staff"];
+const staffRoles = ["admin", "inventory_manager", "receptionist", "chef", "cashier", "event_coordinator", "staff"];
+
+const roleColors: Record<string, { background: string; color: string }> = {
+  admin: { background: "#9B1D20", color: "#FFFFFF" },
+  inventory_manager: { background: "#EFE9FB", color: "#5B3FA8" },
+  receptionist: { background: "#FBEAEA", color: "#8A1719" },
+  chef: { background: "#FDF1D9", color: "#6E4500" },
+  cashier: { background: "#E1F4EA", color: "#14633A" },
+  event_coordinator: { background: "#EAF1FB", color: "#2A5DB0" }
+};
+
+const categoryIcons: Record<ActivityDescription["icon"], LucideIcon> = {
+  book: BookOpen,
+  box: Box,
+  clipboard: ClipboardList,
+  calendar: CalendarDays,
+  package: Box,
+  user: UserRound,
+  settings: Settings,
+  activity: Activity
+};
 
 function formatRole(role: string) {
-  if (role === "staff") {
-    return "Team member";
-  }
-
-  return role
-    .split("_")
-    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
-    .join(" ");
-}
-
-function formatDateTime(value: string | null | undefined) {
-  if (!value) {
-    return "Never";
-  }
-
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) {
-    return "Never";
-  }
-
-  return date.toLocaleString([], {
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-    hour: "numeric",
-    minute: "2-digit"
-  });
+  return humanizeEnum(role);
 }
 
 function getInitials(name: string) {
@@ -54,51 +74,86 @@ function getInitials(name: string) {
     .join("") || "S";
 }
 
-function ActivityLogTable({ logs }: { logs: ActivityLogItem[] }) {
+function RoleAvatar({ name, role }: { name: string; role: string }) {
+  const colors = roleColors[role] ?? { background: "#EEF0F5", color: "#3B4254" };
   return (
-    <div className="overflow-hidden rounded-2xl border border-slate-200">
-      <table className="min-w-full divide-y divide-slate-200 text-left">
-        <thead className="bg-slate-50">
-          <tr>
-            <th className="px-4 py-3 text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Actor</th>
-            <th className="px-4 py-3 text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Action</th>
-            <th className="px-4 py-3 text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">When</th>
-          </tr>
-        </thead>
-        <tbody className="divide-y divide-slate-200 bg-white">
-          {logs.length === 0 ? (
-            <tr>
-              <td className="px-4 py-8 text-center text-sm text-slate-500" colSpan={3}>
-                No activity recorded yet.
-              </td>
-            </tr>
-          ) : (
-            logs.map((log) => (
-              <tr key={log.id} className="align-top">
-                <td className="px-4 py-3">
-                  <div className="flex items-center gap-3">
-                    <div className="flex h-9 w-9 items-center justify-center rounded-full bg-red-50 text-xs font-bold text-red-700">
-                      {getInitials(log.actor_name ?? "System")}
-                    </div>
-                    <div>
-                      <p className="text-sm font-semibold text-slate-900">{log.actor_name ?? "System"}</p>
-                      <p className="text-xs text-slate-500">{log.actor_role ? formatRole(log.actor_role) : "System"}</p>
-                    </div>
-                  </div>
-                </td>
-                <td className="px-4 py-3 text-sm text-slate-700">
-                  <span className="inline-flex rounded-full bg-slate-100 px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.2em] text-slate-600">
-                    {log.entity}
-                  </span>
-                  <p className="mt-2 max-w-xl break-words">{log.message}</p>
-                </td>
-                <td className="px-4 py-3 text-sm text-slate-500">{formatDateTime(log.created_at)}</td>
-              </tr>
-            ))
-          )}
-        </tbody>
-      </table>
-    </div>
+    <span className="settings-avatar" style={{ backgroundColor: colors.background, color: colors.color }} aria-hidden="true">
+      {getInitials(name)}
+    </span>
+  );
+}
+
+function RoleBadge({ role }: { role: string }) {
+  const colors = roleColors[role] ?? { background: "#EEF0F5", color: "#3B4254" };
+  return (
+    <span className={`settings-role-badge${role === "admin" ? " is-admin" : ""}`} style={{ backgroundColor: colors.background, color: colors.color }}>
+      {formatRole(role)}
+    </span>
+  );
+}
+
+function ActivityEntry({ log, description }: { log: ActivityLogItem; description: ActivityDescription }) {
+  const Icon = categoryIcons[description.icon];
+  const avatarRole = log.actor_role ?? "staff";
+  return (
+    <article className={`settings-activity-entry tone-${description.tone}`}>
+      <RoleAvatar name={description.actor} role={avatarRole} />
+      <div className="settings-activity-copy">
+        <p>
+          <strong>{description.actor}</strong>{" "}
+          {description.phrase}{" "}
+          {description.target && <strong>{description.target}</strong>}
+        </p>
+        <span>{log.actor_role ? formatRole(log.actor_role) : "System"}</span>
+      </div>
+      <div className="settings-activity-meta">
+        <span className={`settings-category-pill tone-${description.tone}`}>
+          <Icon aria-hidden="true" size={14} />
+          {description.category}
+        </span>
+        <time dateTime={log.created_at} title={formatDateTime(log.created_at)}>
+          {formatTime(log.created_at)}
+        </time>
+      </div>
+    </article>
+  );
+}
+
+function groupByDay(entries: Array<{ log: ActivityLogItem; description: ActivityDescription }>) {
+  const today = new Date();
+  const yesterday = new Date(today.getTime() - 24 * 60 * 60 * 1000);
+  const todayKey = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Manila", year: "numeric", month: "2-digit", day: "2-digit" }).format(today);
+  const yesterdayKey = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Manila", year: "numeric", month: "2-digit", day: "2-digit" }).format(yesterday);
+  const groups = new Map<string, { label: string; entries: typeof entries }>();
+
+  for (const entry of entries) {
+    const key = entry.description.dayKey;
+    const relative = key === todayKey ? "TODAY" : key === yesterdayKey ? "YESTERDAY" : "";
+    const dateLabel = formatDate(entry.log.created_at).replace(/,\s*\d{4}$/, "");
+    const label = relative ? `${relative} · ${dateLabel}` : dateLabel;
+    if (!groups.has(key)) groups.set(key, { label, entries: [] });
+    groups.get(key)?.entries.push(entry);
+  }
+
+  return Array.from(groups.entries()).map(([key, group]) => ({ key, ...group }));
+}
+
+function WavePattern({ id }: { id: string }) {
+  return (
+    <svg className="settings-drawer-wave" width="100%" height="100%" aria-hidden="true">
+      <defs>
+        <pattern id={id} width="48" height="24" patternUnits="userSpaceOnUse">
+          <path
+            d="M-24 24a24 24 0 0 1 48 0M0 24a24 24 0 0 1 48 0M24 24a24 24 0 0 1 48 0M-12 24a12 12 0 0 1 24 0M12 24a12 12 0 0 1 24 0M36 24a12 12 0 0 1 24 0"
+            fill="none"
+            stroke="white"
+            strokeOpacity=".14"
+            strokeWidth="1"
+          />
+        </pattern>
+      </defs>
+      <rect width="100%" height="100%" fill={`url(#${id})`} />
+    </svg>
   );
 }
 
@@ -106,17 +161,22 @@ export default function AdminSettings({ activeTab }: { activeTab: "users" | "act
   const queryClient = useQueryClient();
   const { toast } = useToast();
   const [searchTerm, setSearchTerm] = useState("");
+  const [activitySearch, setActivitySearch] = useState("");
   const [roleFilter, setRoleFilter] = useState("all");
+  const [activityCategory, setActivityCategory] = useState("All activity");
   const [activityPage, setActivityPage] = useState(1);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [editingUserId, setEditingUserId] = useState<string | null>(null);
   const [resetPassword, setResetPassword] = useState("");
+  const [passwordVisible, setPasswordVisible] = useState(false);
+  const [formError, setFormError] = useState("");
   const [form, setForm] = useState({
     name: "",
     email: "",
     role: "staff",
     password: ""
   });
+  const roleGroupId = useId();
 
   const usersQuery = useQuery({
     queryKey: ["admin", "users"],
@@ -136,6 +196,14 @@ export default function AdminSettings({ activeTab }: { activeTab: "users" | "act
   const users = useMemo(() => usersQuery.data?.users ?? [], [usersQuery.data]);
   const logs = useMemo(() => activityQuery.data?.logs ?? [], [activityQuery.data]);
   const totalLogPages = activityQuery.data?.totalPages ?? 1;
+  const roleOptions = useMemo(() => {
+    const existing = new Set(users.map((user) => user.role).filter(Boolean));
+    return [...staffRoles.filter((role) => existing.has(role)), ...Array.from(existing).filter((role) => !staffRoles.includes(role))];
+  }, [users]);
+  const roleCardOptions = useMemo(
+    () => Array.from(new Set([...staffRoles, ...users.map((user) => user.role).filter(Boolean)])),
+    [users]
+  );
 
   const filteredUsers = useMemo(() => {
     const normalizedQuery = searchTerm.trim().toLowerCase();
@@ -147,10 +215,40 @@ export default function AdminSettings({ activeTab }: { activeTab: "users" | "act
     });
   }, [roleFilter, searchTerm, users]);
 
+  const descriptions = useMemo(
+    () => logs.map((log) => ({ log, description: describeActivity(log, { users: Object.fromEntries(users.map((user) => [user.id, user.name])) }) })),
+    [logs, users]
+  );
+  const nonReadActivity = descriptions.some(({ description }) => !description.hidden);
+  const visibleActivity = useMemo(() => {
+    const query = activitySearch.trim().toLowerCase();
+    return descriptions.filter(({ log, description }) => {
+      if (nonReadActivity && description.hidden) return false;
+      const searchMatch = !query || [
+        description.sentence,
+        description.category,
+        log.actor_role ? formatRole(log.actor_role) : "System"
+      ].some((value) => value.toLowerCase().includes(query));
+      const categoryMatch = activityCategory === "All activity" || description.category === activityCategory;
+      return searchMatch && categoryMatch;
+    });
+  }, [activityCategory, activitySearch, descriptions, nonReadActivity]);
+  const activityCategories = useMemo(
+    () => Array.from(
+      new Set(descriptions
+        .filter(({ description }) => !(nonReadActivity && description.hidden))
+        .map(({ description }) => description.category))
+    ),
+    [descriptions, nonReadActivity]
+  );
+  const activityGroups = useMemo(() => groupByDay(visibleActivity), [visibleActivity]);
+
   const openAddDrawer = () => {
     setEditingUserId(null);
     setForm({ name: "", email: "", role: "staff", password: "" });
     setResetPassword("");
+    setPasswordVisible(false);
+    setFormError("");
     setDrawerOpen(true);
   };
 
@@ -159,6 +257,8 @@ export default function AdminSettings({ activeTab }: { activeTab: "users" | "act
     setEditingUserId(null);
     setForm({ name: "", email: "", role: "staff", password: "" });
     setResetPassword("");
+    setPasswordVisible(false);
+    setFormError("");
   };
 
   const upsertUserMutation = useMutation({
@@ -176,315 +276,388 @@ export default function AdminSettings({ activeTab }: { activeTab: "users" | "act
       return createStaffUser({ ...payload, password: form.password.trim() });
     },
     onSuccess: () => {
-      toast(editingUserId ? "User updated successfully." : "User added successfully.");
+      toast(editingUserId ? "User updated" : "User added");
       closeDrawer();
       queryClient.invalidateQueries({ queryKey: ["admin", "users"] });
       queryClient.invalidateQueries({ queryKey: ["admin", "activity-logs"] });
     },
-    onError: (error: any) => {
-      toast(error?.response?.data?.message ?? `Unable to ${editingUserId ? "update" : "add"} user.`);
+    onError: (error: unknown) => {
+      setFormError(getApiErrorMessage(error, `Unable to ${editingUserId ? "update" : "add"} user.`));
     }
   });
 
   const resetPasswordMutation = useMutation({
     mutationFn: ({ userId, password }: { userId: string; password: string }) =>
       resetStaffUserPassword(userId, password),
-    onSuccess: (_user, variables) => {
-      const target = users.find((user) => user.id === variables.userId);
-      toast(`Password reset for ${target?.name ?? "user"}.`);
+    onSuccess: () => {
+      toast("Password reset");
       setResetPassword("");
+      setFormError("");
       queryClient.invalidateQueries({ queryKey: ["admin", "users"] });
       queryClient.invalidateQueries({ queryKey: ["admin", "activity-logs"] });
     },
-    onError: (error: any) => {
-      toast(error?.response?.data?.message ?? "Unable to reset password.");
+    onError: (error: unknown) => {
+      setFormError(getApiErrorMessage(error, "Unable to reset password."));
     }
   });
 
-  const canSubmitUser =
+  const validEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email.trim());
+  const canSubmitUser = Boolean(
     form.name.trim() &&
-    form.email.trim() &&
+    validEmail &&
     (!editingUserId ? form.password.trim().length >= 8 : true) &&
-    !upsertUserMutation.isPending;
+    !upsertUserMutation.isPending
+  );
+
+  function submitUser(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!canSubmitUser) return;
+    setFormError("");
+    upsertUserMutation.mutate();
+  }
+
+  function changePage(nextPage: number) {
+    setActivityPage(Math.min(totalLogPages, Math.max(1, nextPage)));
+  }
+
+  function onRoleKeyDown(event: KeyboardEvent<HTMLLabelElement>, index: number) {
+    let nextIndex: number | null = null;
+    if (event.key === "ArrowRight" || event.key === "ArrowDown") nextIndex = (index + 1) % roleCardOptions.length;
+    if (event.key === "ArrowLeft" || event.key === "ArrowUp") nextIndex = (index - 1 + roleCardOptions.length) % roleCardOptions.length;
+    if (event.key === "Home") nextIndex = 0;
+    if (event.key === "End") nextIndex = roleCardOptions.length - 1;
+    if (nextIndex === null) return;
+    event.preventDefault();
+    const nextRole = roleCardOptions[nextIndex];
+    setForm((current) => ({ ...current, role: nextRole }));
+    document.getElementById(`${roleGroupId}-${nextRole}`)?.focus();
+  }
 
   return (
-    <Card>
-      {activeTab === "users" && <CardHeader>
-        <div className="flex items-center justify-between gap-3">
-          <div className="flex items-center gap-3 text-red-700">
-            <span aria-hidden="true">Users</span>
-            <CardTitle className="ml-2">User Management</CardTitle>
-          </div>
-          <Button type="button" variant="default" onClick={openAddDrawer}>
-            <Plus className="mr-2 h-4 w-4" />
-            Add user
-          </Button>
-        </div>
-      </CardHeader>}
-      <CardContent className="space-y-8 pt-6">
-        {activeTab === "users" && <section>
-          <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+    <>
+      {activeTab === "users" && (
+        <section className="settings-card" aria-labelledby="settings-users-title">
+          <header className="settings-card-heading">
+            <span className="settings-card-icon"><UsersRoundIcon /></span>
             <div>
-              <h3 className="text-lg font-semibold text-slate-900">Users</h3>
-              <p className="text-sm text-slate-500">Manage accounts and role assignments.</p>
+              <h2 id="settings-users-title">User management</h2>
+              <p>Manage accounts and role assignments.</p>
             </div>
-            <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row">
-              <div className="relative w-full sm:w-64">
-                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-                <input
-                  value={searchTerm}
-                  onChange={(event) => setSearchTerm(event.target.value)}
-                  className="w-full rounded-md border border-slate-300 bg-white py-2.5 pl-10 pr-4 text-sm text-slate-700 outline-none focus:border-red-300"
-                  placeholder="Search by name or email"
-                  aria-label="Search users"
-                />
+          </header>
+
+          <div className="settings-toolbar">
+            <label className="settings-search">
+              <Search aria-hidden="true" size={17} />
+              <input
+                value={searchTerm}
+                onChange={(event) => setSearchTerm(event.target.value)}
+                placeholder="Search by name or email"
+                aria-label="Search users by name or email"
+              />
+            </label>
+            <div className="settings-chip-row" role="group" aria-label="Filter users by role">
+              <Chip selected={roleFilter === "all"} onClick={() => setRoleFilter("all")}>All roles</Chip>
+              {roleOptions.map((role) => (
+                <Chip key={role} selected={roleFilter === role} onClick={() => setRoleFilter(role)}>
+                  {formatRole(role)}
+                </Chip>
+              ))}
+            </div>
+            <button type="button" className="settings-primary-button" onClick={openAddDrawer}>
+              <Plus aria-hidden="true" size={18} />
+              Add user
+            </button>
+          </div>
+
+          <div className="settings-user-table-wrap">
+            <div className="settings-user-table" role="table" aria-label="Staff users">
+              <div className="settings-user-table-head" role="row">
+                <span role="columnheader">Name</span>
+                <span role="columnheader">Email</span>
+                <span role="columnheader">Role</span>
+                <span role="columnheader">Actions</span>
               </div>
-              <select
-                aria-label="Filter by role"
-                value={roleFilter}
-                onChange={(event) => setRoleFilter(event.target.value)}
-                className="rounded-md border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-700 outline-none focus:border-red-300"
-              >
-                <option value="all">All roles</option>
-                {staffRoles.map((role) => (
-                  <option key={role} value={role}>{formatRole(role)}</option>
-                ))}
-              </select>
-            </div>
-          </div>
-
-          <div className="overflow-hidden rounded-2xl border border-slate-200">
-            <table className="min-w-full divide-y divide-slate-200 text-left">
-              <thead className="bg-slate-50">
-                <tr>
-                  <th className="px-4 py-3 text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Name</th>
-                  <th className="px-4 py-3 text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Email</th>
-                  <th className="px-4 py-3 text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Role</th>
-                  <th className="px-4 py-3 text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Actions</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-200 bg-white">
-                {usersQuery.isLoading ? (
-                  <tr>
-                    <td className="px-4 py-8 text-center text-sm text-slate-500" colSpan={4}>
-                      Loading users...
-                    </td>
-                  </tr>
-                ) : filteredUsers.length === 0 ? (
-                  <tr>
-                    <td className="px-4 py-8 text-center text-sm text-slate-500" colSpan={4}>
-                      No matching users found.
-                    </td>
-                  </tr>
-                ) : (
-                  filteredUsers.map((user: StaffUser) => (
-                    <tr key={user.id}>
-                      <td className="px-4 py-3">
-                        <div className="flex items-center gap-3">
-                          <div className="flex h-9 w-9 items-center justify-center rounded-full bg-slate-100 text-xs font-bold text-slate-700">
-                            {getInitials(user.name)}
-                          </div>
-                          <div>
-                            <p className="text-sm font-semibold text-slate-900">{user.name}</p>
-                            <p className="text-xs text-slate-500">{formatDateTime(user.last_login)}</p>
-                          </div>
-                        </div>
-                      </td>
-                      <td className="px-4 py-3 text-sm text-slate-700">{user.email}</td>
-                      <td className="px-4 py-3 text-sm">
-                        <span className="inline-flex rounded-full bg-red-50 px-2.5 py-1 text-xs font-semibold text-red-700 ring-1 ring-red-100">
-                          {formatRole(user.role)}
-                        </span>
-                      </td>
-                      <td className="px-4 py-3">
-                        <div className="flex items-center gap-2">
-                          <button
-                            type="button"
-                            aria-label={`Edit ${user.name}`}
-                            onClick={() => {
-                              setEditingUserId(user.id);
-                              setForm({
-                                name: user.name,
-                                email: user.email,
-                                role: user.role,
-                                password: ""
-                              });
-                              setDrawerOpen(true);
-                            }}
-                            className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-600 transition hover:border-red-200 hover:bg-red-50 hover:text-red-700"
-                          >
-                            <PencilLine className="h-4 w-4" />
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
-          </div>
-        </section>}
-
-        {activeTab === "activity" && <section>
-          <div className="mb-4 flex items-center justify-between gap-3">
-            <div>
-              <h3 className="text-lg font-semibold text-slate-900">User Activity Log</h3>
-              <p className="text-sm text-slate-500">Recent activity and system events.</p>
-            </div>
-          </div>
-
-          <div className="space-y-4">
-            {activityQuery.isLoading ? (
-              <div className="rounded-2xl border border-slate-200 bg-slate-50 p-6 text-sm text-slate-500">
-                Loading recent activity...
-              </div>
-            ) : (
-              <>
-                <ActivityLogTable logs={logs} />
-                <div className="flex items-center justify-between gap-3">
-                  <span className="text-sm text-slate-500">
-                    Page {activityQuery.data?.page ?? 1} of {totalLogPages}
-                  </span>
-                  <div className="flex items-center gap-2">
-                    <Button
+              {usersQuery.isLoading ? (
+                <div className="settings-table-empty" role="row">Loading users…</div>
+              ) : filteredUsers.length === 0 ? (
+                <div className="settings-table-empty" role="row">No matching users found.</div>
+              ) : filteredUsers.map((user: StaffUser) => (
+                <div className="settings-user-row" role="row" key={user.id}>
+                  <div className="settings-user-name" role="cell">
+                    <RoleAvatar name={user.name} role={user.role} />
+                    <div className="settings-user-name-text">
+                      <strong>{user.name}</strong>
+                      <span>Last login: {user.last_login ? formatDateTime(user.last_login) : "Never"}</span>
+                    </div>
+                  </div>
+                  <div className="settings-user-email" role="cell" title={user.email}>{user.email}</div>
+                  <div className="settings-user-role" role="cell"><RoleBadge role={user.role} /></div>
+                  <div className="settings-user-action" role="cell">
+                    <button
                       type="button"
-                      variant="outline"
-                      size="sm"
-                      disabled={activityPage <= 1}
-                      onClick={() => setActivityPage((current) => Math.max(1, current - 1))}
+                      className="settings-edit-button"
+                      aria-label={`Edit ${user.name}`}
+                      onClick={() => {
+                        setEditingUserId(user.id);
+                        setForm({ name: user.name, email: user.email, role: user.role, password: "" });
+                        setResetPassword("");
+                        setPasswordVisible(false);
+                        setFormError("");
+                        setDrawerOpen(true);
+                      }}
                     >
-                      Previous
-                    </Button>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      disabled={activityPage >= totalLogPages}
-                      onClick={() => setActivityPage((current) => Math.min(totalLogPages, current + 1))}
-                    >
-                      Next
-                    </Button>
+                      <PencilLine aria-hidden="true" size={15} />
+                      <span>Edit</span>
+                    </button>
                   </div>
                 </div>
-              </>
-            )}
+              ))}
+            </div>
           </div>
-        </section>}
-      </CardContent>
+        </section>
+      )}
 
-      {drawerOpen && (
-        <div className="fixed inset-0 z-50 flex justify-end bg-slate-950/30" onClick={closeDrawer}>
-          <div
-            className="h-full w-full max-w-md overflow-y-auto bg-white p-6 shadow-2xl"
-            onClick={(event) => event.stopPropagation()}
-          >
-            <div className="flex items-center justify-between gap-3">
-              <div>
-                <p className="text-xs font-semibold uppercase tracking-[0.25em] text-red-700">Users</p>
-                <h3 className="mt-2 text-2xl font-black text-slate-950">
-                  {editingUserId ? "Edit user" : "Add user"}
-                </h3>
+      {activeTab === "activity" && (
+        <section className="settings-card" aria-labelledby="settings-activity-title">
+          <header className="settings-card-heading">
+            <span className="settings-card-icon"><Activity aria-hidden="true" size={19} /></span>
+            <div>
+              <h2 id="settings-activity-title">User activity log</h2>
+              <p>Recent activity and system events, in plain language.</p>
+            </div>
+          </header>
+
+          <div className="settings-toolbar settings-activity-toolbar">
+            <label className="settings-search">
+              <Search aria-hidden="true" size={17} />
+              <input
+                value={activitySearch}
+                onChange={(event) => setActivitySearch(event.target.value)}
+                placeholder="Search activity"
+                aria-label="Search activity"
+              />
+            </label>
+            <div className="settings-chip-row" role="group" aria-label="Filter activity by category">
+              <Chip selected={activityCategory === "All activity"} onClick={() => setActivityCategory("All activity")}>All activity</Chip>
+              {activityCategories.map((category) => (
+                <Chip key={category} selected={activityCategory === category} onClick={() => setActivityCategory(category)}>
+                  {category}
+                </Chip>
+              ))}
+            </div>
+          </div>
+
+          {activityQuery.isLoading ? (
+            <div className="settings-activity-empty">Loading recent activity…</div>
+          ) : activityGroups.length === 0 ? (
+            <div className="settings-activity-empty">No activity matches these filters.</div>
+          ) : (
+            <div className="settings-activity-groups">
+              {activityGroups.map((group) => (
+                <section className="settings-activity-group" key={group.key} aria-label={group.label}>
+                  <div className="settings-day-heading">
+                    <h3>{group.label}</h3>
+                    <span>{group.entries.length}</span>
+                    <i aria-hidden="true" />
+                  </div>
+                  <div className="settings-activity-list">
+                    {group.entries.map(({ log, description }) => (
+                      <ActivityEntry key={log.id} log={log} description={description} />
+                    ))}
+                  </div>
+                </section>
+              ))}
+            </div>
+          )}
+
+          <footer className="settings-pagination">
+            <span>Page {activityQuery.data?.page ?? activityPage} of {totalLogPages}</span>
+            <div>
+              <button type="button" aria-label="Previous activity page" disabled={activityPage <= 1} onClick={() => changePage(activityPage - 1)}>
+                <ChevronLeft aria-hidden="true" size={17} />
+                Previous
+              </button>
+              <button type="button" aria-label="Next activity page" disabled={activityPage >= totalLogPages} onClick={() => changePage(activityPage + 1)}>
+                Next
+                <ChevronRight aria-hidden="true" size={17} />
+              </button>
+            </div>
+          </footer>
+        </section>
+      )}
+
+      <Drawer
+        open={drawerOpen}
+        title={editingUserId ? "Edit user" : "Add user"}
+        onClose={closeDrawer}
+        className="settings-user-drawer"
+      >
+        <header className="settings-drawer-header">
+          <WavePattern id="settings-drawer-pattern" />
+          <span className="settings-drawer-circle" aria-hidden="true" />
+          <div className="settings-drawer-heading">
+            <p>Users</p>
+            <h2>{editingUserId ? "Edit user" : "Add user"}</h2>
+            <span>{editingUserId ? "Update details or reset the password." : "Create an account and choose what they can do."}</span>
+          </div>
+          <button type="button" className="settings-drawer-close" aria-label="Close" onClick={closeDrawer}>
+            <X aria-hidden="true" size={20} />
+          </button>
+        </header>
+
+        <form id="settings-user-form" className="settings-drawer-form" onSubmit={submitUser} noValidate>
+          {formError && (
+            <div className="settings-form-error" role="alert">
+              <AlertCircle aria-hidden="true" size={17} />
+              <span>{formError}</span>
+            </div>
+          )}
+          <label className="settings-field">
+            <span>Full name</span>
+            <span className="settings-input-wrap">
+              <UserRound aria-hidden="true" size={18} />
+              <input
+                required
+                autoComplete="name"
+                value={form.name}
+                onChange={(event) => setForm((current) => ({ ...current, name: event.target.value }))}
+                placeholder="Maria Santos"
+              />
+            </span>
+          </label>
+
+          <label className="settings-field">
+            <span>Email address</span>
+            <span className="settings-input-wrap">
+              <Mail aria-hidden="true" size={18} />
+              <input
+                required
+                type="email"
+                autoComplete="email"
+                value={form.email}
+                onChange={(event) => setForm((current) => ({ ...current, email: event.target.value }))}
+                placeholder="maria@katana.com"
+              />
+            </span>
+          </label>
+
+          <fieldset className="settings-field settings-role-field">
+            <legend>Role</legend>
+            <div className="settings-role-grid" role="radiogroup" aria-label="User role">
+              {roleCardOptions.map((role, index) => {
+                const colors = roleColors[role] ?? { background: "#EEF0F5", color: "#3B4254" };
+                return (
+                  <label
+                    className={`settings-role-card${form.role === role ? " is-selected" : ""}`}
+                    key={role}
+                    onKeyDown={(event) => onRoleKeyDown(event, index)}
+                  >
+                    <input
+                      id={`${roleGroupId}-${role}`}
+                      type="radio"
+                      name="user-role"
+                      value={role}
+                      checked={form.role === role}
+                      onChange={() => setForm((current) => ({ ...current, role }))}
+                    />
+                    <span className="settings-role-dot" style={{ backgroundColor: colors.background, borderColor: colors.color }} />
+                    <span>{formatRole(role)}</span>
+                  </label>
+                );
+              })}
+            </div>
+          </fieldset>
+
+          {!editingUserId && (
+            <div className="settings-field">
+              <label htmlFor="settings-user-password">Password</label>
+              <span className="settings-input-wrap">
+                <LockKeyhole aria-hidden="true" size={18} />
+                <input
+                  id="settings-user-password"
+                  required
+                  minLength={8}
+                  type={passwordVisible ? "text" : "password"}
+                  autoComplete="new-password"
+                  value={form.password}
+                  onChange={(event) => setForm((current) => ({ ...current, password: event.target.value }))}
+                  placeholder="Minimum 8 characters"
+                />
+                <button
+                  type="button"
+                  className="settings-password-toggle"
+                  aria-label={passwordVisible ? "Hide password" : "Show password"}
+                  onClick={() => setPasswordVisible((visible) => !visible)}
+                >
+                  {passwordVisible ? <EyeOff aria-hidden="true" size={17} /> : <Eye aria-hidden="true" size={17} />}
+                </button>
+              </span>
+              <small>Use at least 8 characters. The user can change it after signing in.</small>
+            </div>
+          )}
+
+          {editingUserId && (
+            <section className="settings-reset-card" aria-labelledby="settings-reset-title">
+              <h3 id="settings-reset-title"><KeyRound aria-hidden="true" size={17} />Reset password</h3>
+              <div className="settings-field">
+                <label htmlFor="settings-reset-password">New password</label>
+                <span className="settings-input-wrap">
+                  <LockKeyhole aria-hidden="true" size={18} />
+                  <input
+                    id="settings-reset-password"
+                    type={passwordVisible ? "text" : "password"}
+                    autoComplete="new-password"
+                    value={resetPassword}
+                    onChange={(event) => {
+                      setResetPassword(event.target.value);
+                      setFormError("");
+                    }}
+                    placeholder="Minimum 8 characters"
+                  />
+                  <button
+                    type="button"
+                    className="settings-password-toggle"
+                    aria-label={passwordVisible ? "Hide new password" : "Show new password"}
+                    onClick={() => setPasswordVisible((visible) => !visible)}
+                  >
+                    {passwordVisible ? <EyeOff aria-hidden="true" size={17} /> : <Eye aria-hidden="true" size={17} />}
+                  </button>
+                </span>
               </div>
               <button
                 type="button"
-                onClick={closeDrawer}
-                className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:text-slate-900"
-                aria-label="Close drawer"
+                className="settings-reset-button"
+                disabled={resetPassword.trim().length < 8 || resetPasswordMutation.isPending}
+                onClick={() => {
+                  if (editingUserId) resetPasswordMutation.mutate({ userId: editingUserId, password: resetPassword.trim() });
+                }}
               >
-                <X className="h-4 w-4" />
+                <KeyRound aria-hidden="true" size={16} />
+                {resetPasswordMutation.isPending ? "Resetting…" : "Reset password"}
               </button>
-            </div>
+            </section>
+          )}
 
-            <div className="mt-8 space-y-5">
-              <label className="block space-y-2 text-sm text-slate-700">
-                <span>Full name</span>
-                <input
-                  value={form.name}
-                  onChange={(event) => setForm((current) => ({ ...current, name: event.target.value }))}
-                  className="w-full rounded-2xl border border-slate-300 bg-slate-50 px-4 py-3 outline-none transition focus:border-red-300 focus:bg-white"
-                  placeholder="Maria Santos"
-                />
-              </label>
+        </form>
 
-              <label className="block space-y-2 text-sm text-slate-700">
-                <span>Email address</span>
-                <input
-                  type="email"
-                  value={form.email}
-                  onChange={(event) => setForm((current) => ({ ...current, email: event.target.value }))}
-                  className="w-full rounded-2xl border border-slate-300 bg-slate-50 px-4 py-3 outline-none transition focus:border-red-300 focus:bg-white"
-                  placeholder="maria@katana.com"
-                />
-              </label>
-
-              <label className="block space-y-2 text-sm text-slate-700">
-                <span>Role</span>
-                <select
-                  value={form.role}
-                  onChange={(event) => setForm((current) => ({ ...current, role: event.target.value }))}
-                  className="w-full rounded-2xl border border-slate-300 bg-slate-50 px-4 py-3 outline-none transition focus:border-red-300 focus:bg-white"
-                >
-                  {staffRoles.map((role) => (
-                    <option key={role} value={role}>
-                      {formatRole(role)}
-                    </option>
-                  ))}
-                </select>
-              </label>
-
-              {!editingUserId && <label className="block space-y-2 text-sm text-slate-700">
-                <span>Password</span>
-                <input
-                  type="password"
-                  value={form.password}
-                  onChange={(event) => setForm((current) => ({ ...current, password: event.target.value }))}
-                  className="w-full rounded-2xl border border-slate-300 bg-slate-50 px-4 py-3 outline-none transition focus:border-red-300 focus:bg-white"
-                  placeholder="Minimum 8 characters"
-                />
-              </label>}
-            </div>
-
-            {editingUserId && (
-              <section className="mt-8 border-t border-slate-200 pt-6" aria-labelledby="reset-password-title">
-                <h4 id="reset-password-title" className="text-base font-semibold text-slate-900">Reset password</h4>
-                <label className="mt-4 block space-y-2 text-sm text-slate-700">
-                  <span>New password</span>
-                  <input
-                    type="password"
-                    autoComplete="new-password"
-                    value={resetPassword}
-                    onChange={(event) => setResetPassword(event.target.value)}
-                    className="w-full rounded-md border border-slate-300 bg-white px-3 py-2.5 outline-none focus:border-red-300"
-                    placeholder="Minimum 8 characters"
-                  />
-                </label>
-                <Button
-                  type="button"
-                  className="mt-4"
-                  disabled={resetPassword.trim().length < 8 || resetPasswordMutation.isPending}
-                  onClick={() => resetPasswordMutation.mutate({ userId: editingUserId, password: resetPassword.trim() })}
-                >
-                  <KeyRound className="mr-2 h-4 w-4" />
-                  {resetPasswordMutation.isPending ? "Resetting..." : "Reset password"}
-                </Button>
-              </section>
-            )}
-
-            <div className="mt-8 flex items-center justify-end gap-3">
-              <Button type="button" variant="outline" onClick={closeDrawer}>
-                Cancel
-              </Button>
-              <Button
-                type="button"
-                disabled={!canSubmitUser || upsertUserMutation.isPending}
-                onClick={() => upsertUserMutation.mutate()}
-              >
-                {upsertUserMutation.isPending ? "Saving..." : editingUserId ? "Update user" : "Save user"}
-              </Button>
-            </div>
-          </div>
-        </div>
-      )}
-    </Card>
+        <footer className="settings-drawer-footer">
+          <button type="button" className="settings-secondary-button" onClick={closeDrawer}>Cancel</button>
+          <button
+            type="submit"
+            form="settings-user-form"
+            className="settings-primary-button"
+            disabled={!canSubmitUser}
+            aria-disabled={!canSubmitUser}
+          >
+            <Check aria-hidden="true" size={17} />
+            {upsertUserMutation.isPending ? "Saving…" : editingUserId ? "Update user" : "Save user"}
+          </button>
+        </footer>
+      </Drawer>
+    </>
   );
+}
+
+function UsersRoundIcon() {
+  return <UserRound aria-hidden="true" size={19} />;
 }

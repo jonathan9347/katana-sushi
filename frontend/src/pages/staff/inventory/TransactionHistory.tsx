@@ -3,6 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import axios from "axios";
 import { ChevronDown, ChevronRight, Download } from "lucide-react";
 import { api } from "../../../lib/api";
+import { formatDateTime, humanizeEnum, shortRef } from "../../../lib/display";
 import { Button } from "../../../components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "../../../components/ui/card";
 import { Select } from "../../../components/ui/select";
@@ -150,11 +151,11 @@ export default function TransactionHistory() {
       const rows = [
         ["Date", "Transaction", "Type", "Total", "Payment", "Cashier", "Items"],
         ...(transactionsQuery.data?.transactions ?? []).map((transaction) => [
-          new Date(transaction.created_at).toLocaleString(),
-          transaction.transaction_number,
-          transaction.transaction_type,
+          formatDateTime(transaction.created_at),
+          shortRef(transaction.transaction_number),
+          humanizeEnum(transaction.transaction_type),
           String(transaction.total),
-          transaction.payment_method,
+          humanizeEnum(transaction.payment_method),
           transaction.cashier?.name ?? transaction.cashier?.email ?? "System",
           transaction.items.map((item) => `${item.name_snapshot ?? item.selling_product.name} x${item.quantity}`).join("; ")
         ])
@@ -166,11 +167,11 @@ export default function TransactionHistory() {
     const rows = [
       ["Date", "Material", "Type", "Quantity", "Reference", "User"],
       ...(materialTransactionsQuery.data ?? []).map((transaction) => [
-        new Date(transaction.created_at).toLocaleString(),
+        formatDateTime(transaction.created_at),
         transaction.raw_material.name,
-        transaction.transaction_type,
+        humanizeEnum(transaction.transaction_type),
         `${transaction.quantity} ${transaction.unit}`,
-        transaction.reference ?? "",
+        shortRef(transaction.reference),
         transaction.user?.name ?? transaction.user?.email ?? "System"
       ])
     ];
@@ -268,18 +269,18 @@ export default function TransactionHistory() {
                       {open ? <ChevronDown className="mt-1 h-4 w-4 text-slate-500" /> : <ChevronRight className="mt-1 h-4 w-4 text-slate-500" />}
                       <span>
                         <span className="block font-semibold text-slate-950">
-                          {transaction.transaction_type === "unlimited" ? "Unlimited Session" : "Transaction"} #{transaction.transaction_number}
+                          {transaction.transaction_type === "unlimited" ? "Unlimited Session" : "Transaction"} #{shortRef(transaction.transaction_number)}
                         </span>
                         <span className="mt-1 block text-sm text-slate-600">
-                          {new Date(transaction.created_at).toLocaleString()} | Cashier: {transaction.cashier?.name ?? "System"} | Type:{" "}
-                          {transaction.transaction_type.replace("_", " ")}
+                          {formatDateTime(transaction.created_at)} | Cashier: {transaction.cashier?.name ?? "System"} | Type:{" "}
+                          {humanizeEnum(transaction.transaction_type)}
                         </span>
                         <span className="mt-1 block text-sm text-slate-600">
                           {transaction.transaction_type === "unlimited"
                             ? `Table ${transaction.table?.table_number ?? "-"} | Guests: ${transaction.unlimited_session?.pax_count ?? 0} | Rounds: ${
                                 transaction.unlimited_session?.rounds.length ?? 0
                               } | Items: ${itemCount}`
-                            : `${transaction.transaction_type === "dine_in" ? `Table ${transaction.table_number ?? "-"} | ` : ""}Customer: ${transaction.customer_name || "Walk-in"} | Payment: ${transaction.payment_method}`}
+                            : `${transaction.transaction_type === "dine_in" ? `Table ${transaction.table_number ?? "-"} | ` : ""}Customer: ${transaction.customer_name || "Walk-in"} | Payment: ${humanizeEnum(transaction.payment_method)}`}
                         </span>
                       </span>
                     </span>
@@ -385,13 +386,13 @@ export default function TransactionHistory() {
                           <TableBody>
                             {group.transactions.map((transaction) => (
                               <TableRow key={transaction.id}>
-                                <TableCell>{new Date(transaction.created_at).toLocaleString()}</TableCell>
-                                <TableCell>{transaction.transaction_type}{transaction.reason ? ` (${transaction.reason.replace("_", " ")})` : ""}</TableCell>
+                                <TableCell>{formatDateTime(transaction.created_at)}</TableCell>
+                                <TableCell>{humanizeEnum(transaction.transaction_type)}{transaction.reason ? ` (${humanizeEnum(transaction.reason)})` : ""}</TableCell>
                                 <TableCell>
                                   {Number(transaction.quantity).toLocaleString()} {transaction.unit}
                                 </TableCell>
                                 <TableCell>{transaction.batch?.batch_number ?? "—"}</TableCell>
-                                <TableCell>{transaction.reference ?? "-"}</TableCell>
+                                <TableCell>{shortRef(transaction.reference)}</TableCell>
                                 <TableCell>{transaction.user?.name ?? transaction.user?.email ?? "System"}</TableCell>
                               </TableRow>
                             ))}

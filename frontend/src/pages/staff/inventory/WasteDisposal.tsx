@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import axios from "axios";
 import { AlertCircle, CheckCircle2, LoaderCircle, Trash2, TriangleAlert } from "lucide-react";
 import { api } from "../../../lib/api";
+import { formatDateTime, formatDate, humanizeEnum, shortRef } from "../../../lib/display";
 import { Button } from "../../../components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "../../../components/ui/card";
 import { Select } from "../../../components/ui/select";
@@ -211,7 +212,7 @@ export default function WasteDisposal({
                   {batchesQuery.data?.map((batch) => (
                     <option key={batch.id} value={batch.id}>
                       {batch.batch_number} — {Number(batch.remaining_quantity).toLocaleString()} {batch.raw_material.unit}
-                      {batch.expiration_date ? ` (exp: ${new Date(batch.expiration_date).toLocaleDateString()})` : ""}
+                      {batch.expiration_date ? ` (exp: ${formatDate(batch.expiration_date)})` : ""}
                     </option>
                   ))}
                 </Select>
@@ -317,14 +318,14 @@ export default function WasteDisposal({
                 <TableBody>
                   {wasteHistoryQuery.data.map((transaction) => (
                     <TableRow key={transaction.id}>
-                      <TableCell>{new Date(transaction.created_at).toLocaleString()}</TableCell>
+                      <TableCell>{formatDateTime(transaction.created_at)}</TableCell>
                       <TableCell className="font-medium">{transaction.raw_material.name}</TableCell>
                       <TableCell>
                         {Number(transaction.quantity).toLocaleString()} {transaction.unit}
                       </TableCell>
-                      <TableCell>{transaction.reason ? reasonLabels[transaction.reason as WasteForm["reason"]] ?? transaction.reason : "—"}</TableCell>
+                      <TableCell>{transaction.reason ? reasonLabels[transaction.reason as WasteForm["reason"]] ?? humanizeEnum(transaction.reason) : "—"}</TableCell>
                       <TableCell>{transaction.batch?.batch_number ?? "Auto FEFO"}</TableCell>
-                      <TableCell>{transaction.reference ?? "—"}</TableCell>
+                      <TableCell>{shortRef(transaction.reference)}</TableCell>
                       <TableCell>{transaction.user?.name ?? "System"}</TableCell>
                     </TableRow>
                   ))}

@@ -1,0 +1,197 @@
+.settings-page {
+  position: relative;
+  min-height: 100vh;
+  overflow: hidden;
+  background:
+    radial-gradient(circle at calc(100% - 35px) 25px, rgba(246, 227, 227, .62) 0 145px, transparent 146px),
+    radial-gradient(circle at 0 calc(100% - 90px), rgba(251, 238, 240, .7) 0 170px, transparent 171px),
+    #f7f5f5;
+  padding: 32px 40px 48px;
+  font-family: Figtree, Inter, system-ui, sans-serif;
+}
+
+.settings-content {
+  display: grid;
+  width: 100%;
+  gap: 20px;
+  margin: 0 auto;
+}
+
+.settings-banner {
+  position: relative;
+  display: flex;
+  min-height: 168px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  overflow: hidden;
+  border-radius: 24px;
+  background: linear-gradient(115deg, #b3202a 0%, #9b1d20 55%, #7f1219 100%);
+  padding: 30px 36px;
+  color: #fff;
+  box-shadow: 0 14px 32px rgba(127, 18, 25, .2);
+}
+
+.settings-banner-wave {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.settings-banner-circle {
+  position: absolute;
+  top: -120px;
+  right: -40px;
+  width: 340px;
+  height: 340px;
+  border: 1px solid rgba(255, 255, 255, .08);
+  border-radius: 50%;
+  background: rgba(255, 255, 255, .07);
+  pointer-events: none;
+}
+
+.settings-banner-copy,
+.settings-banner-role {
+  position: relative;
+  z-index: 1;
+}
+
+.settings-banner-copy p {
+  margin: 0 0 8px;
+  color: #f6c1c3;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: .16em;
+}
+
+.settings-banner-copy h1 {
+  margin: 0;
+  color: #fff;
+  font-size: 32px;
+  font-weight: 700;
+  letter-spacing: -.025em;
+  line-height: 1.15;
+}
+
+.settings-banner-copy > span {
+  display: block;
+  margin-top: 8px;
+  color: rgba(255, 255, 255, .82);
+  font-size: 14px;
+}
+
+.settings-banner-role {
+  display: inline-flex;
+  min-height: 42px;
+  flex: none;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid rgba(255, 255, 255, .4);
+  border-radius: 999px;
+  background: #fff;
+  padding: 0 16px;
+  color: #7f1219;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: .1em;
+}
+
+.settings-tabs {
+  display: flex;
+  width: fit-content;
+  max-width: 100%;
+  flex-wrap: wrap;
+  gap: 4px;
+  border: 1px solid #eee7e7;
+  border-radius: 16px;
+  background: #fff;
+  padding: 6px;
+  box-shadow: 0 6px 18px rgba(60, 20, 25, .06);
+}
+
+.settings-tabs button {
+  display: inline-flex;
+  min-height: 42px;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  border: 0;
+  border-radius: 11px;
+  background: transparent;
+  padding: 0 18px;
+  color: #6a7185;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 700;
+  transition: background .16s ease, box-shadow .16s ease, color .16s ease;
+}
+
+.settings-tabs button[aria-selected="true"] {
+  background: linear-gradient(110deg, #c62d30, #8f161c);
+  color: #fff;
+  box-shadow: 0 5px 12px rgba(155, 29, 32, .2);
+}
+
+.settings-tabs button:focus-visible,
+.settings-page button:focus-visible,
+.settings-page input:focus-visible {
+  outline: 3px solid #e6b9bb;
+  outline-offset: 2px;
+}
+
+.settings-tabpanel {
+  min-width: 0;
+}
+
+@media (max-width: 900px) {
+  .settings-page {
+    padding: 24px 24px 40px;
+  }
+
+  .settings-banner {
+    align-items: flex-start;
+    flex-direction: column;
+    padding: 26px;
+  }
+}
+
+@media (max-width: 600px) {
+  .settings-page {
+    padding: 16px 16px 32px;
+  }
+
+  .settings-banner {
+    min-height: 0;
+    border-radius: 20px;
+    padding: 24px 20px;
+  }
+
+  .settings-banner-copy h1 {
+    font-size: 29px;
+  }
+
+  .settings-banner-copy > span {
+    max-width: 32ch;
+    font-size: 13px;
+    line-height: 1.45;
+  }
+
+  .settings-banner-role {
+    min-height: 40px;
+  }
+
+  .settings-tabs {
+    width: 100%;
+  }
+
+  .settings-tabs button {
+    flex: 1;
+    padding: 0 10px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .settings-tabs button {
+    transition-duration: .01ms;
+  }
+}

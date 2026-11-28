@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   BarChart3,
   CalendarDays,
@@ -7,12 +7,15 @@ import {
   Home,
   LogOut,
   Package,
+  ShieldCheck,
   Settings,
   UserRound,
   type LucideIcon
 } from "lucide-react";
 import { NavLink, useNavigate } from "react-router-dom";
 import { api } from "../../lib/api";
+import { humanizeEnum } from "../../lib/display";
+import { LOGOUT_ANIMATION_COMPLETE, LOGOUT_ANIMATION_START } from "./LogoutAnimation";
 import "./Sidebar.css";
 
 type SidebarProps = {
@@ -79,6 +82,7 @@ function getStoredUser() {
   try {
     return JSON.parse(localStorage.getItem("katana_user") ?? "{}") as {
       name?: string;
+      email?: string;
       role?: string;
     };
   } catch {
@@ -100,11 +104,18 @@ function ReportsIcon() {
 export default function Sidebar({ role, hidden, onToggle }: SidebarProps) {
   const [profileOpen, setProfileOpen] = useState(false);
   const navigate = useNavigate();
+  const profileRef = useRef<HTMLDivElement>(null);
+  const profileButtonRef = useRef<HTMLButtonElement>(null);
   const normalizedRole = role.toLowerCase();
   const user = getStoredUser();
   const visibleMainItems = mainItems.filter((item) => item.roles.includes(normalizedRole));
   const showSettings = settingsItem.roles.includes(normalizedRole);
-  const displayRole = normalizedRole === "staff" ? "Team member" : normalizedRole.replace("_", " ");
+  const displayRole = humanizeEnum(normalizedRole);
+  const displayName = user.name ?? "User";
+
+  function initials(name: string) {
+    return name.split(" ").filter(Boolean).slice(0, 2).map((part) => part[0]?.toUpperCase()).join("") || "U";
+  }
 
   const setSidebarRef = useCallback((element: HTMLElement | null) => {
     if (!element) return;
@@ -119,6 +130,35 @@ export default function Sidebar({ role, hidden, onToggle }: SidebarProps) {
     if (hidden) setProfileOpen(false);
   }, [hidden]);
 
+  useEffect(() => {
+    if (!profileOpen) return;
+    const frame = window.requestAnimationFrame(() => {
+      document.getElementById("sidebar-profile-logout")?.focus();
+    });
+
+    function onPointerDown(event: MouseEvent) {
+      if (event.target instanceof Node && !profileRef.current?.contains(event.target)) {
+        setProfileOpen(false);
+      }
+    }
+
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        setProfileOpen(false);
+        profileButtonRef.current?.focus();
+      }
+    }
+
+    document.addEventListener("mousedown", onPointerDown);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      window.cancelAnimationFrame(frame);
+      document.removeEventListener("mousedown", onPointerDown);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [profileOpen]);
+
   async function logout() {
     try {
       await api.post("/api/auth/logout");
@@ -130,6 +170,22 @@ export default function Sidebar({ role, hidden, onToggle }: SidebarProps) {
     localStorage.removeItem("katana_role");
     localStorage.removeItem("katana_user");
     navigate("/staff/login");
+  }
+
+  async function startLogout() {
+    const rect = profileButtonRef.current?.getBoundingClientRect();
+    window.dispatchEvent(new CustomEvent(LOGOUT_ANIMATION_START, {
+      detail: {
+        name: displayName,
+        origin: rect ? { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 } : { x: 40, y: window.innerHeight - 40 }
+      }
+    }));
+    setProfileOpen(false);
+    try {
+      await logout();
+    } finally {
+      window.dispatchEvent(new Event(LOGOUT_ANIMATION_COMPLETE));
+    }
   }
 
   function renderItem(item: SidebarItem) {
@@ -208,11 +264,14 @@ export default function Sidebar({ role, hidden, onToggle }: SidebarProps) {
           <div className="sidebar-bottom-group">
             {showSettings && renderItem(settingsItem)}
             {showSettings && <span className="sidebar-divider" aria-hidden="true" />}
-            <div className="sidebar-profile">
+            <div className="sidebar-profile" ref={profileRef}>
               <button
+                ref={profileButtonRef}
                 type="button"
-                className="sidebar-link sidebar-profile-button"
+                id="sidebar-profile-trigger"
+                className={`sidebar-link sidebar-profile-button${profileOpen ? " is-profile-open" : ""}`}
                 aria-label="Profile"
+                aria-haspopup="menu"
                 aria-expanded={profileOpen}
                 aria-controls="sidebar-profile-menu"
                 onClick={() => setProfileOpen((current) => !current)}
@@ -220,14 +279,36 @@ export default function Sidebar({ role, hidden, onToggle }: SidebarProps) {
                 <UserRound className="sidebar-icon" aria-hidden="true" strokeWidth={1.8} />
               </button>
               {profileOpen && (
-                <div className="sidebar-profile-menu" id="sidebar-profile-menu">
+                <div className="sidebar-profile-menu" id="sidebar-profile-menu" role="menu" aria-labelledby="sidebar-profile-trigger">
+                  <svg className="sidebar-profile-wave" width="100%" height="100%" aria-hidden="true">
+                    <defs>
+                      <pattern id="sidebar-profile-pattern" width="48" height="24" patternUnits="userSpaceOnUse">
+                        <path
+                          d="M-24 24a24 24 0 0 1 48 0M0 24a24 24 0 0 1 48 0M24 24a24 24 0 0 1 48 0M-12 24a12 12 0 0 1 24 0M12 24a12 12 0 0 1 24 0M36 24a12 12 0 0 1 24 0"
+                          fill="none"
+                          stroke="white"
+                          strokeOpacity=".14"
+                          strokeWidth="1"
+                        />
+                      </pattern>
+                    </defs>
+                    <rect width="100%" height="100%" fill="url(#sidebar-profile-pattern)" />
+                  </svg>
+                  <span className="sidebar-profile-decoration" aria-hidden="true" />
+                  <span className="sidebar-profile-arrow" aria-hidden="true" />
                   <div className="sidebar-profile-summary">
-                    <p>{user.name ?? "User"}</p>
-                    <span>{displayRole}</span>
+                    <span className="sidebar-profile-avatar" aria-hidden="true">{initials(displayName)}</span>
+                    <p title={displayName}>{displayName}</p>
+                    <span className="sidebar-profile-email" title={user.email ?? ""}>{user.email ?? ""}</span>
                   </div>
-                  <button type="button" className="sidebar-logout" onClick={logout}>
+                  <div className="sidebar-profile-role">
+                    <ShieldCheck aria-hidden="true" size={15} />
+                    {displayRole.toUpperCase()}
+                  </div>
+                  <div className="sidebar-profile-divider" />
+                  <button id="sidebar-profile-logout" type="button" role="menuitem" className="sidebar-logout" onClick={() => void startLogout()}>
+                    <span>Log out</span>
                     <LogOut aria-hidden="true" />
-                    Logout
                   </button>
                 </div>
               )}

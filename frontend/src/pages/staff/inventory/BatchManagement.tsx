@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import axios from "axios";
 import { AlertCircle, AlertTriangle, CalendarClock, CheckCircle2, LoaderCircle, PackagePlus, TriangleAlert } from "lucide-react";
 import { api } from "../../../lib/api";
+import { formatManilaDate } from "../../../lib/dateTime";
 import { Button } from "../../../components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "../../../components/ui/card";
 import { Dialog } from "../../../components/ui/dialog";
@@ -261,12 +262,12 @@ export default function BatchManagement({
                   <p className={`mt-1 text-sm font-medium ${expired || expiresToday ? "text-red-700" : "text-slate-700"}`}>
                     {batch.expiration_date
                       ? expired
-                        ? `Expired — ${new Date(batch.expiration_date).toLocaleDateString()}`
+                        ? `Expired — ${formatManilaDate(batch.expiration_date)}`
                         : expiresToday
-                          ? `Expires today — ${new Date(batch.expiration_date).toLocaleDateString()}`
+                          ? `Expires today — ${formatManilaDate(batch.expiration_date)}`
                           : batch.daysUntilExpiry !== null && batch.daysUntilExpiry !== undefined
-                           ? `Expires in ${batch.daysUntilExpiry} day(s) — ${new Date(batch.expiration_date).toLocaleDateString()}`
-                           : `Expires ${new Date(batch.expiration_date).toLocaleDateString()}`
+                           ? `Expires in ${batch.daysUntilExpiry} day(s) — ${formatManilaDate(batch.expiration_date)}`
+                           : `Expires ${formatManilaDate(batch.expiration_date)}`
                       : "No expiration date"}
                   </p>
                   {canDisposeNow && onQuickDispose && (
@@ -347,9 +348,9 @@ export default function BatchManagement({
                         <TableCell>
                           {Number(batch.remaining_quantity).toLocaleString()} / {Number(batch.quantity).toLocaleString()} {batch.raw_material.unit}
                         </TableCell>
-                        <TableCell>{new Date(batch.received_at).toLocaleDateString()}</TableCell>
+                        <TableCell>{formatManilaDate(batch.received_at)}</TableCell>
                         <TableCell className={expiredOrToday ? "font-semibold text-red-700" : undefined}>
-                          {batch.expiration_date ? new Date(batch.expiration_date).toLocaleDateString() : "—"}
+                          {batch.expiration_date ? formatManilaDate(batch.expiration_date) : "—"}
                         </TableCell>
                         <TableCell>
                           <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${expiryBadge(batch.expiryStatus)}`}>

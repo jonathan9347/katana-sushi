@@ -3,6 +3,7 @@ import type React from "react";
 import { formatManilaDate, formatTime12 } from "../../lib/dateTime";
 import { formatCateringEventType, formatCurrencyPHP, formatStatus, formatVenueType } from "../../lib/reservationDetails";
 import { formatCateringPackageSnapshots } from "../../lib/cateringPackageSnapshot";
+import { formatDateTime, humanizeEnum, shortRef } from "../../lib/display";
 import { Button } from "./button";
 
 export type ReservationProduct = {
@@ -111,21 +112,9 @@ function numberValue(value?: number | null) {
   return Number(value ?? 0);
 }
 
-function formatDateTime(value?: string | null) {
-  if (!value) return "N/A";
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "N/A";
-  return date.toLocaleString("en-PH", {
-    year: "numeric",
-    month: "long",
-    day: "numeric",
-    hour: "numeric",
-    minute: "2-digit"
-  });
-}
-
 function getReference(reservation: ReservationReceiptData) {
-  return reservation.reference ?? reservation.booking_id ?? reservation.reservation_id ?? "N/A";
+  const reference = reservation.reference ?? reservation.booking_id ?? reservation.reservation_id;
+  return reference ? shortRef(reference) : "N/A";
 }
 
 function getStatus(reservation: ReservationReceiptData) {
@@ -152,7 +141,7 @@ function formatReceiptPaymentPlan(plan?: string | null, isCatering = false) {
   if (plan === "full_payment") return "Pay in full";
   if (plan === "pay_at_venue") return "Pay at the restaurant";
   if (plan === "initial_only") return "Previous payment arrangement";
-  return plan ?? "N/A";
+  return plan ? humanizeEnum(plan) : "N/A";
 }
 
 function formatReceiptPaymentStage(stage: string, isCatering: boolean) {
@@ -167,7 +156,7 @@ function formatPaymentMethod(method?: string | null) {
   if (method === "gcash") return "GCash";
   if (method === "cash") return "Cash";
   if (method === "paymongo") return "PayMongo (online)";
-  return method ?? "N/A";
+  return method ? humanizeEnum(method) : "N/A";
 }
 
 function getPackageItems(packageItems: unknown): string[] {
@@ -371,7 +360,7 @@ export function ReservationReceipt({ reservation, actions, paymentControls, show
                       <tr key={payment.id} className="border-b border-dashed border-slate-200">
                         <td className="py-2 pr-3 font-semibold">{formatReceiptPaymentStage(payment.payment_stage, isCatering)}</td>
                         <td className="py-2 pr-3">{formatPaymentMethod(payment.method)}</td>
-                        <td className="py-2 pr-3">{payment.reference_number ?? (payment.change_due ? `Change: ${money(payment.change_due)}` : "-")}</td>
+                        <td className="py-2 pr-3" title={payment.reference_number ?? undefined}>{payment.reference_number ? shortRef(payment.reference_number) : payment.change_due ? `Change: ${money(payment.change_due)}` : "-"}</td>
                         <td className="py-2 text-right font-semibold">{money(payment.amount)}</td>
                       </tr>
                     ))}
@@ -414,7 +403,7 @@ export function ReservationReceipt({ reservation, actions, paymentControls, show
               {reservation.activity.map((event) => (
                 <li key={event.id} className="rounded border border-slate-200 px-3 py-2 text-sm">
                   <p className="font-semibold">{formatStatus(event.event_type)}{event.from_status || event.to_status ? ` · ${formatStatus(event.from_status ?? "new")} → ${formatStatus(event.to_status ?? "")}` : ""}</p>
-                  <p className="mt-1 text-xs text-slate-500">{formatDateTime(String(event.created_at))} · {event.actor_name ?? event.actor_type}</p>
+                  <p className="mt-1 text-xs text-slate-500">{formatDateTime(String(event.created_at))} · {event.actor_name ?? humanizeEnum(event.actor_type)}</p>
                   {event.reason ? <p className="mt-1 text-slate-600">{event.reason}</p> : null}
                 </li>
               ))}

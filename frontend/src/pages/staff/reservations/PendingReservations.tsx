@@ -4,6 +4,7 @@ import { useState } from "react";
 import SectionNav, { SectionNavTab } from "../../../components/layout/SectionNav";
 import { api } from "../../../lib/api";
 import { formatManilaDate, formatTime12 } from "../../../lib/dateTime";
+import { shortRef } from "../../../lib/display";
 
 type Reservation = {
   id: string;
@@ -74,7 +75,7 @@ export default function PendingReservations() {
               <div className="flex items-start justify-between gap-5">
                 <div>
                   <h2 className="text-lg font-bold text-slate-950">
-                    #{reservation.booking_id} | {dateText(reservation.date)} | {formatTime12(reservation.time)} | {reservation.party_size} guests
+                    #{shortRef(reservation.booking_id)} | {dateText(reservation.date)} | {formatTime12(reservation.time)} | {reservation.party_size} guests
                   </h2>
                   <p className="mt-1 text-sm text-slate-700">
                     Customer: {reservation.customer_name} | {reservation.customer_phone} | {reservation.customer_email}

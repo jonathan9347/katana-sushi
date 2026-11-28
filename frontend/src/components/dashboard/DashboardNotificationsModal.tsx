@@ -2,6 +2,7 @@ import { useEffect, useId, useRef } from "react";
 import { Check, LoaderCircle, X } from "lucide-react";
 import type { DashboardNotification } from "../../lib/staffDashboard";
 import { formatManilaDate, formatTime12 } from "../../lib/dateTime";
+import { humanizeEnum, shortRef } from "../../lib/display";
 
 export type NotificationReviewItem = {
   notification: DashboardNotification;
@@ -63,10 +64,10 @@ function NotificationCard({
           <h3>{notification.customerName}</h3>
           <p>{notification.type === "table" ? "Dine-in request" : notification.type === "catering" ? "Catering request" : "Pickup order"}</p>
         </div>
-        <span className={`admin-status-pill ${statusClass}`}>{status.charAt(0).toUpperCase() + status.slice(1)}</span>
+        <span className={`admin-status-pill ${statusClass}`}>{humanizeEnum(status)}</span>
       </header>
       <dl className="admin-notification-details-grid">
-        <div><dt>Reference</dt><dd>{notification.reference}</dd></div>
+        <div><dt>Reference</dt><dd>{shortRef(notification.reference)}</dd></div>
         <div>
           <dt>Date &amp; time</dt>
           <dd>{formatManilaDate(notification.date, { month: "short", day: "numeric", year: "numeric" })}{notification.time ? ` · ${formatTime12(notification.time)}` : ""}</dd>

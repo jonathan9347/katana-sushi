@@ -5,6 +5,8 @@ import { useSessionTimeout } from "./hooks/useSessionTimeout";
 import CustomerNav from "./components/layout/CustomerNav";
 import Footer from "./components/layout/Footer";
 import Sidebar from "./components/layout/Sidebar";
+import { LogoutAnimation } from "./components/layout/LogoutAnimation";
+import { ToastViewport } from "./components/ui/ToastViewport";
 import UnlimitedSettings from "./pages/admin/UnlimitedSettings";
 import CateringInquiry from "./pages/customer/CateringInquiry";
 import CateringReservation from "./pages/customer/CateringReservation";
@@ -103,72 +105,76 @@ function InnerCustomerLayout({ children }: { children: JSX.Element }) {
 
 export default function App() {
   return (
-    <Routes>
-      <Route path="/" element={<HomeCustomerLayout><><CustomerHome /><Footer /></></HomeCustomerLayout>} />
-      <Route path="/menu" element={<InnerCustomerLayout><Menu /></InnerCustomerLayout>} />
-      <Route path="/takeout" element={<InnerCustomerLayout><TakeoutOrder /></InnerCustomerLayout>} />
-      <Route path="/reserve" element={<InnerCustomerLayout><ReserveHub /></InnerCustomerLayout>} />
-      <Route path="/reserve/book" element={<InnerCustomerLayout><TableReservationForm /></InnerCustomerLayout>} />
-      <Route path="/reservation/status" element={<InnerCustomerLayout><ReservationStatus /></InnerCustomerLayout>} />
-      <Route path="/payment/return" element={<InnerCustomerLayout><PaymentReturn /></InnerCustomerLayout>} />
-      <Route path="/payment/:reference" element={<InnerCustomerLayout><PaymentPage /></InnerCustomerLayout>} />
-      <Route path="/catering" element={<InnerCustomerLayout><CateringReservationIntro /></InnerCustomerLayout>} />
-      <Route path="/catering/book" element={<InnerCustomerLayout><CateringReservation /></InnerCustomerLayout>} />
-      <Route path="/catering/inquiry" element={<InnerCustomerLayout><CateringInquiry /></InnerCustomerLayout>} />
-      <Route path="/feedback" element={<InnerCustomerLayout><Feedback /></InnerCustomerLayout>} />
-      <Route path="/staff/login" element={<Login />} />
-      <Route path="/staff/dashboard" element={<StaffPage roles={["admin", "inventory_manager", "cashier", "receptionist", "event_coordinator", "chef"]}><Dashboard /></StaffPage>} />
-      <Route path="/staff/inventory" element={<StaffPage roles={["admin", "inventory_manager"]}><InventoryPage /></StaffPage>} />
-      <Route path="/staff/inventory/read-only" element={<StaffPage roles={["admin", "inventory_manager", "chef"]}><InventoryPage readOnly /></StaffPage>} />
-      <Route path="/staff/pos" element={<StaffPage roles={["admin", "cashier"]}><PosPage /></StaffPage>} />
-      <Route path="/staff/pos/dining" element={<Navigate to="/staff/pos" replace />} />
-      <Route path="/staff/kitchen" element={<Navigate to="/staff/pos" replace />} />
-      <Route path="/staff/takeout" element={<Navigate to="/staff/reservations?view=pickup" replace />} />
-      <Route path="/staff/pos/history" element={<StaffPage roles={["admin", "cashier"]}><PosHistory /></StaffPage>} />
-      <Route path="/staff/pos/unlimited-settings" element={<StaffPage roles={["admin"]}><UnlimitedSettings /></StaffPage>} />
-      <Route path="/admin/unlimited-settings" element={<Navigate to="/staff/pos/unlimited-settings" replace />} />
-      <Route path="/staff/settings" element={<StaffPage roles={["admin"]}><SettingsPage /></StaffPage>} />
-      <Route path="/staff/analytics" element={<StaffPage roles={["admin", "inventory_manager"]}><AnalyticsPage /></StaffPage>} />
-      <Route
-        path="/staff/reservations"
-        element={
-          <StaffPage roles={["admin", "receptionist", "cashier", "event_coordinator", "chef"]}>
-            <DineInReservations />
-          </StaffPage>
-        }
-      />
-      <Route path="/staff/reservations/pending" element={<Navigate to="/staff/reservations" replace />} />
-      <Route path="/staff/reservations/calendar" element={<Navigate to="/staff/reservations" replace />} />
-      <Route
-        path="/staff/catering"
-        element={
-          <StaffPage roles={["admin", "event_coordinator"]}>
-            {localStorage.getItem("katana_role")?.toLowerCase() === "event_coordinator"
-              ? <DineInReservations />
-              : <CateringReservations />}
-          </StaffPage>
-        }
-      />
-      <Route
-        path="/staff/catering/photos"
-        element={
-          <StaffPage roles={["admin"]}>
-            <CateringOptionPhotos />
-          </StaffPage>
-        }
-      />
-      <Route path="/staff/catering/dashboard" element={<Navigate to="/staff/catering" replace />} />
-      <Route
-        path="*"
-        element={
-          <main className="flex min-h-screen flex-col items-center justify-center gap-4">
-            <h1 className="text-2xl font-semibold">Page not found</h1>
-            <Link className="text-red-700 underline" to="/">
-              Go home
-            </Link>
-          </main>
-        }
-      />
-    </Routes>
+    <>
+      <Routes>
+        <Route path="/" element={<HomeCustomerLayout><><CustomerHome /><Footer /></></HomeCustomerLayout>} />
+        <Route path="/menu" element={<InnerCustomerLayout><Menu /></InnerCustomerLayout>} />
+        <Route path="/takeout" element={<InnerCustomerLayout><TakeoutOrder /></InnerCustomerLayout>} />
+        <Route path="/reserve" element={<InnerCustomerLayout><ReserveHub /></InnerCustomerLayout>} />
+        <Route path="/reserve/book" element={<InnerCustomerLayout><TableReservationForm /></InnerCustomerLayout>} />
+        <Route path="/reservation/status" element={<InnerCustomerLayout><ReservationStatus /></InnerCustomerLayout>} />
+        <Route path="/payment/return" element={<InnerCustomerLayout><PaymentReturn /></InnerCustomerLayout>} />
+        <Route path="/payment/:reference" element={<InnerCustomerLayout><PaymentPage /></InnerCustomerLayout>} />
+        <Route path="/catering" element={<InnerCustomerLayout><CateringReservationIntro /></InnerCustomerLayout>} />
+        <Route path="/catering/book" element={<InnerCustomerLayout><CateringReservation /></InnerCustomerLayout>} />
+        <Route path="/catering/inquiry" element={<InnerCustomerLayout><CateringInquiry /></InnerCustomerLayout>} />
+        <Route path="/feedback" element={<InnerCustomerLayout><Feedback /></InnerCustomerLayout>} />
+        <Route path="/staff/login" element={<Login />} />
+        <Route path="/staff/dashboard" element={<StaffPage roles={["admin", "inventory_manager", "cashier", "receptionist", "event_coordinator", "chef"]}><Dashboard /></StaffPage>} />
+        <Route path="/staff/inventory" element={<StaffPage roles={["admin", "inventory_manager"]}><InventoryPage /></StaffPage>} />
+        <Route path="/staff/inventory/read-only" element={<StaffPage roles={["admin", "inventory_manager", "chef"]}><InventoryPage readOnly /></StaffPage>} />
+        <Route path="/staff/pos" element={<StaffPage roles={["admin", "cashier"]}><PosPage /></StaffPage>} />
+        <Route path="/staff/pos/dining" element={<Navigate to="/staff/pos" replace />} />
+        <Route path="/staff/kitchen" element={<Navigate to="/staff/pos" replace />} />
+        <Route path="/staff/takeout" element={<Navigate to="/staff/reservations?view=pickup" replace />} />
+        <Route path="/staff/pos/history" element={<StaffPage roles={["admin", "cashier"]}><PosHistory /></StaffPage>} />
+        <Route path="/staff/pos/unlimited-settings" element={<StaffPage roles={["admin"]}><UnlimitedSettings /></StaffPage>} />
+        <Route path="/admin/unlimited-settings" element={<Navigate to="/staff/pos/unlimited-settings" replace />} />
+        <Route path="/staff/settings" element={<StaffPage roles={["admin"]}><SettingsPage /></StaffPage>} />
+        <Route path="/staff/analytics" element={<StaffPage roles={["admin", "inventory_manager"]}><AnalyticsPage /></StaffPage>} />
+        <Route
+          path="/staff/reservations"
+          element={
+            <StaffPage roles={["admin", "receptionist", "cashier", "event_coordinator", "chef"]}>
+              <DineInReservations />
+            </StaffPage>
+          }
+        />
+        <Route path="/staff/reservations/pending" element={<Navigate to="/staff/reservations" replace />} />
+        <Route path="/staff/reservations/calendar" element={<Navigate to="/staff/reservations" replace />} />
+        <Route
+          path="/staff/catering"
+          element={
+            <StaffPage roles={["admin", "event_coordinator"]}>
+              {localStorage.getItem("katana_role")?.toLowerCase() === "event_coordinator"
+                ? <DineInReservations />
+                : <CateringReservations />}
+            </StaffPage>
+          }
+        />
+        <Route
+          path="/staff/catering/photos"
+          element={
+            <StaffPage roles={["admin"]}>
+              <CateringOptionPhotos />
+            </StaffPage>
+          }
+        />
+        <Route path="/staff/catering/dashboard" element={<Navigate to="/staff/catering" replace />} />
+        <Route
+          path="*"
+          element={
+            <main className="flex min-h-screen flex-col items-center justify-center gap-4">
+              <h1 className="text-2xl font-semibold">Page not found</h1>
+              <Link className="text-red-700 underline" to="/">
+                Go home
+              </Link>
+            </main>
+          }
+        />
+      </Routes>
+      <LogoutAnimation />
+      <ToastViewport />
+    </>
   );
 }

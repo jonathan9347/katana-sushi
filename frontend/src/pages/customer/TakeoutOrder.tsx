@@ -4,6 +4,7 @@ import { Link } from "react-router-dom";
 import BackToHome from "../../components/layout/BackToHome";
 import { api, resolveImageUrl } from "../../lib/api";
 import { formatTime12 } from "../../lib/dateTime";
+import { humanizeEnum, shortRef } from "../../lib/display";
 import { fetchReservationRules, type ReservationRulesResponse } from "../../lib/reservationRules";
 import "./ReservationForm.css";
 
@@ -578,7 +579,7 @@ export default function TakeoutOrder() {
           <h2 id="pickup-success-title">Your pickup order is sent.</h2>
           <p className="customer-pickup-success-copy">Staff will review it shortly. Your order is not confirmed until it is approved.</p>
           <div className="customer-pickup-reference-chip">
-            <strong>{successOrder.order.order_number}</strong>
+            <strong title={successOrder.order.order_number}>{shortRef(successOrder.order.order_number)}</strong>
             <button type="button" onClick={() => void copyReference(successOrder.order.order_number)}><Copy aria-hidden="true" /> Copy</button>
           </div>
           {referenceCopied && <p className="customer-pickup-copy-message" role="status">Reference copied</p>}
@@ -587,7 +588,7 @@ export default function TakeoutOrder() {
             <PickupDetail label="Pickup time" value={formatPickupDate(successOrder.order.pickup_time ?? pickupDateTime(pickupTime))} />
             <div className="customer-pickup-success-detail"><span>Items</span><strong>{successOrder.order.items.map((item) => `${item.quantity} × ${item.name}`).join(", ")}</strong></div>
             <PickupDetail label="Total" value={formatMoney(successOrder.order.total)} />
-            <PickupDetail label="Payment" value={`${successOrder.order.payment_plan === "pay_at_pickup" ? "Pay at pickup" : successOrder.order.payment_plan} · ${successOrder.order.payment_status}`} />
+            <PickupDetail label="Payment" value={`${successOrder.order.payment_plan === "pay_at_pickup" ? "Pay at pickup" : humanizeEnum(successOrder.order.payment_plan)} · ${humanizeEnum(successOrder.order.payment_status)}`} />
           </div>
           <button type="button" className="customer-pickup-success-primary" onClick={() => {
             setQuantities({});

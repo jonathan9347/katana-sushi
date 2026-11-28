@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "../../../lib/api";
+import { formatDateTime, humanizeEnum, shortRef } from "../../../lib/display";
 
 type FulfillmentStatus = "pending_payment" | "payment_failed" | "pending_approval" | "confirmed" | "preparing" | "ready" | "released" | "completed" | "cancelled" | "expired";
 
@@ -26,7 +27,7 @@ function statusLabel(status: FulfillmentStatus) {
     ? "Awaiting approval"
     : status === "released"
       ? "Completed"
-      : status.replace(/_/g, " ");
+      : humanizeEnum(status);
 }
 
 function orderError(error: unknown) {
@@ -120,14 +121,14 @@ export default function TakeoutOrders() {
               <article key={order.order_number} className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm sm:p-6">
                 <div className="flex flex-wrap items-start justify-between gap-3 border-b border-slate-100 pb-4">
                   <div>
-                    <h2 className="text-lg font-black">{order.order_number}</h2>
+                    <h2 className="text-lg font-black" title={order.order_number}>{shortRef(order.order_number)}</h2>
                     <p className="mt-1 text-sm text-slate-600">{order.customer_name} · {order.customer_phone}</p>
-                    <p className="mt-1 text-xs text-slate-500">{new Date(order.created_at).toLocaleString()}</p>
+                    <p className="mt-1 text-xs text-slate-500">{formatDateTime(order.created_at)}</p>
                   </div>
                   <div className="text-right text-sm">
                     <p className="font-bold capitalize">{statusLabel(order.status)}</p>
-                    <p className="mt-1 text-slate-600">Payment: {order.payment_status.replace(/_/g, " ")}</p>
-                    <p className="text-slate-600">{order.payment_plan === "pay_now" ? order.payment_method ?? "Online" : "Pay at pickup"}</p>
+                    <p className="mt-1 text-slate-600">Payment: {humanizeEnum(order.payment_status)}</p>
+                    <p className="text-slate-600">{order.payment_plan === "pay_now" ? humanizeEnum(order.payment_method ?? "online") : "Pay at pickup"}</p>
                   </div>
                 </div>
                 {order.status === "ready" && (

@@ -1,9 +1,11 @@
+import { humanizeEnum } from "./display";
+
 export function formatStatus(status: string) {
-  return status.replace(/_/g, " ");
+  return humanizeEnum(status);
 }
 
 export function formatVenueType(venueType?: string | null) {
-  return venueType ?? "N/A";
+  return venueType ? humanizeEnum(venueType) : "N/A";
 }
 
 export function formatCateringEventType(eventType?: string | null, eventTypeOther?: string | null) {
@@ -11,11 +13,11 @@ export function formatCateringEventType(eventType?: string | null, eventTypeOthe
     return eventTypeOther?.trim() ? `Other — ${eventTypeOther.trim()}` : "Other";
   }
 
-  return eventType ?? "N/A";
+  return eventType ? humanizeEnum(eventType) : "N/A";
 }
 
 export function formatPaymentPlan(paymentPlan?: string | null) {
-  return paymentPlan?.replace(/_/g, " ") ?? "N/A";
+  return paymentPlan ? humanizeEnum(paymentPlan) : "N/A";
 }
 
 export function formatCurrencyPHP(value?: number) {

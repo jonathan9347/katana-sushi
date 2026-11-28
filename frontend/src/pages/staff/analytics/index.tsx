@@ -1,5 +1,6 @@
 import { KeyboardEvent, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { formatDate, humanizeEnum } from "../../../lib/display";
 import {
   CartesianGrid,
   Line,
@@ -566,10 +567,10 @@ export default function AnalyticsPage() {
                   <TableBody>
                     {historyQuery.data.wasteHistory.slice(0, 10).map((entry) => (
                       <TableRow key={entry.id}>
-                        <TableCell>{new Date(entry.created_at).toLocaleDateString()}</TableCell>
+                        <TableCell>{formatDate(entry.created_at)}</TableCell>
                         <TableCell className="analytics-waste-material">{entry.raw_material.name}</TableCell>
                         <TableCell>{Number(entry.quantity).toLocaleString()} {entry.unit}</TableCell>
-                        <TableCell className="analytics-waste-reason">{entry.reason?.replace("_", " ") ?? "—"}</TableCell>
+                        <TableCell className="analytics-waste-reason">{entry.reason ? humanizeEnum(entry.reason) : "—"}</TableCell>
                       </TableRow>
                     ))}
                   </TableBody>

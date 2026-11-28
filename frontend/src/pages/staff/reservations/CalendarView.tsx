@@ -6,6 +6,7 @@ import { useMemo, useState } from "react";
 import { formatManilaDate, formatTime12, manilaDateKey, todayManilaDateKey } from "../../../lib/dateTime";
 import { Dialog } from "../../../components/ui/dialog";
 import { Button } from "../../../components/ui/button";
+import { humanizeEnum, shortRef } from "../../../lib/display";
 
 type Reservation = {
   id: string;
@@ -173,9 +174,9 @@ export default function CalendarView() {
               <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
                 <div>
                   <p className="font-black text-slate-950">{formatTime12(reservation.time)} · {reservation.customer_name}</p>
-                  <p className="mt-1 text-sm text-slate-600">{reservation.booking_id} · {reservation.party_size} guests</p>
+                  <p className="mt-1 text-sm text-slate-600">{shortRef(reservation.booking_id)} · {reservation.party_size} guests</p>
                   <span className={`mt-2 inline-flex rounded-full px-2 py-1 text-xs font-black uppercase ${statusClass(reservation.status)}`}>
-                    {reservation.status.replace(/_/g, " ")}
+                    {humanizeEnum(reservation.status)}
                   </span>
                 </div>
                 <div className="flex flex-wrap gap-2">

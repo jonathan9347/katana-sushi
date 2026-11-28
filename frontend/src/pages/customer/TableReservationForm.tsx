@@ -7,6 +7,7 @@ import { Dialog } from "../../components/ui/dialog";
 import { api } from "../../lib/api";
 import { getApiErrorMessage } from "../../lib/errors";
 import { formatTime12, todayManilaDateKey } from "../../lib/dateTime";
+import { shortRef } from "../../lib/display";
 import {
   fetchReservationRules,
   getServerNow,
@@ -189,7 +190,7 @@ export default function TableReservationForm() {
             <p className="table-reservation-eyebrow">Table reservation</p>
             <h1>Your table is confirmed.</h1>
             <p className="table-reservation-success-copy">We look forward to welcoming you. Your booking reference is:</p>
-            <p className="table-reservation-reference">{booking.booking_id}</p>
+            <p className="table-reservation-reference" title={booking.booking_id}>{shortRef(booking.booking_id)}</p>
             <p className="table-reservation-success-detail">
               {date} · {timeLabel} · {partySize} guest{partySize === 1 ? "" : "s"} · {reservationType === "unlimited" ? "Unlimited" : "Regular à la carte"}
             </p>

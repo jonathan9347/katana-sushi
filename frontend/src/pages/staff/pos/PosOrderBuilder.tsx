@@ -5,6 +5,7 @@ import { Button } from "../../../components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "../../../components/ui/card";
 import { resolveImageUrl } from "../../../lib/api";
 import { formatManilaDateTime } from "../../../lib/dateTime";
+import { shortRef } from "../../../lib/display";
 import type { CartItem, PosCartKey, PosProduct } from "./store";
 import "./PosPage.css";
 
@@ -480,7 +481,7 @@ export default function PosOrderBuilder({
                 <div className="grid gap-2">
                   <div className="rounded-md bg-slate-50 p-3 text-sm">
                     <p className="font-semibold">{pickupOrder.customer_name}</p>
-                    <p>{pickupOrder.order_number} · {pickupOrder.status === "ready" ? "Ready for pickup" : "Preparing"}</p>
+                    <p title={pickupOrder.order_number}>{shortRef(pickupOrder.order_number)} · {pickupOrder.status === "ready" ? "Ready for pickup" : "Preparing"}</p>
                     {pickupOrder.pickup_time && <p>Pickup Time: {formatManilaDateTime(pickupOrder.pickup_time, { hour: "numeric", minute: "2-digit" })}</p>}
                   </div>
                   {pickupOrder.items.map((item, index) => (

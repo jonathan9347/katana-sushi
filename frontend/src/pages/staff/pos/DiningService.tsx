@@ -6,6 +6,7 @@ import UnlimitedTimer from "../../../components/pos/UnlimitedTimer";
 import { usePosCart, type PosCartKey } from "./store";
 import { api } from "../../../lib/api";
 import { useToast } from "../../../hooks/useToast";
+import { formatDateTime, humanizeEnum, shortRef } from "../../../lib/display";
 import { PRINT_LINE_WIDTH, addPrintAmount, addPrintPair, loadReceiptLogoDataUrl, printPlainLines, wrapPrintText } from "./printLayout";
 
 type Guest = {
@@ -196,7 +197,7 @@ function money(value: number) {
 }
 
 function formatTime(value: string) {
-  return new Date(value).toLocaleString();
+  return formatDateTime(value);
 }
 
 function normalizeTableStatus(status: string) {
@@ -236,7 +237,7 @@ export function printDiningOrderSlip(
   const lines = ["ORDER SLIP - NOT A RECEIPT"];
   if (isReprint) lines.push("REPRINT");
   addPrintPair(lines, "Table", order.table_number_snapshot ?? "Unknown");
-  addPrintPair(lines, "Order", order.order_number);
+  addPrintPair(lines, "Order", shortRef(order.order_number));
   addPrintPair(lines, "Date", formatTime(order.created_at));
   addPrintPair(lines, "Cashier", options.cashierName ?? "Cashier");
   lines.push("-".repeat(PRINT_LINE_WIDTH));
@@ -254,7 +255,7 @@ export function printDiningOrderSlip(
       ? "Unavailable"
       : money(options.tableTotal)
   );
-  printPlainLines(target, `Order ${order.order_number}`, lines, options.paperSize ?? "80mm");
+  printPlainLines(target, `Order ${shortRef(order.order_number)}`, lines, options.paperSize ?? "80mm");
 }
 
 function errorMessage(error: unknown) {
@@ -825,7 +826,7 @@ export default function DiningService({
         <style>body{font:16px Arial,sans-serif;margin:20px}h1{font-size:20px}li{margin:10px 0}</style>
       </head><body>
         <h1>Table ${order.dining_session.table.table_number}</h1>
-        <p>${order.order_type === "unlimited" ? "UNLIMITED" : "A LA CARTE"} · ${escapeHtml(order.order_number)}</p>
+        <p>${order.order_type === "unlimited" ? "UNLIMITED" : "A LA CARTE"} · ${escapeHtml(shortRef(order.order_number))}</p>
         <p>${formatTime(order.created_at)}</p><hr />
         <ul>${order.items.map((item) => `<li>${item.quantity} × ${escapeHtml(item.name_snapshot)}</li>`).join("")}</ul>
         <script>window.print();window.close();</script>
@@ -850,7 +851,7 @@ export default function DiningService({
                   <div>
                     <p className="text-xs font-bold uppercase text-red-700">{order.order_type === "unlimited" ? "Unlimited" : "A la carte"}</p>
                     <h2 className="text-xl font-black">Table {order.dining_session.table.table_number}</h2>
-                    <p className="text-xs text-slate-500">{order.order_number} · {formatTime(order.created_at)}</p>
+                    <p className="text-xs text-slate-500" title={order.order_number}>{shortRef(order.order_number)} · {formatTime(order.created_at)}</p>
                   </div>
                   <button className="rounded border p-2 text-slate-700 hover:bg-slate-50" onClick={() => printTicket(order)} aria-label="Print kitchen ticket">
                     <Printer className="h-4 w-4" />
@@ -863,7 +864,7 @@ export default function DiningService({
                     </li>
                   ))}
                 </ul>
-                <p className="mb-3 text-sm font-bold uppercase text-slate-600">Status: {order.status}</p>
+                <p className="mb-3 text-sm font-bold uppercase text-slate-600">Status: {humanizeEnum(order.status)}</p>
                 <div className="flex flex-wrap gap-2">
                   {order.status === "reserved" && (
                     <>
@@ -1132,7 +1133,7 @@ export default function DiningService({
                 <p className="text-sm font-bold uppercase text-emerald-800">Checkout complete</p>
                 <h2 className="text-lg font-black text-slate-950">Table {completedTransaction.dining_session.table.table_number}</h2>
                 <p className="text-sm text-slate-700">
-                  {completedTransaction.transaction_number} · {formatTime(completedTransaction.created_at)} · paid {money(completedTransaction.total)}
+                  {shortRef(completedTransaction.transaction_number)} · {formatTime(completedTransaction.created_at)} · paid {money(completedTransaction.total)}
                 </p>
               </div>
               <div className="flex gap-2">
@@ -1145,7 +1146,7 @@ export default function DiningService({
         {!boardOnly && !kitchenOnly && lastCommittedOrder && (
           <section aria-label="Last committed order" className="rounded-xl border border-emerald-300 bg-emerald-50 p-4 shadow-sm">
             <p className="font-semibold">
-              Saved order {lastCommittedOrder.order_number} · Table {lastCommittedOrder.table_number_snapshot ?? "—"}
+              Saved order {shortRef(lastCommittedOrder.order_number)} · Table {lastCommittedOrder.table_number_snapshot ?? "—"}
             </p>
             {printError && <p role="alert" className="mt-1 text-sm text-amber-900">{printError}</p>}
             <ActionButton className="mt-2" tone="muted" onClick={reprintLastOrder}>Reprint</ActionButton>
@@ -1881,7 +1882,7 @@ function printCheckoutReceipt(transaction: CheckoutTransaction) {
   ].join("");
   const renderReceipt = (logoDataUrl?: string) => {
     receipt.document.write(`
-    <html><head><title>${escapeHtml(transaction.transaction_number)}</title>
+    <html><head><title>${escapeHtml(shortRef(transaction.transaction_number))}</title>
       <style>
         body{font-family:Arial,sans-serif;margin:18px;color:#111827}
         .receipt-branding{padding:3mm 0 4mm}
@@ -1898,9 +1899,9 @@ function printCheckoutReceipt(transaction: CheckoutTransaction) {
       ${logoDataUrl ? `<header class="receipt-branding"><img class="receipt-logo" src="${escapeHtml(logoDataUrl)}" alt="Katana Sushi"></header>` : ""}
       <h1>Katana Sushi</h1>
       <p>Table ${transaction.table_number_snapshot ?? transaction.dining_session.table.table_number}</p>
-      <p>Transaction: ${escapeHtml(transaction.transaction_number)}</p>
+      <p>Transaction: ${escapeHtml(shortRef(transaction.transaction_number))}</p>
       <p>Date: ${escapeHtml(formatTime(transaction.created_at))}</p>
-      <p>Payment: ${escapeHtml(transaction.payment_method.toUpperCase())}</p>
+      <p>Payment: ${escapeHtml(humanizeEnum(transaction.payment_method))}</p>
       <div class="line"></div>
       <table>${lines}</table>
       <div class="line"></div>

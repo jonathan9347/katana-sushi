@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { MessageSquareText } from "lucide-react";
 import { api } from "../../lib/api";
+import { formatDate, humanizeEnum, shortRef } from "../../lib/display";
 import { Card, CardContent, CardHeader, CardTitle } from "../ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../ui/table";
 
@@ -24,7 +25,7 @@ const analysisClass: Record<string, string> = {
 };
 
 function visitTypeLabel(value: string) {
-  return value.replace(/_/g, " ");
+  return humanizeEnum(value);
 }
 
 export default function FeedbackAnalysisTable() {
@@ -75,19 +76,19 @@ export default function FeedbackAnalysisTable() {
               <TableBody>
                 {feedback.map((item) => (
                   <TableRow key={item.id}>
-                    <TableCell className="font-semibold">{item.feedback_id}</TableCell>
+                    <TableCell className="font-semibold" title={item.feedback_id}>{shortRef(item.feedback_id)}</TableCell>
                     <TableCell>{item.customer_name}</TableCell>
                     <TableCell className="capitalize">{visitTypeLabel(item.visit_type)}</TableCell>
                     <TableCell>{item.rating}/5</TableCell>
                     <TableCell>
                       <span className={`inline-flex rounded-full border px-2.5 py-1 text-xs font-bold ${analysisClass[item.analysis] ?? analysisClass["General Feedback"]}`}>
-                        {item.analysis}
+                        {humanizeEnum(item.analysis)}
                       </span>
                     </TableCell>
                     <TableCell className="max-w-sm text-sm text-slate-600">
                       <span className="line-clamp-2">{item.message}</span>
                     </TableCell>
-                    <TableCell className="text-sm text-slate-600">{new Date(item.created_at).toLocaleDateString()}</TableCell>
+                    <TableCell className="text-sm text-slate-600">{formatDate(item.created_at)}</TableCell>
                   </TableRow>
                 ))}
               </TableBody>

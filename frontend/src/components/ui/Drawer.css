@@ -1,0 +1,49 @@
+.ui-visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  clip-path: inset(50%);
+}
+
+.ui-drawer-backdrop {
+  position: fixed;
+  z-index: 100;
+  inset: 0;
+  display: flex;
+  justify-content: flex-end;
+  background: rgba(28, 32, 48, .45);
+  backdrop-filter: blur(3px);
+}
+
+.ui-drawer-panel {
+  position: relative;
+  display: flex;
+  width: min(500px, 100vw);
+  height: 100%;
+  min-height: 0;
+  flex-direction: column;
+  overflow: hidden;
+  background: #fff;
+  box-shadow: -18px 0 42px rgba(28, 20, 22, .18);
+  animation: ui-drawer-enter 280ms cubic-bezier(.2, .8, .2, 1) both;
+}
+
+.ui-drawer-backdrop button:focus-visible,
+.ui-drawer-backdrop input:focus-visible {
+  outline: 3px solid #fff;
+  outline-offset: 2px;
+}
+
+@keyframes ui-drawer-enter {
+  from { transform: translateX(36px); opacity: .7; }
+  to { transform: translateX(0); opacity: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ui-drawer-panel {
+    animation-duration: .01ms;
+  }
+}

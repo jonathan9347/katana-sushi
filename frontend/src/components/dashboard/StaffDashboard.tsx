@@ -15,6 +15,7 @@ import {
 import { Link } from "react-router-dom";
 import { useAuth } from "../../hooks/useAuth";
 import { formatManilaDate, formatTime12, todayManilaDateKey } from "../../lib/dateTime";
+import { humanizeEnum, shortRef } from "../../lib/display";
 import {
   dashboardKeys,
   fetchDashboardCalendar,
@@ -233,7 +234,7 @@ export default function StaffDashboard() {
   const feedback = feedbackQuery.data ?? [];
   const notifications = notificationsQuery.data?.notifications ?? [];
   const approvedDates = new Set(calendarQuery.data ?? []);
-  const displayRole = role === "staff" ? "TEAM MEMBER" : role.replace(/_/g, " ").toUpperCase();
+  const displayRole = humanizeEnum(role).toUpperCase();
   const roleFocus = role === "event_coordinator"
     ? { title: "Upcoming catering events", value: summaryQuery.data?.upcomingEvents }
     : role === "inventory_manager" || role === "chef"
@@ -372,7 +373,7 @@ export default function StaffDashboard() {
                   <li key={`${notification.type}-${notification.id}`} className="staff-notification-item">
                     <div className="min-w-0">
                       <p className="staff-notification-name">{notification.customerName}</p>
-                      <p className="staff-notification-meta">{notification.type} · {notification.reference}</p>
+                      <p className="staff-notification-meta">{humanizeEnum(notification.type)} · {shortRef(notification.reference)}</p>
                       <p className="staff-notification-meta">
                         {formatManilaDate(notification.date, { month: "short", day: "numeric" })}
                         {notification.time ? ` · ${formatTime12(notification.time)}` : ""}
@@ -521,7 +522,7 @@ export default function StaffDashboard() {
                     <div className="admin-reminder-row">
                       <div className="min-w-0">
                         <p className="admin-reminder-name">{reminder.customerName} · {reminder.details}</p>
-                        <p className="admin-reminder-meta">{reminder.type === "table" ? "Table booking" : "Catering event"} · {reminder.reference}</p>
+                        <p className="admin-reminder-meta">{reminder.type === "table" ? "Table booking" : "Catering event"} · {shortRef(reminder.reference)}</p>
                       </div>
                       <p className="admin-reminder-meta shrink-0">
                         <Clock3 aria-hidden="true" className="mr-1 inline" size={12} />

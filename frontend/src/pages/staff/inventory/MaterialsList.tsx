@@ -17,6 +17,7 @@ import {
 import { useSearchParams } from "react-router-dom";
 import { api } from "../../../lib/api";
 import { formatManilaDate, todayManilaDateKey } from "../../../lib/dateTime";
+import { humanizeEnum, shortRef } from "../../../lib/display";
 import { Button } from "../../../components/ui/button";
 import { Card, CardContent } from "../../../components/ui/card";
 import { Dialog } from "../../../components/ui/dialog";
@@ -772,12 +773,12 @@ export default function MaterialsList({ role, onNavigateStockView, onOpenReserva
                 <ul className="grid gap-2">
                   {detailsMaterial.reserved_for.map((lock) => (
                     <li key={lock.id} className="rounded-md border border-slate-200 p-3">
-                      <p className="font-semibold">{lock.booking_reference ?? lock.event_name}</p>
-                      <p className="text-sm text-slate-600">{lock.customer_name} · {lock.event_name.replace(/_/g, " ")}</p>
+                      <p className="font-semibold">{lock.booking_reference ? shortRef(lock.booking_reference) : humanizeEnum(lock.event_name)}</p>
+                      <p className="text-sm text-slate-600">{lock.customer_name} · {humanizeEnum(lock.event_name)}</p>
                       <p className="text-sm text-slate-600">
                         {Number(lock.reserved_quantity).toLocaleString()} {lock.unit} · {lock.event_date ? formatManilaDate(lock.event_date, { month: "short", day: "numeric", year: "numeric" }) : "Date not set"}
                       </p>
-                      <p className="text-xs text-slate-500">Status: {lock.status ?? "Active"}</p>
+                      <p className="text-xs text-slate-500">Status: {lock.status ? humanizeEnum(lock.status) : "Active"}</p>
                     </li>
                   ))}
                   {onOpenReservations && (
@@ -797,10 +798,10 @@ export default function MaterialsList({ role, onNavigateStockView, onOpenReserva
                 {detailsMovementsQuery.data?.map((movement) => (
                   <div key={movement.id} className="rounded-md border border-slate-200 p-3 text-sm">
                     <div className="flex justify-between gap-3">
-                      <strong>{movement.action} · {Number(movement.quantity).toLocaleString()} {movement.unit}</strong>
+                      <strong>{humanizeEnum(movement.action)} · {Number(movement.quantity).toLocaleString()} {movement.unit}</strong>
                       <span className="text-slate-500">{formatManilaDate(movement.created_at)}</span>
                     </div>
-                    <p className="mt-1 text-slate-600">{movement.source_reference ?? "No booking/reference"} · {movement.actor?.name ?? "System"}</p>
+                    <p className="mt-1 text-slate-600">{movement.source_reference ? shortRef(movement.source_reference) : "No booking/reference"} · {movement.actor?.name ?? "System"}</p>
                     {movement.note && <p className="mt-1 text-slate-500">{movement.note}</p>}
                   </div>
                 ))}
