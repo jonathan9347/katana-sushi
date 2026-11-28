@@ -15,6 +15,9 @@ import { getApiErrorMessage } from "../../../lib/errors";
 import { formatCateringEventType } from "../../../lib/reservationDetails";
 import { formatCateringPackageSnapshots } from "../../../lib/cateringPackageSnapshot";
 import { humanizeEnum, shortRef } from "../../../lib/display";
+import { getPrintProfile } from "../../../print/printConfig";
+import { renderCateringReceipt } from "../../../print/receiptTemplates";
+import { printReceiptDocument } from "../../../pages/staff/pos/printLayout";
 
 type PaymentHistoryItem = {
   id: string;
@@ -125,6 +128,7 @@ export default function CateringReservations() {
   const [calendarOpen, setCalendarOpen] = useState(false);
   const [statusFilter, setStatusFilter] = useState("open");
   const [activeReservation, setActiveReservation] = useState<CateringReservation | null>(null);
+  const [isPrintingReceipt, setIsPrintingReceipt] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [paymentModalOpen, setPaymentModalOpen] = useState(false);
   const [approvalTarget, setApprovalTarget] = useState<CateringReservation | null>(null);
@@ -364,6 +368,39 @@ export default function CateringReservations() {
       setActionLoading((current) => ({ ...current, [reservation.id]: false }));
       setCompletionTarget(null);
     }
+  }
+
+  function handlePrintReceipt() {
+    if (!activeReservation) return;
+
+    const history = (activeReservation.payment_history ?? []).filter((payment) =>
+      !["refund", "refund_downpayment", "cancellation"].includes(payment.payment_stage.toLowerCase())
+    );
+    const totalPaid = history.length > 0
+      ? Math.max(history.reduce((sum, payment) =>
+          sum + (payment.payment_stage.toLowerCase() === "forfeited_fee" ? 0 : Number(payment.amount ?? 0)), 0), 0)
+      : Number(activeReservation.downpayment_amount ?? 0);
+    const total = Number(activeReservation.total_price ?? activeReservation.package_total ?? 0);
+    const remainingBalance = Number(activeReservation.remaining_balance ?? Math.max(total - totalPaid, 0));
+    const started = printReceiptDocument({
+      key: `catering:${activeReservation.reference}`,
+      title: `Catering receipt ${activeReservation.reference}`,
+      content: renderCateringReceipt(activeReservation, {
+        profile: getPrintProfile(),
+        totalPaid,
+        remainingBalance,
+        total
+      }),
+      onAfterPrint: () => setIsPrintingReceipt(false),
+      onError: (error) => {
+        console.error("Catering receipt printing failed", error);
+        setIsPrintingReceipt(false);
+        toast("The catering receipt could not be prepared for printing.");
+      }
+    });
+
+    if (started) setIsPrintingReceipt(true);
+    else toast("This catering receipt is already being printed.");
   }
 
   const modalActions: Array<{
@@ -735,8 +772,8 @@ export default function CateringReservations() {
             {action.label}
           </Button>
         )).concat(
-          <Button key="print-receipt" type="button" variant="outline" onClick={() => window.print()}>
-            Print Receipt
+          <Button key="print-receipt" type="button" variant="outline" onClick={handlePrintReceipt} disabled={isPrintingReceipt}>
+            {isPrintingReceipt ? "Preparing receipt..." : "Print Receipt"}
           </Button>
         )}
         body={activeReservation ? (

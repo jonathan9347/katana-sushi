@@ -8,6 +8,9 @@ import { Dialog } from "./dialog";
 import { Select } from "./select";
 import { formatManilaDate, manilaDateKey, todayManilaDateKey } from "../../lib/dateTime";
 import { formatDateTime, humanizeEnum, shortRef } from "../../lib/display";
+import { getPrintProfile } from "../../print/printConfig";
+import { renderCateringReceipt } from "../../print/receiptTemplates";
+import { printReceiptDocument } from "../../pages/staff/pos/printLayout";
 import "../../styles/staff-redesign.css";
 
 type ModalAction = {
@@ -62,6 +65,8 @@ export function ReservationDetailsModal({ open, title, reservation, actions, onP
   const [activity, setActivity] = useState<NonNullable<ReservationReceiptData["activity"]>>([]);
   const [activityError, setActivityError] = useState<string | null>(null);
   const [paymentMethod, setPaymentMethod] = useState("cash");
+  const [isPrintingReceipt, setIsPrintingReceipt] = useState(false);
+  const [printError, setPrintError] = useState<string | null>(null);
   const [amount, setAmount] = useState("");
   const [referenceNumber, setReferenceNumber] = useState("");
   const [cashReceived, setCashReceived] = useState("");
@@ -96,6 +101,8 @@ export function ReservationDetailsModal({ open, title, reservation, actions, onP
     setCashReceived(String(Number(reservation.remaining_balance ?? 0).toFixed(2)));
     setOverrideReason("");
     setError(null);
+    setPrintError(null);
+    setIsPrintingReceipt(false);
   }, [open, reservation]);
 
   useEffect(() => {
@@ -279,6 +286,36 @@ export function ReservationDetailsModal({ open, title, reservation, actions, onP
       : Number(reservation?.downpayment_amount ?? 0);
   const totalValue = Number(reservation?.total_price ?? reservation?.package_total ?? ((remainingBalance + totalPaid) || 0));
   const progressPercent = Math.min(100, Math.max(0, (totalPaid / Math.max(totalValue, 1)) * 100));
+
+  function handlePrintReceipt() {
+    if (!reservation) return;
+    if (reservation.type !== "catering") {
+      window.print();
+      return;
+    }
+
+    const bookingId = reservation.reference ?? reservation.booking_id ?? reservation.reservation_id ?? reservation.id ?? "unknown";
+    const started = printReceiptDocument({
+      key: `catering:${bookingId}`,
+      title: `Catering receipt ${bookingId}`,
+      content: renderCateringReceipt(reservation, {
+        profile: getPrintProfile(),
+        totalPaid,
+        remainingBalance,
+        total: totalValue
+      }),
+      onAfterPrint: () => setIsPrintingReceipt(false),
+      onError: (printFailure) => {
+        console.error("Catering receipt printing failed", printFailure);
+        setIsPrintingReceipt(false);
+        setPrintError("The catering receipt could not be prepared for printing. Please try again.");
+      }
+    });
+    if (started) {
+      setIsPrintingReceipt(true);
+      setPrintError(null);
+    }
+  }
 
   function handleTabKeyDown(event: React.KeyboardEvent<HTMLButtonElement>, currentIndex: number) {
     let nextIndex: number;
@@ -514,9 +551,12 @@ export function ReservationDetailsModal({ open, title, reservation, actions, onP
 
         <div className="staff-details-footer">
           <div className="flex flex-wrap items-center justify-between gap-2">
-            <Button type="button" variant="outline" onClick={() => window.print()}>Print receipt</Button>
+            <Button type="button" variant="outline" onClick={handlePrintReceipt} disabled={isPrintingReceipt}>
+              {isPrintingReceipt ? "Preparing receipt..." : "Print receipt"}
+            </Button>
             <div className="flex flex-wrap justify-end gap-2">{renderActions(actions)}<Button type="button" variant="outline" onClick={onClose}>Close</Button></div>
           </div>
+          {printError && <p className="mt-2 text-sm font-semibold text-red-700" role="alert">{printError}</p>}
         </div>
       </div>
     </div>

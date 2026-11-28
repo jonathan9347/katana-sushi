@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { expectPrintLinesWithin32 } from "./printAssertions";
+import { expectReceiptPrint, finishReceiptPrint } from "./printAssertions";
 
 test("takeout checkout creates one immediate sale and receipt without entering dine-in flow", async ({ page }) => {
   const checkoutBodies: Array<Record<string, unknown>> = [];
@@ -13,7 +13,9 @@ test("takeout checkout creates one immediate sale and receipt without entering d
       name: "Test Cashier",
       role: "cashier"
     }));
-    window.print = () => document.body.setAttribute("data-print-requested", "true");
+    window.print = () => {
+      window.parent.document.body.setAttribute("data-print-requested", "true");
+    };
   });
   await page.route("**/api/**", async (route) => {
     const url = new URL(route.request().url());
@@ -102,20 +104,17 @@ test("takeout checkout creates one immediate sale and receipt without entering d
   await payment.getByLabel("Enter Amount Received").fill("250");
   await expect(payment.getByText("Change: PHP 50.00")).toBeVisible();
 
-  const receiptPopupPromise = page.waitForEvent("popup");
   await payment.getByLabel("Enter Amount Received").press("Enter");
-  const receipt = await receiptPopupPromise;
+  const receipt = await expectReceiptPrint(page, "Receipt POS-TAKEOUT-001");
   const receiptLogo = receipt.locator("img.receipt-logo");
   await expect(receiptLogo).toHaveAttribute("src", /^data:image\/png;base64,/);
   expect(await receiptLogo.evaluate((logo) => parseFloat(getComputedStyle(logo).width))).toBeGreaterThan(110);
-  expect(await receipt.locator(".receipt-branding").evaluate((header) => parseFloat(getComputedStyle(header).paddingBottom))).toBeGreaterThan(15);
-  await expect(receipt.locator(".receipt-branding + pre")).toContainText("POS-TAKEOUT-001");
+  await expect(receipt.locator("body")).toContainText("KATANA SUSHI");
   await expect(receiptLogo).toHaveJSProperty("complete", true);
   expect(await receiptLogo.evaluate((logo) => logo.naturalWidth)).toBeGreaterThan(0);
   await expect(receipt.locator("body")).toContainText("POS-TAKEOUT-001");
-  await expect(receipt.locator("body")).toContainText("2 x California Roll");
-  await expect(receipt.locator("body")).toHaveAttribute("data-print-requested", "true");
-  await expectPrintLinesWithin32(receipt);
+  await expect(receipt.locator("body")).toContainText("California Roll");
+  await expect(receipt.locator(".item-quantity")).toContainText("2x");
   await expect(receipt.locator("body")).not.toContainText("Table");
   await expect(receipt.locator("body")).not.toContainText("Order POS-TAKEOUT-001");
 
@@ -136,6 +135,7 @@ test("takeout checkout creates one immediate sale and receipt without entering d
   expect(checkoutBodies[0]).not.toHaveProperty("orderType");
   expect(diningRequests).toEqual([]);
   await expect(page.getByRole("button", { name: "Checkout" })).toBeDisabled();
+  await finishReceiptPrint(page);
 });
 
 test("takeout checkout applies the shared Senior/PWD discount to the server-calculated total and receipt", async ({ page }) => {
@@ -149,7 +149,7 @@ test("takeout checkout applies the shared Senior/PWD discount to the server-calc
       name: "Test Cashier",
       role: "cashier"
     }));
-    window.print = () => document.body.setAttribute("data-print-requested", "true");
+    window.print = () => window.parent.document.body.setAttribute("data-print-requested", "true");
   });
   await page.route("**/api/**", async (route) => {
     const url = new URL(route.request().url());
@@ -236,14 +236,12 @@ test("takeout checkout applies the shared Senior/PWD discount to the server-calc
   await payment.getByLabel("Enter Amount Received").fill("1000");
   await expect(payment.getByText("Change: PHP 60.00")).toBeVisible();
 
-  const receiptPopupPromise = page.waitForEvent("popup");
   await payment.getByRole("button", { name: "Complete payment" }).click();
-  const receipt = await receiptPopupPromise;
+  const receipt = await expectReceiptPrint(page, "Receipt POS-TAKEOUT-940");
   await expect(receipt.locator("body")).toContainText("Senior/PWD discount");
   await expect(receipt.locator("body")).toContainText("PHP 60.00");
-  await expect(receipt.locator("body")).toHaveAttribute("data-print-requested", "true");
-  await expect(receipt.locator("body")).toContainText("TOTAL PAID PHP 940.00");
-  await expectPrintLinesWithin32(receipt);
+  await expect(receipt.locator("body")).toContainText("TOTAL PAID");
+  await expect(receipt.locator("body")).toContainText("PHP 940.00");
   expect(checkoutBodies).toHaveLength(1);
   expect(checkoutBodies[0]).toMatchObject({
     transactionType: "takeout",
@@ -252,4 +250,5 @@ test("takeout checkout applies the shared Senior/PWD discount to the server-calc
     seniorPwdCount: 3,
     cashReceived: 1000
   });
+  await finishReceiptPrint(page);
 });

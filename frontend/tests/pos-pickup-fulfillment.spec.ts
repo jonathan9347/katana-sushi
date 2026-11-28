@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { expectPrintLinesWithin32 } from "./printAssertions";
+import { expectReceiptPrint, finishReceiptPrint } from "./printAssertions";
 
 type PickupStatus = "preparing" | "ready";
 type PickupOrder = {
@@ -42,7 +42,9 @@ test("cashier searches by order ID and completes preparing or ready pickups with
       name: "Test Cashier",
       role: "cashier"
     }));
-    window.print = () => document.body.setAttribute("data-print-requested", "true");
+    window.print = () => {
+      window.parent.document.body.setAttribute("data-print-requested", "true");
+    };
   });
   await page.route("**/api/**", async (route) => {
     const url = new URL(route.request().url());
@@ -150,15 +152,13 @@ test("cashier searches by order ID and completes preparing or ready pickups with
     if (orderId.includes("READY")) {
       await expect(payment.getByText("Change: PHP 62.00")).toBeVisible();
     }
-    const receiptPopupPromise = page.waitForEvent("popup");
-    await payment.getByRole("button", { name: "Confirm" }).click();
-    const receipt = await receiptPopupPromise;
-    await expect(receipt.locator("body")).toHaveAttribute("data-print-requested", "true");
-    await expectPrintLinesWithin32(receipt);
+    await payment.getByRole("button", { name: "Complete payment" }).click();
+    const receipt = await expectReceiptPrint(page, "Receipt POS-PICKUP-001");
     if (orderId.includes("READY")) {
       await expect(receipt.locator("body")).toContainText("Senior/PWD discount");
       await expect(receipt.locator("body")).toContainText("PHP 12.00");
     }
+    await finishReceiptPrint(page);
     await expect(page.getByRole("region", { name: "POS order builder" })).toBeVisible();
     await expect(page.getByRole("button", { name: "Pickup", exact: true })).toBeVisible();
     if (orderId.includes("PREP")) {

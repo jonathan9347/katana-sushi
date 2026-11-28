@@ -7,7 +7,9 @@ import { usePosCart, type PosCartKey } from "./store";
 import { api } from "../../../lib/api";
 import { useToast } from "../../../hooks/useToast";
 import { formatDateTime, humanizeEnum, shortRef } from "../../../lib/display";
-import { PRINT_LINE_WIDTH, addPrintAmount, addPrintPair, loadReceiptLogoDataUrl, printPlainLines, wrapPrintText } from "./printLayout";
+import { getPrintProfile } from "../../../print/printConfig";
+import { renderOrderSlip, renderPaidReceipt } from "../../../print/receiptTemplates";
+import { printReceiptDocument } from "./printLayout";
 
 type Guest = {
   id: string;
@@ -42,8 +44,18 @@ export type CommittedDiningOrder = {
     quantity: number;
     unit_price: number | string;
     total_price: number | string;
+    notes?: string | null;
   }>;
 };
+
+function currentCashierName() {
+  try {
+    const user = JSON.parse(localStorage.getItem("katana_user") ?? "{}") as { name?: unknown };
+    return typeof user.name === "string" && user.name.trim() ? user.name.trim() : "Cashier";
+  } catch {
+    return "Cashier";
+  }
+}
 
 type ReviewedOrder = {
   sessionId: string;
@@ -183,7 +195,7 @@ type Props = {
   onBoardAction?: () => void;
 };
 type DraftItem = { productId: string; quantity: number };
-type CommitOrderInput = { review: ReviewedOrder; printWindow: Window | null };
+type CommitOrderInput = { review: ReviewedOrder };
 type DiningAction = { method: "post" | "patch"; url: string; body?: unknown };
 export const LAST_COMMITTED_ORDER_STORAGE_KEY = "katana_last_committed_dining_order_id";
 type DiningActionResult = {
@@ -229,33 +241,30 @@ function escapeHtml(value: string) {
 }
 
 export function printDiningOrderSlip(
-  target: Window,
   order: CommittedDiningOrder,
   isReprint = false,
-  options: { cashierName?: string; tableTotal?: number | null; paperSize?: string } = {}
+  options: {
+    cashierName?: string;
+    tableTotal?: number | null;
+    paperSize?: string;
+    orderType?: string;
+    onError?: (error: unknown) => void;
+  } = {}
 ) {
-  const lines = ["ORDER SLIP - NOT A RECEIPT"];
-  if (isReprint) lines.push("REPRINT");
-  addPrintPair(lines, "Table", order.table_number_snapshot ?? "Unknown");
-  addPrintPair(lines, "Order", shortRef(order.order_number));
-  addPrintPair(lines, "Date", formatTime(order.created_at));
-  addPrintPair(lines, "Cashier", options.cashierName ?? "Cashier");
-  lines.push("-".repeat(PRINT_LINE_WIDTH));
-  for (const item of order.items) {
-    lines.push(...wrapPrintText(`${item.quantity} x ${item.name_snapshot}`));
-    addPrintAmount(lines, "Amount", money(Number(item.total_price)));
-  }
-  lines.push("-".repeat(PRINT_LINE_WIDTH));
-  const orderTotal = order.items.reduce((sum, item) => sum + Number(item.total_price), 0);
-  addPrintAmount(lines, "This order total", money(orderTotal));
-  addPrintAmount(
-    lines,
-    "Table total so far",
-    options.tableTotal === null || options.tableTotal === undefined
-      ? "Unavailable"
-      : money(options.tableTotal)
-  );
-  printPlainLines(target, `Order ${shortRef(order.order_number)}`, lines, options.paperSize ?? "80mm");
+  const profile = getPrintProfile(options.paperSize);
+  return printReceiptDocument({
+    key: `order:${order.id}`,
+    title: `Order ${order.order_number}`,
+    content: renderOrderSlip(order, {
+      cashierName: options.cashierName,
+      tableTotal: options.tableTotal,
+      orderType: options.orderType,
+      isReprint,
+      profile
+    }),
+    paperSize: options.paperSize,
+    onError: options.onError
+  });
 }
 
 function errorMessage(error: unknown) {
@@ -634,22 +643,20 @@ export default function DiningService({
       setOrderReview(null);
       setPrintError("");
       confirmClickLocked.current = false;
-      if (input.printWindow) {
-        try {
-          printDiningOrderSlip(input.printWindow, result.order);
-        } catch {
-          input.printWindow.close();
-          setPrintError("The order was saved, but the print window failed. Use Reprint to try again.");
+      const printed = printDiningOrderSlip(result.order, false, {
+        cashierName: currentCashierName(),
+        orderType: input.review.orderType,
+        onError: (error) => {
+          console.error("Dine-in order printing failed", error);
+          setPrintError("The order was saved, but printing failed. Use Reprint to try again.");
           toast("The order was saved, but printing failed. Use Reprint to try again.");
         }
-      } else {
-        setPrintError("The order was saved, but the print window was blocked. Use Reprint to try again.");
-        toast("The order was saved, but the print window was blocked. Use Reprint to try again.");
-      }
+      });
+      if (printed) toast("Order confirmed and sent to print.");
+      else setPrintError("This order is already being printed. Use Reprint after it finishes.");
       await refreshQueries();
     },
-    onError: async (error, input) => {
-      input.printWindow?.close();
+    onError: async (error) => {
       confirmClickLocked.current = false;
       if (errorCode(error) === "PRODUCT_PRICE_CHANGED") {
         setOrderReview(null);
@@ -793,26 +800,21 @@ export default function DiningService({
     if (!orderReview || confirmClickLocked.current || commitOrder.isPending) return;
     confirmClickLocked.current = true;
     setPrintError("");
-    const printWindow = window.open("", "_blank", "width=520,height=700");
-    commitOrder.mutate({ review: orderReview, printWindow });
+    commitOrder.mutate({ review: orderReview });
   }
 
   function reprintLastOrder() {
     if (!lastCommittedOrder) return;
-    const printWindow = window.open("", "_blank", "width=520,height=700");
-    if (!printWindow) {
-      setPrintError("The reprint window was blocked. Allow pop-ups and try Reprint again.");
-      toast("The reprint window was blocked. Allow pop-ups and try Reprint again.");
-      return;
-    }
-    try {
-      printDiningOrderSlip(printWindow, lastCommittedOrder, true);
-      setPrintError("");
-    } catch {
-      printWindow.close();
-      setPrintError("The order is still saved, but reprinting failed. Try Reprint again.");
-      toast("The order is still saved, but reprinting failed. Try Reprint again.");
-    }
+    const printed = printDiningOrderSlip(lastCommittedOrder, true, {
+      cashierName: currentCashierName(),
+      onError: (error) => {
+        console.error("Dine-in order reprinting failed", error);
+        setPrintError("The order is still saved, but reprinting failed. Try Reprint again.");
+        toast("The order is still saved, but reprinting failed. Try Reprint again.");
+      }
+    });
+    if (printed) setPrintError("");
+    else setPrintError("This order is already being printed. Try again when printing finishes.");
   }
 
   function printTicket(order: KitchenOrder) {
@@ -1867,75 +1869,15 @@ function BillLine({ label, amount, strong = false }: { label: string; amount: nu
 }
 
 function printCheckoutReceipt(transaction: CheckoutTransaction) {
-  const receipt = window.open("", "_blank", "width=420,height=700");
-  if (!receipt) {
-    window.alert("Allow pop-ups for this site to print the receipt.");
-    return;
-  }
-  const lines = [
-    ...transaction.items.map((item) =>
-      `<tr><td>${item.quantity} × ${escapeHtml(item.name_snapshot ?? item.selling_product.name)}</td><td class="right">${money(item.total_price)}</td></tr>`
-    ),
-    ...transaction.charges.map((charge) =>
-      `<tr><td>${charge.quantity} × ${escapeHtml(charge.name_snapshot)}</td><td class="right">${money(charge.total_price)}</td></tr>`
-    )
-  ].join("");
-  const renderReceipt = (logoDataUrl?: string) => {
-    receipt.document.write(`
-    <html><head><title>${escapeHtml(shortRef(transaction.transaction_number))}</title>
-      <style>
-        body{font-family:Arial,sans-serif;margin:18px;color:#111827}
-        .receipt-branding{padding:3mm 0 4mm}
-        .receipt-logo{display:block;width:32mm;height:32mm;margin:0 auto;object-fit:contain;filter:grayscale(1) invert(1) contrast(2)}
-        h1{text-align:center;font-size:20px;margin:0 0 8px}
-        p{margin:5px 0;font-size:12px}
-        table{border-collapse:collapse;width:100%;margin:12px 0}
-        td{padding:5px 0;font-size:12px;vertical-align:top}
-        .right{text-align:right}
-        .line{border-top:1px dashed #94a3b8;margin:10px 0}
-        .total{font-weight:bold;font-size:15px}
-      </style>
-    </head><body>
-      ${logoDataUrl ? `<header class="receipt-branding"><img class="receipt-logo" src="${escapeHtml(logoDataUrl)}" alt="Katana Sushi"></header>` : ""}
-      <h1>Katana Sushi</h1>
-      <p>Table ${transaction.table_number_snapshot ?? transaction.dining_session.table.table_number}</p>
-      <p>Transaction: ${escapeHtml(shortRef(transaction.transaction_number))}</p>
-      <p>Date: ${escapeHtml(formatTime(transaction.created_at))}</p>
-      <p>Payment: ${escapeHtml(humanizeEnum(transaction.payment_method))}</p>
-      <div class="line"></div>
-      <table>${lines}</table>
-      <div class="line"></div>
-      <p class="right">Subtotal: ${money(transaction.subtotal)}</p>
-      ${transaction.tax > 0 ? `<p class="right">Tax: ${money(transaction.tax)}</p>` : ""}
-      ${transaction.discount_amount > 0 ? `<p class="right">Senior/PWD discount (${transaction.discount_guest_count} of ${transaction.guest_count} guests${transaction.discount_base_snapshot === null || transaction.discount_rate_snapshot === null ? "" : `; ${transaction.discount_rate_snapshot * 100}% of ${money(transaction.discount_base_snapshot)} a-la-carte total`}): −${money(transaction.discount_amount)}</p>` : ""}
-      <p class="right total">Total: ${money(transaction.total)}</p>
-      ${transaction.cash_received === null ? "" : `<p class="right">Cash received: ${money(transaction.cash_received)}</p>`}
-      ${transaction.change_due === null ? "" : `<p class="right">Change: ${money(transaction.change_due)}</p>`}
-      <p style="text-align:center;margin-top:18px">Thank you!</p>
-    </body></html>
-  `);
-    receipt.document.close();
-    let printed = false;
-    const printWhenReady = () => {
-      if (printed) return;
-      printed = true;
-      receipt.focus();
-      receipt.print();
-    };
-    const logo = logoDataUrl ? receipt.document.querySelector<HTMLImageElement>(".receipt-logo") : null;
-    if (logo && !logo.complete) {
-      logo.addEventListener("load", printWhenReady, { once: true });
-      logo.addEventListener("error", printWhenReady, { once: true });
-    } else {
-      printWhenReady();
+  return printReceiptDocument({
+    key: `paid:${transaction.transaction_number}`,
+    title: `Receipt ${transaction.transaction_number}`,
+    content: renderPaidReceipt(transaction),
+    onError: (error) => {
+      console.error("Table receipt printing failed", error);
+      window.alert("The table receipt could not be prepared for printing.");
     }
-  };
-  void loadReceiptLogoDataUrl()
-    .then(renderReceipt)
-    .catch((error: unknown) => {
-      console.error("Table receipt logo could not be loaded for printing:", error);
-      renderReceipt();
-    });
+  });
 }
 
 function ActionButton({

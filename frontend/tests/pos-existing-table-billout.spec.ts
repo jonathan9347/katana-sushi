@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { expectPrintLinesWithin32 } from "./printAssertions";
+import { expectReceiptPrint, finishReceiptPrint } from "./printAssertions";
 
 const product = {
   id: "sushi-1",
@@ -36,7 +36,9 @@ async function signIn(page: import("@playwright/test").Page) {
       name: "Test Cashier",
       role: "cashier"
     }));
-    window.print = () => document.body.setAttribute("data-print-requested", "true");
+    window.print = () => {
+      window.parent.document.body.setAttribute("data-print-requested", "true");
+    };
   });
 }
 
@@ -45,21 +47,20 @@ async function printBillAndContinue(
   billDialog: import("@playwright/test").Locator,
   beforeContinue?: () => void
 ) {
-  const popupPromise = page.waitForEvent("popup");
   await billDialog.getByRole("button", { name: "Print Bill", exact: true }).click();
-  const popup = await popupPromise;
-  await expect(popup.locator("body")).toHaveAttribute("data-print-requested", "true");
-  await expectPrintLinesWithin32(popup);
-  const content = await popup.locator("pre").textContent() ?? "";
+  const popup = await expectReceiptPrint(page, "Bill slip, table 4");
+  const content = await popup.locator("body").innerText();
   beforeContinue?.();
-  await popup.evaluate(() => window.dispatchEvent(new Event("afterprint")));
+  await finishReceiptPrint(page);
   await expect(page.getByRole("dialog", { name: "Checkout Table 4" })).toBeVisible();
   return content;
 }
 
 function printedAmount(text: string | null, label: string) {
-  const line = text?.split("\n").find((candidate) => candidate.includes(label));
-  const amount = line?.match(/PHP ([\d,]+\.\d{2})/)?.[1];
+  const lines = text?.split("\n") ?? [];
+  const labelIndex = lines.findIndex((candidate) => candidate.includes(label));
+  if (labelIndex < 0) throw new Error(`Missing printed amount for ${label}`);
+  const amount = lines.slice(labelIndex).join(" ").match(/PHP ([\d,]+\.\d{2})/)?.[1];
   if (!amount) throw new Error(`Missing printed amount for ${label}`);
   return Number(amount.replace(/,/g, ""));
 }
@@ -212,17 +213,17 @@ test("existing table order can be committed, previewed with Senior/PWD discount,
   await expect(cartPanel).toContainText("Your cart is empty");
   await page.getByRole("button", { name: /Sushi Set Sushi/ }).click();
 
-  const slipPopup = page.waitForEvent("popup");
   await orderBuilder.getByRole("button", { name: "Print order" }).click();
-  const slip = await slipPopup;
+  const slip = await expectReceiptPrint(page, "Order DO-001");
   await expect(slip.locator("body")).toContainText("DO-001");
-  await expect(slip.locator("body")).toContainText("Table: 4");
+  await expect(slip.locator("body")).toContainText("TABLE 4");
   await expect(slip.locator("body")).toContainText("Sushi Set");
-  await expect(slip.locator("body")).toContainText("ORDER SLIP - NOT A RECEIPT");
-  await expect(slip.locator("body")).toContainText("Cashier: Test Cashier");
+  await expect(slip.locator("body")).toContainText("ORDER SLIP");
+  await expect(slip.locator("body")).toContainText("NOT A RECEIPT");
+  await expect(slip.locator("body")).toContainText("Test Cashier");
   await expect(slip.locator("body")).toContainText("Table total so far");
   await expect(slip.locator("body")).not.toContainText(/address|\bTIN\b|official receipt|\binvoice\b/i);
-  await expectPrintLinesWithin32(slip);
+  await finishReceiptPrint(page);
   await expect(orderBuilder.getByRole("button", { name: "Print Bill" })).toBeVisible();
   expect(confirmationCount).toBe(1);
 
@@ -249,29 +250,29 @@ test("existing table order can be committed, previewed with Senior/PWD discount,
   await expect(checkout.getByLabel("Bill-out cash received")).toHaveValue("1000.00");
   await expect(checkout).toContainText("Change: PHP 60.00");
 
-  const receiptPopup = page.waitForEvent("popup");
   await checkout.getByLabel("Bill-out cash received").press("Enter");
-  const receipt = await receiptPopup;
   await checkoutStarted;
-  expect(billSlipText).toContain("BILL SLIP - NOT A RECEIPT");
+  expect(billSlipText).toContain("BILL SLIP");
+  expect(billSlipText).toContain("NOT A RECEIPT");
   expect(billSlipText).toContain("TOTAL TO PAY");
   expect(billSlipText).toContain("PHP 940.00");
   expect(billSlipText).not.toContain("Payment:");
-  expect(billSlipText).not.toMatch(/address|\bTIN\b|official receipt|\binvoice\b/i);
-  await expect(receipt.locator("body")).not.toContainText("POS-001");
+  expect(billSlipText).not.toMatch(/address|\bTIN\b|\binvoice\b/i);
+  expect(billSlipText).toContain("This is not an official receipt.");
+  await expect(page.locator('iframe[data-receipt-print-frame="true"]')).toHaveCount(0);
   releaseCheckout();
+  const receipt = await expectReceiptPrint(page, "Receipt POS-001");
   await expect(receipt.locator("body")).toContainText("POS-001");
   await expect(receipt.locator("body")).toContainText("PAID");
   await expect(receipt.locator("body")).toContainText("Thank you");
   await expect(receipt.locator("body")).toContainText("TOTAL PAID");
   await expect(receipt.locator("body")).not.toContainText(/address|\bTIN\b|official receipt|\binvoice\b/i);
   const billSlipTotal = printedAmount(billSlipText, "TOTAL TO PAY");
-  const receiptTotal = printedAmount(await receipt.locator("pre").textContent(), "TOTAL PAID");
+  const receiptTotal = printedAmount(await receipt.locator("body").innerText(), "TOTAL PAID");
   expect(billSlipTotal).toBe(receiptTotal);
   expect(receiptTotal).toBe(940);
   await expect(receipt.locator("body")).toContainText("PHP 940.00");
-  await expect(receipt.locator("body")).toHaveAttribute("data-print-requested", "true");
-  await expectPrintLinesWithin32(receipt);
+  await finishReceiptPrint(page);
   expect(checkoutBody).not.toBeNull();
   expect(Number((checkoutBody as Record<string, unknown> | null)?.cashReceived)).toBe(1000);
   expect(Number((checkoutBody as Record<string, unknown> | null)?.seniorPwdCount)).toBe(3);
@@ -368,9 +369,10 @@ test("bill-out warns when the charged total differs from the printed preview", a
   await cashInput.press("Enter");
   expect(checkoutCalls).toBe(0);
   await cashInput.fill("100");
-  const receiptPopup = page.waitForEvent("popup");
   await cashInput.press("Enter");
-  await receiptPopup;
+  const receipt = await expectReceiptPrint(page, "Receipt POS-MISMATCH-001");
+  await expect(receipt.locator("body")).toContainText("POS-MISMATCH-001");
+  await finishReceiptPrint(page);
   expect(checkoutCalls).toBe(1);
   await expect(page.getByText("Bill slip total PHP 100.00 differs from charged total PHP 99.00")).toBeVisible();
 });
@@ -804,10 +806,10 @@ test("one table cart keeps regular a-la-carte and Unlimited items together with 
   await expect(builder).toContainText("Unlimited package · due at bill-out");
   await expect(builder).toContainText("PHP 4,750.00");
 
-  const slipPromise = page.waitForEvent("popup");
   await page.getByRole("button", { name: "Print order" }).click();
-  const slip = await slipPromise;
+  const slip = await expectReceiptPrint(page, "Order DO-MIXED-001");
   await expect(slip.locator("body")).toContainText("DO-MIXED-001");
+  await finishReceiptPrint(page);
   expect(confirmationBodies).toHaveLength(1);
   expect(confirmationBodies[0]).toMatchObject({
     orderType: "unlimited",

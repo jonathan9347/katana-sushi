@@ -1,5 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
-import { expectPrintLinesWithin32 } from "./printAssertions";
+import { renderCateringReceipt } from "../src/print/receiptTemplates";
+import { RECEIPT_LOGO_DATA_URL } from "../src/print/receiptLogo";
+import { expectPrintLinesWithin32, finishReceiptPrint } from "./printAssertions";
 
 const committedOrder = {
   id: "order-1",
@@ -40,11 +42,42 @@ async function setUp(page: Page, includeOrder = false) {
       role: "cashier"
     }));
     if (hasOrder) localStorage.setItem("katana_last_committed_dining_order_id", "order-1");
-    window.print = () => document.body.setAttribute("data-print-requested", "true");
+    window.print = () => {
+      window.parent.document.body.setAttribute("data-print-requested", "true");
+    };
   }, includeOrder);
 }
 
-test("printer test slip invokes print and keeps every line plain and within 32 characters", async ({ page }) => {
+test("catering receipt normalizes payment status and omits unavailable venue", () => {
+  const content = renderCateringReceipt({
+    type: "catering",
+    reference: "CAT-2026-001",
+    customer_name: "Test Customer",
+    payment_status: "Fully Paid"
+  }, {
+    totalPaid: 800,
+    remainingBalance: 0,
+    total: 800,
+    printedAt: new Date("2026-11-28T10:00:00+08:00")
+  });
+
+  expect(content).toContain("FULLY PAID");
+  expect(content).toContain("PHP 800.00");
+  expect(content).not.toContain("N/A");
+});
+
+test("embedded receipt logo decodes in the browser", async ({ page }) => {
+  const width = await page.evaluate(async (source) => {
+    const image = new Image();
+    image.src = source;
+    await image.decode();
+    return image.naturalWidth;
+  }, RECEIPT_LOGO_DATA_URL);
+
+  expect(width).toBe(384);
+});
+
+test("printer test slip prints in a hidden iframe with the selected paper profile", async ({ page }) => {
   await setUp(page);
   await page.route("**/api/**", async (route) => {
     const url = new URL(route.request().url());
@@ -57,12 +90,13 @@ test("printer test slip invokes print and keeps every line plain and within 32 c
 
   await page.goto("/staff/pos");
   await page.getByText("More", { exact: true }).click();
-  const popupPromise = page.waitForEvent("popup");
   await page.getByRole("button", { name: "Print test slip" }).click();
-  const popup = await popupPromise;
-  await expect(popup.locator("body")).toHaveAttribute("data-print-requested", "true");
-  await expectPrintLinesWithin32(popup);
-  const printContent = await popup.locator("pre").textContent() ?? "";
+  await expect(page.locator("body")).toHaveAttribute("data-print-requested", "true");
+  const printFrame = page.locator('iframe[data-receipt-print-frame="true"]');
+  await expect(printFrame).toHaveAttribute("title", "Printer test slip");
+  const content = page.frameLocator('iframe[data-receipt-print-frame="true"]');
+  const printContent = await content.locator(".plain-lines").textContent() ?? "";
+  await expectPrintLinesWithin32(content);
   const printLines = printContent.split("\n");
   const edgeLine = `|${"-".repeat(30)}|`;
   expect(printLines).toContain("12345678901234567890123456789012");
@@ -76,15 +110,15 @@ test("printer test slip invokes print and keeps every line plain and within 32 c
   expect(printContent).toContain("PAID");
   expect(printContent).not.toMatch(/address|\bTIN\b|official receipt|\binvoice\b/i);
 
-  const printStyle = await popup.locator("style").textContent() ?? "";
-  expect(printStyle).toContain("@page { size: 58mm auto; margin: 0; }");
-  expect(printStyle).toContain("font: 7pt/1.2");
-  const layout = await popup.locator("pre").evaluate((element) => ({
+  const printStyle = (await content.locator("style").allTextContents()).join("\n");
+  expect(printStyle).toMatch(/@page\s*\{\s*size:\s*58mm \d+mm; margin: 0;\s*\}/);
+  const layout = await content.locator(".plain-lines").evaluate((element) => ({
     width: element.getBoundingClientRect().width,
     fontSize: Number.parseFloat(getComputedStyle(element).fontSize)
   }));
-  expect(layout.width).toBeLessThanOrEqual((48 * 96) / 25.4);
-  expect(layout.fontSize).toBeCloseTo((7 * 96) / 72, 2);
+  expect(layout.width).toBeLessThanOrEqual((48 * 96) / 25.4 + 0.1);
+  expect(layout.fontSize).toBe(10);
+  await finishReceiptPrint(page);
 });
 
 test("reprinting a committed order prints saved session totals without committing or changing stock", async ({ page }) => {
@@ -131,19 +165,19 @@ test("reprinting a committed order prints saved session totals without committin
   await page.goto("/staff/pos");
   await page.getByRole("button", { name: "Existing table", exact: true }).click();
   await page.getByRole("button", { name: "Select Table 4, Occupied" }).click();
-  const popupPromise = page.waitForEvent("popup");
   await page.getByRole("button", { name: "Reprint", exact: true }).click();
-  const popup = await popupPromise;
-
-  await expect(popup.locator("body")).toHaveAttribute("data-print-requested", "true");
-  await expect(popup.locator("pre")).toContainText("REPRINT");
-  await expect(popup.locator("pre")).toContainText("DO-PRINT-001");
-  await expect(popup.locator("pre")).toContainText("PHP 350.00");
-  await expectPrintLinesWithin32(popup);
+  await expect(page.locator("body")).toHaveAttribute("data-print-requested", "true");
+  const printFrame = page.locator('iframe[data-receipt-print-frame="true"]');
+  await expect(printFrame).toHaveAttribute("title", "Order DO-PRINT-001");
+  const content = page.frameLocator('iframe[data-receipt-print-frame="true"]');
+  await expect(content.locator("body")).toContainText("REPRINT");
+  await expect(content.locator("body")).toContainText("DO-PRINT-001");
+  await expect(content.locator("body")).toContainText("PHP 350.00");
   expect(writeRequests).toEqual([]);
+  await finishReceiptPrint(page);
 });
 
-test("takeout opens its receipt window before checkout finishes", async ({ page }) => {
+test("takeout prints the saved receipt after checkout finishes", async ({ page }) => {
   let releaseCheckout = () => {};
   const checkoutGate = new Promise<void>((resolve) => {
     releaseCheckout = resolve;
@@ -217,13 +251,15 @@ test("takeout opens its receipt window before checkout finishes", async ({ page 
   await payment.getByRole("button", { name: "Cash", exact: true }).click();
   await payment.getByLabel("Enter Amount Received").fill("150");
 
-  const popupPromise = page.waitForEvent("popup");
-  await payment.getByRole("button", { name: "Confirm" }).click();
-  const popup = await popupPromise;
+  await payment.getByRole("button", { name: "Complete payment" }).click();
   await checkoutStarted;
-  await expect(popup.locator("body")).not.toContainText("POS-TAKEOUT-001");
+  await expect(page.locator('iframe[data-receipt-print-frame="true"]')).toHaveCount(0);
   releaseCheckout();
-  await expect(popup.locator("body")).toContainText("POS-TAKEOUT-001");
-  await expect(popup.locator("body")).toHaveAttribute("data-print-requested", "true");
-  await expectPrintLinesWithin32(popup);
+  await expect(page.locator("body")).toHaveAttribute("data-print-requested", "true");
+  const printFrame = page.locator('iframe[data-receipt-print-frame="true"]');
+  await expect(printFrame).toHaveAttribute("title", "Receipt POS-TAKEOUT-001");
+  const content = page.frameLocator('iframe[data-receipt-print-frame="true"]');
+  await expect(content.locator("body")).toContainText("POS-TAKEOUT-001");
+  await expect(content.locator("body")).toContainText("PAID");
+  await finishReceiptPrint(page);
 });

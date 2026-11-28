@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import { expectReceiptPrint, finishReceiptPrint } from "./printAssertions";
 
 test("inline order paths open table, reservation, and pickup selection views", async ({ page }) => {
   let sessionCreationCount = 0;
@@ -170,6 +171,7 @@ test("confirms a walk-in dine-in order atomically after table selection and rese
       name: "Test Cashier",
       role: "cashier"
     }));
+    window.print = () => window.parent.document.body.setAttribute("data-print-requested", "true");
   });
   await page.route("**/api/**", async (route) => {
     const url = new URL(route.request().url());
@@ -241,19 +243,18 @@ test("confirms a walk-in dine-in order atomically after table selection and rese
   await expect(builder.locator(".pos-cart-line-name")).toHaveText("California Roll");
   await page.getByRole("button", { name: "Select Table 12, Free" }).click();
 
-  const popupPromise = page.waitForEvent("popup");
   await page.getByRole("button", { name: "Confirm & Print" }).click();
-  const slip = await popupPromise;
+  const slip = await expectReceiptPrint(page, "Order DIN-20261022-ABC12345");
   await expect(slip.locator("body")).toContainText("DIN-20261022-ABC12345");
-  await expect(slip.locator("body")).toContainText("Table: 12");
-  await slip.close();
+  await expect(slip.locator("body")).toContainText("TABLE 12");
+  await finishReceiptPrint(page);
   await expect(builder).toContainText("Menu");
   await expect(builder).toContainText("Your cart is empty");
-  const reprintPromise = page.waitForEvent("popup");
   await page.getByRole("button", { name: "Reprint", exact: true }).click();
-  const reprint = await reprintPromise;
+  const reprint = await expectReceiptPrint(page, "Order DIN-20261022-ABC12345");
   await expect(reprint.locator("body")).toContainText("REPRINT");
   await expect(reprint.locator("body")).toContainText("DIN-20261022-ABC12345");
+  await finishReceiptPrint(page);
   expect(confirmationBody).toMatchObject({
     selection: { type: "table", tableId: "table-12" },
     orderType: "ala_carte",

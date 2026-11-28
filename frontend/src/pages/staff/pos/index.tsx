@@ -8,6 +8,8 @@ import { api } from "../../../lib/api";
 import { defaultSystemSettings, fetchSystemSettings, type SystemSettings } from "../../../lib/systemSettings";
 import { useToast } from "../../../hooks/useToast";
 import { formatDateTime, shortRef } from "../../../lib/display";
+import { getPrintProfile } from "../../../print/printConfig";
+import { renderBillSlip, renderPaidReceipt } from "../../../print/receiptTemplates";
 import { Button } from "../../../components/ui/button";
 import { Dialog } from "../../../components/ui/dialog";
 import DiningService, {
@@ -15,7 +17,7 @@ import DiningService, {
   printDiningOrderSlip,
   type CommittedDiningOrder
 } from "./DiningService";
-import { addPrintAmount, addPrintPair, printPlainLines, wrapPrintText } from "./printLayout";
+import { printPlainLines, printReceiptDocument } from "./printLayout";
 import UnlimitedTimer from "../../../components/pos/UnlimitedTimer";
 import PosOrderBuilder from "./PosOrderBuilder";
 import PosHeader from "./PosHeader";
@@ -338,9 +340,7 @@ export default function PosPage() {
       applyDiscount: boolean;
       guestCount: number;
       seniorPwdCount: number;
-      printWindow: Window;
     }) => {
-      const { printWindow, ...payment } = input;
       console.debug("Checkout submit", {
         itemCount: takeoutItems.length,
         hasToken: Boolean(localStorage.getItem("katana_token"))
@@ -348,11 +348,11 @@ export default function PosPage() {
       const response = await api.post<{ transaction: PosTransaction }>("/api/pos/transaction", {
         customerName,
         transactionType: "takeout",
-        paymentMethod: payment.paymentMethod,
-        cashReceived: payment.cashReceived,
-        applyDiscount: payment.applyDiscount,
-        guestCount: payment.guestCount,
-        seniorPwdCount: payment.seniorPwdCount,
+        paymentMethod: input.paymentMethod,
+        cashReceived: input.cashReceived,
+        applyDiscount: input.applyDiscount,
+        guestCount: input.guestCount,
+        seniorPwdCount: input.seniorPwdCount,
         items: takeoutItems.map((item) => ({
           productId: item.product.id,
           quantity: item.quantity,
@@ -360,16 +360,13 @@ export default function PosPage() {
         }))
       });
 
-      return { transaction: response.data.transaction, printWindow };
+      return response.data.transaction;
     },
-    onSuccess: ({ transaction, printWindow }) => {
-      try {
-        printReceipt(transaction, systemSettings, printWindow);
-      } catch (error) {
-        printWindow.close();
+    onSuccess: (transaction) => {
+      printReceipt(transaction, systemSettings, (error) => {
         console.error("Takeout receipt printing failed", error);
-        toast("Payment completed, but the receipt could not be printed. Check the print window and retry from transaction history.");
-      }
+        toast("Payment completed, but the receipt could not be printed. Check the printer and retry from transaction history.");
+      });
       setPaymentOpen(false);
       clearCurrentOrderPath();
       queryClient.invalidateQueries({ queryKey: ["inventory"] });
@@ -377,8 +374,7 @@ export default function PosPage() {
       queryClient.invalidateQueries({ queryKey: ["pos", "transactions"] });
       toast("Payment completed.");
     },
-    onError: (error, input) => {
-      input.printWindow.close();
+    onError: (error) => {
       console.error("Checkout failed", error);
       toast(getApiErrorMessage(error, "Unable to complete payment."));
     }
@@ -450,7 +446,7 @@ export default function PosPage() {
   const billOutHasDiscountableItems = (billOutPreviewQuery.data?.discount_base_snapshot ?? 0) > 0;
 
   const billOutMutation = useMutation({
-    mutationFn: async (input: { receiptWindow: Window; billSlipTotal: number }) => {
+    mutationFn: async (input: { billSlipTotal: number }) => {
       if (!activeSession) throw new Error("The active table session is no longer available.");
       const response = await api.post<{ transaction: PosTransaction; replayed: boolean }>(
         `/api/pos/dining/sessions/${activeSession.id}/checkout`,
@@ -461,16 +457,13 @@ export default function PosPage() {
           ...(billOutPaymentMethod === "cash" ? { cashReceived: Number(billOutCashReceived) } : {})
         }
       );
-      return { ...response.data, ...input };
+      return { ...response.data, billSlipTotal: input.billSlipTotal };
     },
-    onSuccess: ({ transaction, receiptWindow, billSlipTotal }) => {
-      try {
-        printReceipt(transaction, systemSettings, receiptWindow);
-      } catch (error) {
-        receiptWindow.close();
+    onSuccess: ({ transaction, billSlipTotal }) => {
+      printReceipt(transaction, systemSettings, (error) => {
         console.error("Bill-out receipt printing failed", error);
         toast("The table bill was completed, but the receipt could not be printed.");
-      }
+      });
       setBillOutOpen(false);
       setBillOutStep("bill");
       clearCurrentOrderPath();
@@ -489,8 +482,7 @@ export default function PosPage() {
         setBillOutMismatchWarning("");
       }
     },
-    onError: (error, input) => {
-      input.receiptWindow.close();
+    onError: (error) => {
       toast(getApiErrorMessage(error, "Unable to complete the table bill."));
     }
   });
@@ -504,7 +496,7 @@ export default function PosPage() {
         guestCount?: number;
         seniorPwdCount?: number;
       };
-      printWindow: Window | null;
+      shouldPrint: boolean;
     }) => {
       if (!selectedPickupOrder) {
         throw new Error("Select a preparing or ready pickup order first.");
@@ -513,18 +505,15 @@ export default function PosPage() {
         `/api/pos/pickup-orders/${encodeURIComponent(selectedPickupOrder.order_number)}/complete`,
         selectedPickupOrder.payment_status === "paid" ? {} : input.payment
       );
-      return { ...response.data, printWindow: input.printWindow };
+      return { ...response.data, shouldPrint: input.shouldPrint };
     },
-    onSuccess: ({ transaction, printWindow }) => {
-      if (printWindow) {
-        try {
-          printReceipt(transaction, systemSettings, printWindow);
-          toast("Pickup order completed. Receipt sent to print.");
-        } catch (error) {
-          printWindow.close();
+    onSuccess: ({ transaction, shouldPrint }) => {
+      if (shouldPrint) {
+        printReceipt(transaction, systemSettings, (error) => {
           console.error("Pickup receipt printing failed", error);
           toast("Pickup order completed, but the receipt could not be printed. Use Print Receipt to retry.");
-        }
+        });
+        toast("Pickup order completed. Receipt sent to print.");
       } else {
         toast("Pickup order completed. Use Print Receipt to print the receipt.");
       }
@@ -535,8 +524,7 @@ export default function PosPage() {
       queryClient.invalidateQueries({ queryKey: ["pos", "pickup-orders"] });
       queryClient.invalidateQueries({ queryKey: ["inventory"] });
     },
-    onError: (error, input) => {
-      input.printWindow?.close();
+    onError: (error) => {
       toast(getApiErrorMessage(error, "Unable to complete this pickup order."));
       queryClient.invalidateQueries({ queryKey: ["pos", "pickup-orders"] });
     }
@@ -548,7 +536,6 @@ export default function PosPage() {
         | { type: "session"; sessionId: string }
         | { type: "table"; tableId: string }
         | { type: "reservation"; reservationId: string; tableIds: string[] };
-      printWindow: Window;
     }) => {
       const response = await api.post<{ order: CommittedDiningOrder; replayed: boolean }>(
         "/api/pos/dining/confirm-order",
@@ -568,9 +555,9 @@ export default function PosPage() {
           })
         }
       );
-      return { ...response.data, printWindow: input.printWindow };
+      return response.data;
     },
-    onSuccess: async ({ order, printWindow }) => {
+    onSuccess: async ({ order }) => {
       localStorage.setItem(LAST_COMMITTED_ORDER_STORAGE_KEY, order.id);
       setLastCommittedOrderId(order.id);
       queryClient.setQueryData(["pos", "dining", "committed-order", order.id], order);
@@ -603,20 +590,23 @@ export default function PosPage() {
         setOrderPrintWarning("The order was saved, but its table total could not be loaded from saved session lines.");
       }
       try {
-        printDiningOrderSlip(printWindow, order, false, {
+        const printStarted = printDiningOrderSlip(order, false, {
           cashierName: currentCashierName(),
+          orderType: hasUnlimitedItems ? "UNLIMITED" : "A LA CARTE",
           tableTotal,
-          paperSize: systemSettings.receipt_paper_size
+          paperSize: systemSettings.receipt_paper_size,
+          onError: (error) => {
+            console.error("Dine-in order printing failed", error);
+            toast(`Order ${shortRef(order.order_number)} was saved, but printing failed. Please retry the print.`);
+          }
         });
-        toast("Order confirmed and sent to print.");
+        if (printStarted) toast("Order confirmed and sent to print.");
       } catch (error) {
-        printWindow.close();
         console.error("Dine-in order printing failed", error);
         toast(`Order ${shortRef(order.order_number)} was saved, but printing failed. Please retry the print.`);
       }
     },
-    onError: (error, input) => {
-      input.printWindow.close();
+    onError: (error) => {
       toast(getApiErrorMessage(error, "Unable to confirm this dine-in order."));
     }
   });
@@ -631,15 +621,10 @@ export default function PosPage() {
   }
 
   function handlePrintTestSlip() {
-    const printWindow = window.open("", "_blank", "width=380,height=640");
-    if (!printWindow) {
-      toast("Allow pop-ups for this site to print the test slip.");
-      return;
-    }
     const ruler = "12345678901234567890123456789012";
     const edgeLine = `|${"-".repeat(30)}|`;
     try {
-      printPlainLines(printWindow, "Printer test slip", [
+      printPlainLines("Printer test slip", [
         "PRINTER TEST SLIP",
         "Paper width: " + systemSettings.receipt_paper_size,
         "Printable area: 48 mm",
@@ -650,7 +635,7 @@ export default function PosPage() {
         "ORDER SLIP - NOT A RECEIPT",
         "Table: 4",
         "Order: DEMO-ORDER-001",
-        "Date: 2026-11-25 13:00",
+        `Date: ${formatDateTime(new Date("2026-11-25T13:00:00+08:00"))}`,
         "Cashier: Demo Cashier",
         "1 x Sample Roll",
         "Amount: PHP 250.00",
@@ -674,16 +659,18 @@ export default function PosPage() {
         "RECEIPT",
         "PAID",
         "Receipt no: DEMO-RECEIPT-001",
-        "Date: 2026-11-25 13:00",
+        `Date: ${formatDateTime(new Date("2026-11-25T13:00:00+08:00"))}`,
         "1 x Sample Roll: PHP 250.00",
         "TOTAL PAID: PHP 250.00",
         "Payment: CASH",
         "Amount received: PHP 300.00",
         "Change: PHP 50.00",
         "Thank you!"
-      ], systemSettings.receipt_paper_size);
+      ], systemSettings.receipt_paper_size, undefined, (error) => {
+        console.error("Printer test slip failed", error);
+        toast("The printer test slip could not be prepared.");
+      });
     } catch (error) {
-      printWindow.close();
       console.error("Printer test slip failed", error);
       toast("The printer test slip could not be prepared.");
     }
@@ -693,19 +680,15 @@ export default function PosPage() {
     const preview = billOutPreviewQuery.data;
     if (!activeSession || !preview || billOutPreviewQuery.isFetching || billOutMutation.isPending) return;
 
-    const billSlipWindow = window.open("", "_blank", "width=380,height=640");
-    if (!billSlipWindow) {
-      toast("Allow pop-ups for this site to print the bill.");
-      return;
-    }
-
     try {
-      printBillSlip(billSlipWindow, preview, systemSettings.receipt_paper_size, () => {
-        billSlipWindow.close();
+      const started = printBillSlip(preview, systemSettings.receipt_paper_size, () => {
         setBillOutStep("payment");
+      }, (error) => {
+        console.error("Bill slip printing failed", error);
+        toast("The bill slip could not be printed. Checkout has not started.");
       });
+      if (!started) toast("This bill is already being printed.");
     } catch (error) {
-      billSlipWindow.close();
       console.error("Bill slip printing failed", error);
       toast("The bill slip could not be printed. Checkout has not started.");
     }
@@ -715,24 +698,13 @@ export default function PosPage() {
     const preview = billOutPreviewQuery.data;
     if (!activeSession || !preview || billOutStep !== "payment" || billOutMutation.isPending) return;
 
-    const receiptWindow = window.open("", "_blank", "width=380,height=640");
-    if (!receiptWindow) {
-      toast("Allow pop-ups for this site to print the paid receipt after checkout.");
-      return;
-    }
-
-    billOutMutation.mutate({ receiptWindow, billSlipTotal: preview.total });
+    billOutMutation.mutate({ billSlipTotal: preview.total });
   }
 
   function handlePickupCheckout() {
     if (!selectedPickupOrder) return;
     if (selectedPickupOrder.payment_status === "paid") {
-      const printWindow = window.open("", "_blank", "width=380,height=640");
-      if (!printWindow) {
-        toast("Allow pop-ups to print the pickup receipt after checkout.");
-        return;
-      }
-      pickupCompletionMutation.mutate({ payment: {}, printWindow });
+      pickupCompletionMutation.mutate({ payment: {}, shouldPrint: true });
       return;
     }
     setPaymentOpen(true);
@@ -742,11 +714,6 @@ export default function PosPage() {
     const order = lastCommittedOrderQuery.data;
     if (!order) {
       toast("The saved order is not available to reprint.");
-      return;
-    }
-    const printWindow = window.open("", "_blank", "width=420,height=640");
-    if (!printWindow) {
-      toast("Allow pop-ups for this site before reprinting the order.");
       return;
     }
     let tableTotal: number | null = null;
@@ -766,15 +733,19 @@ export default function PosPage() {
     }
 
     try {
-      printDiningOrderSlip(printWindow, order, true, {
+      const started = printDiningOrderSlip(order, true, {
         cashierName: currentCashierName(),
         tableTotal,
-        paperSize: systemSettings.receipt_paper_size
+        paperSize: systemSettings.receipt_paper_size,
+        onError: (error) => {
+          console.error("Dine-in order reprinting failed", error);
+          toast("The order is saved, but printing failed.");
+        }
       });
+      if (!started) toast("This order is already being printed.");
     } catch (error) {
-      printWindow.close();
       console.error("Dine-in order reprinting failed", error);
-      toast("The order is saved, but the reprint window failed.");
+      toast("The order is saved, but the receipt could not be prepared for printing.");
     }
   }
 
@@ -983,11 +954,6 @@ export default function PosPage() {
           : dineInEntryType === "reservation" ? "reservation-list" : "table-board");
       } else {
         if (items.length === 0 || dineInConfirmationMutation.isPending) return;
-        const printWindow = window.open("", "_blank", "width=420,height=640");
-        if (!printWindow) {
-          toast("Allow pop-ups for this site before confirming and printing the order.");
-          return;
-        }
         const selection = selectedReservation
           ? {
               type: "reservation" as const,
@@ -997,7 +963,7 @@ export default function PosPage() {
           : selectedDiningSessionId
             ? { type: "session" as const, sessionId: selectedDiningSessionId }
             : { type: "table" as const, tableId: selectedTable!.id };
-        dineInConfirmationMutation.mutate({ selection, printWindow });
+        dineInConfirmationMutation.mutate({ selection });
       }
       return;
     }
@@ -1093,7 +1059,10 @@ export default function PosPage() {
             <Button
               type="button"
               variant="outline"
-              onClick={() => printReceipt(lastPickupReceipt, systemSettings)}
+              onClick={() => printReceipt(lastPickupReceipt, systemSettings, (error) => {
+                console.error("Pickup receipt reprinting failed", error);
+                toast("The pickup receipt could not be prepared for printing.");
+              })}
             >
               <Printer className="mr-2 h-4 w-4" /> Print Receipt
             </Button>
@@ -1352,11 +1321,6 @@ export default function PosPage() {
         onConfirm={(payment) => {
           if (isPickupCustomer) {
             if (payment.paymentMethod !== "cash") return;
-            const printWindow = window.open("", "_blank", "width=380,height=640");
-            if (!printWindow) {
-              toast("Allow pop-ups to print the pickup receipt after checkout.");
-              return;
-            }
             pickupCompletionMutation.mutate({
               payment: {
                 paymentMethod: "cash",
@@ -1365,15 +1329,10 @@ export default function PosPage() {
                 guestCount: payment.guestCount,
                 seniorPwdCount: payment.seniorPwdCount
               },
-              printWindow
+              shouldPrint: true
             });
           } else {
-            const printWindow = window.open("", "_blank", "width=380,height=640");
-            if (!printWindow) {
-              toast("Allow pop-ups for this site before taking payment so the receipt can print.");
-              return;
-            }
-            checkoutMutation.mutate({ ...payment, printWindow });
+            checkoutMutation.mutate(payment);
           }
         }}
       />
@@ -1535,105 +1494,37 @@ function TotalLine({ label, value, strong = false }: { label: string; value: num
 }
 
 function printBillSlip(
-  windowTarget: Window,
   preview: DiningCheckoutPreview,
   paperSize: string,
-  afterPrint: () => void
+  afterPrint: () => void,
+  onError: (error: unknown) => void
 ) {
-  const lines = ["BILL SLIP - NOT A RECEIPT"];
-  addPrintPair(lines, "Table", preview.table_number);
-
-  if (preview.a_la_carte_lines.length > 0) {
-    lines.push("A LA CARTE ITEMS");
-    for (const item of preview.a_la_carte_lines) {
-      lines.push(...wrapPrintText(`${item.quantity} x ${item.name}`));
-      addPrintAmount(lines, "Amount", money(item.total_price));
-    }
-    const subtotal = preview.a_la_carte_lines.reduce((sum, item) => sum + Number(item.total_price), 0);
-    addPrintAmount(lines, "A la carte subtotal", money(subtotal));
-  }
-
-  if (preview.unlimited_order_lines.length > 0) {
-    lines.push("ADD-ONS");
-    for (const item of preview.unlimited_order_lines) {
-      lines.push(...wrapPrintText(`${item.quantity} x ${item.name}`));
-      addPrintAmount(lines, "Amount", money(item.total_price));
-    }
-    const subtotal = preview.unlimited_order_lines.reduce((sum, item) => sum + Number(item.total_price), 0);
-    addPrintAmount(lines, "Add-ons subtotal", money(subtotal));
-  }
-
-  if (preview.unlimited_lines.length > 0) {
-    lines.push("UNLIMITED PACKAGES");
-    for (const item of preview.unlimited_lines) {
-      lines.push(...wrapPrintText(`${item.quantity} heads x ${money(item.unit_price)}`));
-      addPrintAmount(lines, "Package subtotal", money(item.total_price));
-    }
-    addPrintAmount(lines, "Unlimited subtotal", money(preview.unlimited_amount));
-  }
-
-  if (preview.leftover_lines.length > 0) {
-    lines.push("LEFTOVER FEES");
-    for (const item of preview.leftover_lines) {
-      lines.push(...wrapPrintText(`${item.quantity} x ${item.name}`));
-      addPrintAmount(lines, "Fee", money(item.total));
-    }
-    addPrintAmount(lines, "Leftover subtotal", money(preview.leftover_amount));
-  }
-
-  addPrintAmount(lines, "Subtotal", money(preview.subtotal));
-  if (preview.discount_amount > 0 && preview.discounted_guest_count > 0) {
-    addPrintAmount(
-      lines,
-      `Senior/PWD (${preview.discounted_guest_count} guests)`,
-      `-${money(preview.discount_amount)}`
-    );
-  }
-  lines.push("-".repeat(32));
-  addPrintAmount(lines, "TOTAL TO PAY", money(preview.total));
-  printPlainLines(windowTarget, "Bill slip", lines, paperSize, afterPrint);
+  return printReceiptDocument({
+    key: `bill:${preview.session_id}`,
+    title: `Bill slip, table ${preview.table_number}`,
+    content: renderBillSlip(preview, { profile: getPrintProfile(paperSize) }),
+    paperSize,
+    onAfterPrint: afterPrint,
+    onError
+  });
 }
 
-function printReceipt(transaction: PosTransaction, settings: SystemSettings, receiptWindow?: Window) {
-  const receipt = receiptWindow ?? window.open("", "_blank", "width=380,height=640");
-
-  if (!receipt) {
-    window.alert("Allow pop-ups for this site to print the receipt.");
+function printReceipt(
+  transaction: PosTransaction,
+  settings: SystemSettings,
+  onError: (error: unknown) => void
+) {
+  try {
+    const profile = getPrintProfile(settings.receipt_paper_size);
+    return printReceiptDocument({
+      key: `paid:${transaction.transaction_number}`,
+      title: `Receipt ${transaction.transaction_number}`,
+      content: renderPaidReceipt(transaction, { footer: settings.receipt_footer, profile }),
+      paperSize: settings.receipt_paper_size,
+      onError
+    });
+  } catch (error) {
+    onError(error);
     return false;
   }
-
-  const lines = [settings.restaurant_name, "RECEIPT", "PAID"];
-  addPrintPair(lines, "Receipt no", shortRef(transaction.transaction_number));
-  addPrintPair(lines, "Date", formatDateTime(transaction.created_at));
-  if (transaction.customer_name) addPrintPair(lines, "Customer", transaction.customer_name);
-  lines.push("-".repeat(32));
-  for (const item of transaction.items) {
-    lines.push(...wrapPrintText(`${item.quantity} x ${item.selling_product.name}`));
-    addPrintAmount(lines, "Amount", money(Number(item.total_price)));
-  }
-  for (const charge of transaction.charges ?? []) {
-    lines.push(...wrapPrintText(`${charge.quantity} x ${charge.name_snapshot}`));
-    addPrintAmount(lines, "Amount", money(Number(charge.total_price)));
-  }
-  lines.push("-".repeat(32));
-  addPrintAmount(lines, "Subtotal", money(Number(transaction.subtotal)));
-  if (Number(transaction.tax) > 0) addPrintAmount(lines, "Tax", money(Number(transaction.tax)));
-  if (Number(transaction.discount_amount ?? 0) > 0) {
-    addPrintAmount(lines, "Senior/PWD discount", `-${money(Number(transaction.discount_amount))}`);
-  }
-  lines.push("-".repeat(32));
-  addPrintAmount(lines, "TOTAL PAID", money(Number(transaction.total)));
-  addPrintPair(lines, "Payment", transaction.payment_method.toUpperCase());
-  addPrintPair(
-    lines,
-    "Amount received",
-    money(Number(transaction.cash_received ?? transaction.total))
-  );
-  addPrintPair(lines, "Change", money(Number(transaction.change_due ?? 0)));
-  if (settings.receipt_footer) {
-    lines.push("-".repeat(32));
-    lines.push(...wrapPrintText(settings.receipt_footer));
-  }
-  printPlainLines(receipt, shortRef(transaction.transaction_number), lines, settings.receipt_paper_size, () => receipt.close(), true);
-  return true;
 }
